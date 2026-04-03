@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from shared_css import get_report_css, get_reports_dir
+from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,7 +27,7 @@ def get_engine(save_name):
     env_path = PROJECT_ROOT / ".env"
     load_dotenv(env_path)
     postgres_host = os.getenv("POSTGRES_URL")
-    db_name = save_name.lower().replace("-", "_")
+    db_name = db_name_from_save(save_name)
     return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
@@ -308,6 +308,40 @@ def fetch_batter_data(conn, player_id, common=None):
     return data
 
 
+def fetch_fielding_stats(conn, player_id, primary_position):
+    """Fetch fielding stats for a position player (non-pitcher).
+
+    split_id is inconsistent in this table (0 for recent seasons, 1 for older) so
+    we aggregate by year+position to avoid duplicates from team changes mid-season.
+    """
+    max_year_row = conn.execute(text(
+        "SELECT MAX(year) FROM players_career_fielding_stats "
+        "WHERE player_id = :pid AND level_id = 1 AND league_id = 203"
+    ), dict(pid=player_id)).fetchone()
+    max_year = int(max_year_row[0]) if max_year_row and max_year_row[0] else None
+
+    if max_year is None:
+        return dict(current=[], career=[])
+
+    current = conn.execute(text(
+        "SELECT position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
+        "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
+        "FROM players_career_fielding_stats "
+        "WHERE player_id = :pid AND year = :yr AND level_id = 1 AND league_id = 203 "
+        "GROUP BY position ORDER BY SUM(g) DESC"
+    ), dict(pid=player_id, yr=max_year)).fetchall()
+
+    career = conn.execute(text(
+        "SELECT year, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
+        "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
+        "FROM players_career_fielding_stats "
+        "WHERE player_id = :pid AND position = :pos AND level_id = 1 AND league_id = 203 "
+        "GROUP BY year ORDER BY year"
+    ), dict(pid=player_id, pos=primary_position)).fetchall()
+
+    return dict(current=current, career=career)
+
+
 def fetch_pitcher_data(conn, player_id, common=None):
     """Fetch pitching-specific data. If common is provided, merge into it."""
     data = common if common else fetch_common_data(conn, player_id)
@@ -369,6 +403,96 @@ def fetch_pitcher_data(conn, player_id, common=None):
         data["pitch_adv_history"] = []
 
     return data
+
+
+def _fpct_html(tc, e):
+    if not tc or tc == 0:
+        return "—"
+    fpct = (int(tc) - int(e)) / int(tc)
+    cls = ' class="good"' if fpct >= 0.985 else ' class="poor"' if fpct <= 0.960 else ''
+    return f'<span{cls}>{fpct:.3f}</span>'
+
+
+def _zr_html(zr):
+    if zr is None:
+        return "—"
+    val = float(zr)
+    cls = ' class="good"' if val > 1.0 else ' class="poor"' if val < -1.0 else ''
+    sign = "+" if val >= 0 else ""
+    return f'<span{cls}>{sign}{val:.1f}</span>'
+
+
+def generate_fielding_stats_html(fielding_data, primary_position):
+    """Build the fielding statistics section (current season + career year-by-year)."""
+    current = fielding_data.get("current", [])
+    career = fielding_data.get("career", [])
+    if not current and not career:
+        return ""
+
+    is_catcher = primary_position == 2
+    html = '<h2>Fielding Statistics</h2>'
+
+    # Current season: all positions played
+    if current:
+        html += '<h3>Current Season</h3><table><tr>'
+        std_hdrs = ['Pos', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
+        c_hdrs = ['PB', 'SBA', 'CS', 'CS%', 'Framing', 'Arm']
+        for h in std_hdrs + (c_hdrs if is_catcher else []):
+            html += f'<th>{h}</th>'
+        html += '</tr>'
+        for row in current:
+            pos, g, gs, ip, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
+            inn = f"{float(ip):.1f}" if ip else "—"
+            html += (f'<tr><td>{POS_MAP.get(pos, str(pos))}</td>'
+                     f'<td>{g}</td><td>{gs}</td><td>{inn}</td>'
+                     f'<td>{tc}</td><td>{po}</td><td>{a}</td><td>{e}</td>'
+                     f'<td>{_fpct_html(tc, e)}</td><td>{dp}</td>'
+                     f'<td>{_zr_html(zr)}</td>')
+            if is_catcher:
+                cs = int(rto) if rto else 0
+                total_att = (int(sba) if sba else 0) + cs
+                cs_pct = f"{cs / total_att * 100:.1f}%" if total_att > 0 else "—"
+                html += (f'<td>{int(pb) if pb else 0}</td>'
+                         f'<td>{int(sba) if sba else 0}</td>'
+                         f'<td>{cs}</td><td>{cs_pct}</td>'
+                         f'<td>{float(framing):.2f}</td>'
+                         f'<td>{float(arm):.2f}</td>')
+            html += '</tr>'
+        html += '</table>'
+
+    # Career by year at primary position
+    if career:
+        html += f'<h3>Career Fielding — {POS_MAP.get(primary_position, "?")} (MLB)</h3><table><tr>'
+        car_hdrs = ['Year', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
+        if is_catcher:
+            car_hdrs += ['PB', 'SBA', 'CS', 'CS%', 'Framing', 'Arm']
+        for h in car_hdrs:
+            html += f'<th>{h}</th>'
+        html += '</tr>'
+        max_year = max(r[0] for r in career)
+        for row in career:
+            yr, g, gs, ipf, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
+            inn = f"{float(ipf):.1f}" if ipf else "—"
+            style = ' style="font-weight:bold;background:#e8f0fe"' if yr == max_year else ''
+            html += (f'<tr{style}><td>{yr}</td>'
+                     f'<td>{g}</td><td>{gs}</td><td>{inn}</td>'
+                     f'<td>{tc}</td><td>{po}</td><td>{a}</td><td>{e}</td>'
+                     f'<td>{_fpct_html(tc, e)}</td><td>{dp}</td>'
+                     f'<td>{_zr_html(zr)}</td>')
+            if is_catcher:
+                cs = int(rto) if rto else 0
+                total_att = (int(sba) if sba else 0) + cs
+                cs_pct = f"{cs / total_att * 100:.1f}%" if total_att > 0 else "—"
+                html += (f'<td>{int(pb) if pb else 0}</td>'
+                         f'<td>{int(sba) if sba else 0}</td>'
+                         f'<td>{cs}</td><td>{cs_pct}</td>'
+                         f'<td>{float(framing):.2f}</td>'
+                         f'<td>{float(arm):.2f}</td>')
+            html += '</tr>'
+        html += '</table>'
+
+    html += '<!-- ANALYSIS:START --><!-- FIELDING_SUMMARY --><!-- ANALYSIS:END -->'
+    return html
 
 
 def generate_batter_html(data, generated_at, last_import):
@@ -468,6 +592,12 @@ def generate_batter_section_html(data):
         if cur_val > 0 or pot_val > 0:
             html += f'<tr><td class="left">{pn}</td>{rating_td(cur_val)}{rating_td(pot_val)}</tr>'
     html += '</table></div>'
+
+    # Fielding statistics (position players only)
+    if data.get("fielding_stats"):
+        p = data["player"]
+        primary_pos = p[4]
+        html += generate_fielding_stats_html(data["fielding_stats"], primary_pos)
 
     # Current season advanced stats
     adv = data.get("advanced")
@@ -890,10 +1020,19 @@ def generate_player_report(save_name, first_name, last_name):
     last_import = get_last_import_time()
 
     with engine.connect() as conn:
-        # Look up player
+        # Look up player — prefer the one with the most MLB career activity (PA + IP)
         row = conn.execute(text(
-            "SELECT player_id, position FROM players "
-            "WHERE first_name = :first AND last_name = :last"),
+            "SELECT p.player_id, p.position FROM players p "
+            "LEFT JOIN ("
+            "  SELECT player_id, SUM(pa) AS total_pa FROM players_career_batting_stats "
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            ") bs ON bs.player_id = p.player_id "
+            "LEFT JOIN ("
+            "  SELECT player_id, SUM(ip) AS total_ip FROM players_career_pitching_stats "
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            ") ps ON ps.player_id = p.player_id "
+            "WHERE p.first_name = :first AND p.last_name = :last "
+            "ORDER BY COALESCE(bs.total_pa, 0) + COALESCE(ps.total_ip, 0) DESC"),
             dict(first=first_name, last=last_name)).fetchone()
 
         if not row:
@@ -931,6 +1070,10 @@ def generate_player_report(save_name, first_name, last_name):
 
         if has_pitching:
             data = fetch_pitcher_data(conn, player_id, data)
+
+        # Fielding stats for position players (not pitchers)
+        if position != 1 and has_batting:
+            data["fielding_stats"] = fetch_fielding_stats(conn, player_id, position)
 
         # Generate HTML — for position=1 players, pitching section always comes first
         if position == 1:

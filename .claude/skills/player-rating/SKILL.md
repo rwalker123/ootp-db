@@ -162,7 +162,7 @@ analysis using the data dict from Step 1 and the WAR trend from Step 1.5.
 **Required bullets — write all 5:**
 
 1. **Overall** — rating grade in league context, position rank (e.g. "3rd among all SS"), key stat (wRC+ or FIP)
-2. **Strengths / Weaknesses** — 2-3 top sub-scores vs bottom sub-scores; reference bands
+2. **Strengths / Weaknesses** — 2-3 top sub-scores vs bottom sub-scores; reference bands. For the Defense sub-score, note the position-specific factors that drove it: for catchers highlight framing and CS%; for middle infielders (2B/SS) note DP rate and ZR; for CF note range (ZR) and putout rate; for corner OF note arm and ZR
 3. **Durability & Personality** — injury risk flag, proneness profile, work ethic, leadership if flagged
 4. **Focus modifier impact** — if focus modifiers were passed, explain how re-weighting changes the picture; skip this bullet if no modifiers
 5. **Future Outlook** — synthesize the year-by-year trend data from Step 1.5 with the rating factors:
@@ -209,5 +209,16 @@ CRITICAL: Use ONLY this player's name. Do not reference any other player.
 | FIP | <3.50 | ~4.00 | >4.50 |
 | K-BB% | 18%+ | ~14% | <8% |
 | WHIP | <1.15 | ~1.30 | >1.40 |
+
+| Fielding (Defense sub-score inputs) | Good | Average | Poor |
+|--------------------------------------|------|---------|------|
+| ZR (zone rating) | >+3 | ~0 | <-3 |
+| FPct | ≥.985 | ~.978 | ≤.960 |
+| CS% (catchers) | >32% | ~18% | <10% |
+| Framing (catchers) | >5 | ~0 | <-5 |
+| DP/150G (2B) | >100 | ~82 | <55 |
+| DP/150G (SS) | >90 | ~72 | <40 |
+| Arm value (OF) | >+2 | ~0 | <-2 |
+| PO/G (CF) | >2.7 | ~2.35 | <1.5 |
 
 ---

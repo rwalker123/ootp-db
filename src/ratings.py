@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from shared_css import get_report_css, get_reports_dir
+from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -580,6 +580,22 @@ PREMIUM_DEFENSE_POS = {POS_CATCHER, POS_SS, POS_2B, POS_CF}
 # Positions where defense matters least (get 0.7x)
 LOW_DEFENSE_POS = {POS_1B, POS_LF, POS_RF}
 
+# ZR scoring: score = clamp(50 + zr / half_range * 50)
+# half_range calibrated from empirical p10/p90 spread in the DB
+ZR_HALF_RANGE = {
+    POS_CATCHER: 1.5, POS_1B: 2.5, POS_2B: 4.5, POS_3B: 5.0,
+    POS_SS: 5.5, POS_LF: 6.0, POS_CF: 9.0, POS_RF: 6.5,
+}
+
+# DP per 150G scoring: clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
+# Calibrated from empirical min/max in the DB
+DP_SCALE = {
+    POS_1B: (19, 134),
+    POS_2B: (43, 116),
+    POS_3B: (11, 40),
+    POS_SS: (27, 111),
+}
+
 # Position field rating column mapping
 POS_FIELD_COL = {
     POS_CATCHER: "fielding_rating_pos2",
@@ -645,7 +661,7 @@ def setup_engine(save_name):
     if not postgres_host:
         print("Error: POSTGRES_URL not set in .env")
         sys.exit(1)
-    db_name = save_name.lower().replace("-", "_")
+    db_name = db_name_from_save(save_name)
     return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
@@ -693,6 +709,36 @@ def load_batter_data(engine):
           AND player_id IN (SELECT player_id FROM batter_advanced_stats)
     """, engine)
 
+    # Current-season fielding stats at each player's primary position
+    # Aggregated (SUM) to handle mid-season team changes; split_id excluded because
+    # it changed conventions across seasons (0 for recent, 1 for older).
+    fielding_cur = pd.read_sql(f"""
+        SELECT pcfs.player_id,
+               SUM(pcfs.g)       AS fld_g,
+               SUM(pcfs.tc)      AS fld_tc,
+               SUM(pcfs.po)      AS fld_po,
+               SUM(pcfs.a)       AS fld_a,
+               SUM(pcfs.e)       AS fld_e,
+               SUM(pcfs.dp)      AS fld_dp,
+               SUM(pcfs.pb)      AS fld_pb,
+               SUM(pcfs.sba)     AS fld_sba,
+               SUM(pcfs.rto)     AS fld_rto,
+               SUM(pcfs.framing) AS fld_framing,
+               SUM(pcfs.arm)     AS fld_arm,
+               SUM(pcfs.zr)      AS fld_zr
+        FROM players_career_fielding_stats pcfs
+        JOIN players p ON p.player_id = pcfs.player_id
+        WHERE pcfs.league_id = {MLB_LEAGUE_ID}
+          AND pcfs.level_id = {MLB_LEVEL_ID}
+          AND pcfs.position = p.position
+          AND pcfs.year = (
+              SELECT MAX(year) FROM players_career_fielding_stats
+              WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
+          )
+          AND pcfs.player_id IN (SELECT player_id FROM batter_advanced_stats)
+        GROUP BY pcfs.player_id
+    """, engine)
+
     # Career trend: current year vs previous year wRC+
     trend = pd.read_sql(f"""
         SELECT player_id, year, SUM(pa) as pa, SUM(ab) as ab, SUM(h) as h,
@@ -707,7 +753,7 @@ def load_batter_data(engine):
         ORDER BY player_id, year
     """, engine)
 
-    return stats, players, value, batting, fielding, trend
+    return stats, players, value, batting, fielding, fielding_cur, trend
 
 
 def load_pitcher_data(engine):
@@ -776,18 +822,94 @@ def score_discipline(row):
 
 
 def score_defense(row, fielding_row, position):
-    """Defense score with position-based multiplier."""
+    """Defense score blending OOTP fielding rating (50%) with actual fielding stats (50%).
+
+    Falls back to rating-only when fewer than 10 games of fielding stats are available
+    (e.g. focus-modifier path, rookies, or players without current-season data).
+
+    Position-specific stat weights (within the stats component):
+      Catcher:   ZR 30% | FPct 15% | CS% 30% | Framing 25%
+      2B / SS:   ZR 40% | FPct 20% | DP rate 40%
+      3B / 1B:   ZR 40% | FPct 30% | DP rate 30%
+      CF:        ZR 40% | FPct 10% | Arm 20% | PO/G 30%
+      LF / RF:   ZR 40% | FPct 20% | Arm 40%
+    """
+    # ── Component 1: OOTP talent rating ─────────────────────────────────────
     pos_col = POS_FIELD_COL.get(position)
     if pos_col and fielding_row is not None and pos_col in fielding_row:
         field_rating = fielding_row[pos_col]
         if pd.notna(field_rating) and field_rating > 0:
-            score = clamp((field_rating - 20) / 60 * 100)
+            rating_score = clamp((field_rating - 20) / 60 * 100)
         else:
-            score = 50.0
+            rating_score = 50.0
     else:
-        score = 50.0
+        rating_score = 50.0
 
-    # Position multiplier
+    # ── Component 2: Actual fielding stats ───────────────────────────────────
+    fld_g = row.get("fld_g") if hasattr(row, "get") else None
+    if fld_g is None or pd.isna(fld_g):
+        fld_g = 0
+    fld_g = int(fld_g)
+
+    if fld_g < 10:
+        # Not enough data — fall back to rating only
+        score = rating_score
+    else:
+        components = []   # list of (score_0_100, weight)
+
+        def _fval(key, default=0.0):
+            """Safely extract a float from row, returning default for NaN/None."""
+            v = row.get(key)
+            return float(v) if (v is not None and not pd.isna(v)) else default
+
+        # ZR — position-specific scaling so ±half_range maps to 0/100
+        half_range = ZR_HALF_RANGE.get(position, 5.0)
+        zr_score = clamp(50.0 + _fval("fld_zr") / half_range * 50.0)
+
+        # FPct — (tc-e)/tc; good ≥.985, poor ≤.960
+        tc = _fval("fld_tc")
+        e  = _fval("fld_e")
+        fpct_score = clamp((((tc - e) / tc) - 0.950) / 0.035 * 100) if tc > 0 else 50.0
+
+        if position == POS_CATCHER:
+            sba = _fval("fld_sba")
+            rto = _fval("fld_rto")
+            total_att = sba + rto
+            cs_score = clamp(rto / total_att / 0.35 * 100) if total_att >= 5 else 50.0
+
+            framing = _fval("fld_framing")
+            framing_score = clamp(50.0 + framing / 12.0 * 50.0)
+
+            components = [(zr_score, 0.30), (fpct_score, 0.15),
+                          (cs_score, 0.30), (framing_score, 0.25)]
+
+        elif position in (POS_2B, POS_SS):
+            dp_per_150 = _fval("fld_dp") / fld_g * 150
+            dp_min, dp_max = DP_SCALE[position]
+            dp_score = clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
+            components = [(zr_score, 0.40), (fpct_score, 0.20), (dp_score, 0.40)]
+
+        elif position in (POS_3B, POS_1B):
+            dp_per_150 = _fval("fld_dp") / fld_g * 150
+            dp_min, dp_max = DP_SCALE[position]
+            dp_score = clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
+            components = [(zr_score, 0.40), (fpct_score, 0.30), (dp_score, 0.30)]
+
+        elif position == POS_CF:
+            arm_score = clamp(50.0 + _fval("fld_arm") * 10.0)
+            po_score  = clamp((_fval("fld_po") / fld_g - 0.9) / 2.0 * 100)
+            components = [(zr_score, 0.40), (fpct_score, 0.10), (arm_score, 0.20), (po_score, 0.30)]
+
+        else:  # LF, RF
+            arm_score = clamp(50.0 + _fval("fld_arm") * 10.0)
+            components = [(zr_score, 0.40), (fpct_score, 0.20), (arm_score, 0.40)]
+
+        total_w = sum(w for _, w in components)
+        stats_score = sum(s * w for s, w in components) / total_w if total_w > 0 else 50.0
+
+        score = rating_score * 0.50 + stats_score * 0.50
+
+    # ── Position multiplier ──────────────────────────────────────────────────
     if position in PREMIUM_DEFENSE_POS:
         score = min(100, score * 1.3)
     elif position in LOW_DEFENSE_POS:
@@ -1005,13 +1127,14 @@ def get_trend_metrics_pitching(trend_df, cfip):
 # ---------------------------------------------------------------------------
 def compute_batter_ratings(engine):
     """Compute ratings for all position players."""
-    stats, players, value, batting, fielding, trend = load_batter_data(engine)
+    stats, players, value, batting, fielding, fielding_cur, trend = load_batter_data(engine)
 
     # Merge all data
     df = stats.merge(players, on="player_id", how="left", suffixes=("", "_p"))
     df = df.merge(value, on="player_id", how="left")
     df = df.merge(batting, on="player_id", how="left")
     df = df.merge(fielding, on="player_id", how="left")
+    df = df.merge(fielding_cur, on="player_id", how="left")
 
     # Compute percentile ranks for contact stats
     contact_pctile_cols = ["barrel_pct", "hard_hit_pct", "avg_ev", "xslg", "xwoba"]

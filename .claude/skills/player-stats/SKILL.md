@@ -111,8 +111,19 @@ SELECT player_id, first_name, last_name FROM players WHERE last_name ILIKE '<par
 The HTML has placeholder comments where summaries go:
 - `<!-- BATTING_SUMMARY -->` — replace with a batting scouting summary (if player has batting data)
 - `<!-- PITCHING_SUMMARY -->` — replace with a pitching scouting summary (if player has pitching data)
+- `<!-- FIELDING_SUMMARY -->` — replace with a fielding scouting note (position players only, not pitchers)
 
-For two-way players, write BOTH summaries. Each is independent — analyze batting and pitching separately.
+For two-way players, write BOTH batting and pitching summaries. Each is independent — analyze batting and pitching separately.
+
+**Fielding summary** (2-3 bullets, position players only — skip for pitchers):
+- Primary position performance: ZR (positive = above avg, negative = below avg; >1.0 good, <-1.0 poor), FPct vs ~.980 MLB avg
+- Position-specific highlights:
+  - **Catchers**: framing value, CS% (>32% good, ~28% avg, <22% poor), PB rate
+  - **Infielders**: DP rate, ZR range tendency, error frequency
+  - **Outfielders**: arm value, ZR range assessment
+- Cross-reference fielding ratings vs actual stats — flag if ratings and real-world performance diverge
+
+Wrap in `<h2>Fielding Scouting Summary</h2><div class="summary"><ul>...</ul></div>`
 
 **Batting summary** (3-5 bullets):
 - Overall offensive production (wRC+/OPS+ vs benchmarks: 115+ good, 100 avg, <85 poor)
@@ -165,6 +176,12 @@ Then print: `~ Model: claude-sonnet-4-6 | ~8–15K in / ~3–6K out | est. 7–1
 | Avg EV | 92+ | 88-90 | <86 |
 | Hard Hit% | 45%+ | ~39% | <32% |
 | Barrel% | 10%+ | ~6-7% | <4% |
+
+| Fielding | Good | Average | Poor |
+|----------|------|---------|------|
+| FPct | ≥.985 | ~.978 | ≤.960 |
+| ZR | >1.0 | ~0 | <-1.0 |
+| CS% (catchers) | >32% | ~28% | <22% |
 
 | Pitching | Good | Average | Poor |
 |----------|------|---------|------|
