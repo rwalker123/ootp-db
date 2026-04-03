@@ -181,9 +181,9 @@
 </div>
 
 <script>
-async function tryFetch(url) {
+async function tryFetch(url, opts) {
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, opts);
     return r.ok ? await r.text() : null;
   } catch(e) { return null; }
 }
@@ -204,14 +204,18 @@ function parseHtmlLinks(html) {
     .filter(h => h.endsWith('.html') && !h.startsWith('?') && !h.startsWith('/') && !h.startsWith('http'));
 }
 
+function unescHtml(s) {
+  return s ? s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : s;
+}
+
 function extractMeta(html) {
   const title  = (html.match(/<title>(.*?)<\/title>/) || [])[1] || null;
   const ts     = (html.match(/Generated: ([\d\-T:]+)/) || [])[1] || null;
   const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
   const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
   const skill  = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
-  const args   = (html.match(/<meta name="ootp-args" content="([^"]+)"/) || [])[1] || null;
-  const kwargs = (html.match(/<meta name="ootp-kwargs" content="([^"]+)"/) || [])[1] || null;
+  const args   = unescHtml((html.match(/<meta name="ootp-args" content="([^"]+)"/) || [])[1] || null);
+  const kwargs = unescHtml((html.match(/<meta name="ootp-kwargs" content="([^"]+)"/) || [])[1] || null);
   return { title, ts, oa, pot, skill, args, kwargs };
 }
 
@@ -230,6 +234,7 @@ document.addEventListener('click', () => {
 let _savePollTimer = null;
 let _lastRunningKey = null;
 let _lastActiveKey = null;
+let _prevRunningCount = null;
 
 async function loadSaves() {
   const r = await fetch('/saves');
@@ -264,9 +269,17 @@ async function loadSaves() {
     activeEl.textContent = 'No active save';
   }
 
-  // Poll every 1s while imports are running, stop when done
+  // Poll every 1s while imports are running; reload reports when they finish
+  const wasRunning = _prevRunningCount !== null && _prevRunningCount > 0;
+  const nowRunning = data.running.length > 0;
+  _prevRunningCount = data.running.length;
   clearTimeout(_savePollTimer);
-  _savePollTimer = data.running.length > 0 ? setTimeout(loadSaves, 1000) : null;
+  if (nowRunning) {
+    _savePollTimer = setTimeout(loadSaves, 1000);
+  } else {
+    _savePollTimer = null;
+    if (wasRunning) reloadReports();
+  }
 }
 
 function renderSaves(data) {
@@ -536,7 +549,9 @@ async function setActive(saveName) {
 // ---------------------------------------------------------------------------
 
 async function refreshReport(filePath, mode, kwargsEncoded) {
-  const wrap = document.querySelector(`[data-refresh="${CSS.escape(filePath)}"]`);
+  const wrap = [...document.querySelectorAll('.btn-refresh-wrap')].find(el => el.dataset.path === filePath);
+  const mainBtn = wrap && wrap.querySelector('.btn-refresh');
+  if (mainBtn) { mainBtn.textContent = 'Refreshing…'; mainBtn.disabled = true; }
   if (wrap) wrap.classList.add('busy');
 
   let kwargs = null;
@@ -550,45 +565,57 @@ async function refreshReport(filePath, mode, kwargsEncoded) {
     body: JSON.stringify({ path: filePath, mode, kwargs_override: kwargs }),
   });
 
-  if (wrap) wrap.classList.remove('busy');
+  if (!r.ok) {
+    if (wrap) wrap.classList.remove('busy');
+    if (mainBtn) { mainBtn.textContent = '↻ Refresh'; mainBtn.disabled = false; }
+    alert('Refresh failed: ' + await r.text());
+    return;
+  }
 
-  if (r.ok) {
-    const html = await tryFetch(filePath);
+  const { job_id } = await r.json();
+  const label = mode === 'full' ? 'Data + Analysis' : 'Data refresh';
+  _jobData[job_id] = { skill: 'refresh', args: label, log: [], running: true, file_path: filePath };
+  listenToJob(job_id, async () => {
+    if (wrap) { wrap.classList.remove('busy'); wrap.remove(); }
+    const html = await tryFetch(filePath, { cache: 'no-store' });
     if (html) {
       const meta = extractMeta(html);
       const row = document.getElementById('row-' + CSS.escape(filePath));
-      if (row && meta.ts) {
-        row.querySelector('.ts').textContent = meta.ts;
-        row.querySelector('.stale-cell').innerHTML = '';
-        if (wrap) wrap.remove();
-      }
+      if (row && meta.ts) row.querySelector('.ts').textContent = meta.ts;
+      if (row) row.querySelector('.stale-cell').innerHTML = '';
     }
-  } else {
-    const msg = await r.text();
-    alert('Refresh failed: ' + msg);
-  }
+  });
 }
 
 function buildRefreshBtn(filePath, kwargsEncoded) {
-  const escaped = filePath.replace(/'/g, "\\'");
-  const kw = kwargsEncoded ? kwargsEncoded.replace(/'/g, "\\'") : '';
-  return `<span class="btn-refresh-wrap" data-refresh="${CSS.escape(filePath)}">
-    <button class="btn-refresh" onclick="refreshReport('${escaped}','data','${kw}')">↻ Refresh</button>
-    <button class="btn-refresh-arrow" onclick="showRefreshMenu(event,'${escaped}','${kw}')">▾</button>
+  return `<span class="btn-refresh-wrap" data-path="${esc(filePath)}" data-kwargs="${esc(kwargsEncoded || '')}">
+    <button class="btn-refresh" onclick="refreshFromWrap(this,'data')">↻ Refresh</button>
+    <button class="btn-refresh-arrow" onclick="showRefreshMenu(event,this)">▾</button>
   </span>`;
 }
 
-function showRefreshMenu(e, filePath, kwargsEncoded) {
+function refreshFromWrap(btn, mode) {
+  const wrap = btn.closest('.btn-refresh-wrap');
+  refreshReport(wrap.dataset.path, mode, wrap.dataset.kwargs);
+}
+
+function showRefreshMenu(e, btn) {
   e.stopPropagation();
   document.querySelectorAll('.refresh-menu').forEach(m => m.remove());
-  const btn = e.currentTarget;
+  const wrap = btn.closest('.btn-refresh-wrap');
+  const filePath = wrap.dataset.path;
+  const kwargsEncoded = wrap.dataset.kwargs;
   const menu = document.createElement('div');
   menu.className = 'refresh-menu';
   menu.style.cssText = `position:absolute;top:${btn.getBoundingClientRect().bottom + scrollY}px;left:${btn.getBoundingClientRect().left}px`;
-  menu.innerHTML = `
-    <button onclick="document.querySelectorAll('.refresh-menu').forEach(m=>m.remove());refreshReport('${filePath}','data','${kwargsEncoded}')">↻ Data only (fast)</button>
-    <button onclick="document.querySelectorAll('.refresh-menu').forEach(m=>m.remove());refreshReport('${filePath}','full','${kwargsEncoded}')">✦ Data + Analysis (slow)</button>
-  `;
+  const addItem = (label, mode) => {
+    const item = document.createElement('button');
+    item.textContent = label;
+    item.onclick = () => { document.querySelectorAll('.refresh-menu').forEach(m => m.remove()); refreshReport(filePath, mode, kwargsEncoded); };
+    menu.appendChild(item);
+  };
+  addItem('↻ Data only (fast)', 'data');
+  addItem('✦ Data + Analysis (slow)', 'full');
   document.body.appendChild(menu);
 }
 
@@ -601,7 +628,7 @@ async function buildSection(basePath, dirKey, lastImport) {
 
   const reports = await Promise.all(links.map(async link => {
     const filename = link.split('/').pop();
-    const html = await tryFetch(basePath + dirKey + filename);
+    const html = await tryFetch(basePath + dirKey + filename, { cache: 'no-cache' });
     const meta = html ? extractMeta(html) : {};
     return { filename, ...meta };
   }));
@@ -619,7 +646,7 @@ async function buildSection(basePath, dirKey, lastImport) {
   const rows = reports.map(rpt => {
     const stale = lastImport && rpt.ts && lastImport > rpt.ts;
     const staleCell = stale
-      ? `<span class="stale">STALE</span>${rpt.skill ? buildRefreshBtn(basePath + dirKey + rpt.filename, rpt.kwargs) : ''}`
+      ? (rpt.skill ? buildRefreshBtn(basePath + dirKey + rpt.filename, rpt.kwargs) : '<span class="stale">STALE</span>')
       : '';
     const extraTd = showRatings
       ? `<td>${rpt.oa ? `<span class="badge-oa">${rpt.oa}</span>` : '—'}</td>`
@@ -757,15 +784,16 @@ function _jobPanelId(jobId) {
   return 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
 }
 
-function _renderJobPanel(jobId) {
+function _renderJobPanelContent(jobId) {
   const job = _jobData[jobId];
   if (!job) return '';
   const id = _jobPanelId(jobId);
   const status = job.running ? 'Running…' : 'Done';
   const logText = renderMarkdownLog(job.log);
-  const label = `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
-  return `<div class="import-log" id="logpanel-${id}">
-    <div class="import-log-header">
+  const label = job.skill === 'refresh'
+    ? `↻ ${esc(job.args)}`
+    : `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
+  return `<div class="import-log-header">
       <span class="log-title">${label}</span>
       <span class="log-status" id="status-${id}">${status}</span>
       <span class="log-controls">
@@ -775,8 +803,12 @@ function _renderJobPanel(jobId) {
         <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''} id="close-${id}">✕</button>
       </span>
     </div>
-    <div class="import-log-body rendered" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>
-  </div>`;
+    <div class="import-log-body rendered" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
+}
+
+function _renderJobPanel(jobId) {
+  const id = _jobPanelId(jobId);
+  return `<div class="import-log" id="logpanel-${id}">${_renderJobPanelContent(jobId)}</div>`;
 }
 
 function _appendJobLine(jobId, line) {
@@ -800,13 +832,33 @@ function _markJobDone(jobId) {
 function _openJobPanel(jobId) {
   const id = _jobPanelId(jobId);
   if (document.getElementById('logpanel-' + id)) return;
+
+  const job = _jobData[jobId];
+  const filePath = job && job.file_path;
+  if (filePath) {
+    const row = document.getElementById('row-' + CSS.escape(filePath));
+    if (row) {
+      const tr = document.createElement('tr');
+      tr.id = 'logpanel-' + id;
+      const td = document.createElement('td');
+      td.colSpan = 10;
+      td.style.padding = '0';
+      td.innerHTML = `<div class="import-log">${_renderJobPanelContent(jobId)}</div>`;
+      tr.appendChild(td);
+      row.insertAdjacentElement('afterend', tr);
+      const body = tr.querySelector('.import-log-body');
+      if (body) body.scrollTop = body.scrollHeight;
+      return;
+    }
+  }
+
   const el = document.getElementById('job-logs');
   el.insertAdjacentHTML('afterbegin', _renderJobPanel(jobId));
   const body = document.getElementById(id);
   if (body) body.scrollTop = body.scrollHeight;
 }
 
-function listenToJob(jobId) {
+function listenToJob(jobId, onDone) {
   if (_activeStreams[jobId]) return;
   _openJobPanel(jobId);
 
@@ -818,7 +870,7 @@ function listenToJob(jobId) {
       es.close();
       delete _activeStreams[jobId];
       _markJobDone(jobId);
-      reloadReports();
+      if (onDone) onDone(); else reloadReports();
       return;
     }
     try {
@@ -834,6 +886,7 @@ function listenToJob(jobId) {
     es.close();
     delete _activeStreams[jobId];
     _markJobDone(jobId);
+    if (onDone) onDone();
   };
 }
 
@@ -897,7 +950,6 @@ async function reloadReports() {
 
 async function main() {
   updateGenFields();  // populate initial skill fields
-  startJobPolling();  // pick up any jobs left from a previous page load
   loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
   loadStatus();   // fire and forget
 
@@ -913,6 +965,8 @@ async function main() {
 
   document.getElementById('content').innerHTML =
     html || '<div class="section"><span class="empty">No reports yet.</span></div>';
+
+  startJobPolling();  // pick up any jobs left from a previous page load — must run after rows exist
 }
 
 main();
