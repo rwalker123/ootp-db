@@ -82,33 +82,29 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
    ```
    This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. The UI shows any remaining pre-requisites (PostgreSQL, etc.) and guides you through setup.
 
-3. Once pre-reqs are met, the UI auto-discovers OOTP 27 saves. Click **Import** next to a save to load it into the database. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
+3. The UI auto-discovers OOTP 27 saves. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
+4. Export your data from within OOTP: open your save, go to **Game > Game Settings > Database tab**, and click **Database Tools > Export CSV Files**. Do not use the MySQL export option.
+5. Click **Import** next to a save to load it into the database. 
 
-That's it. You can refresh you import at any time to get the lastest save data.
+That's it. You can refresh your import at any time to get the latest save data.
 
-## Exporting CSVs from OOTP
+## Under the Hood
 
-Before running the importer, export your data from within OOTP:
+## Manual Usage
 
-1. Open your save in OOTP Baseball 27
-2. Go to **Game > Game Settings > Database tab**
-3. Click **Database Tools > Export CSV Files**
+These are the scripts the web UI runs behind the scenes. If you're using the web interface, you don't need to run these directly.
 
-This writes CSV files to `saved_games/<save_name>.lg/import_export/csv` inside your OOTP directory.
-
-**Important:** Do not use the MySQL export option -- it generates MySQL-specific SQL that is not compatible with PostgreSQL.
-
-## Usage
+### Import Save
 
 Pass your save name as the argument:
 
 ```bash
-./import.sh Tigers-2026-CBL
+./import.sh {save_name}
 ```
 
 This runs the full pipeline:
 
-1. Loads all CSVs into PostgreSQL (`tigers_2026_cbl`)
+1. Loads all CSVs into PostgreSQL (`{save_name}`)
 2. Computes advanced batting/pitching stats (wRC+, FIP, xFIP, exit velo, etc.)
 3. Computes composite 0–100 player ratings
 4. Computes draft prospect ratings
@@ -117,7 +113,7 @@ This runs the full pipeline:
 Example output:
 
 ```
-Created database: tigers_2026_cbl
+Created database: {save_name}
 ✓ players (1842 rows)
 ✓ teams (30 rows)
 ✓ leagues (2 rows)
@@ -130,7 +126,7 @@ Done: 45 tables, 28,391 rows in 12.3s
 Just run the same command again. All tables are dropped and recreated, so the database always reflects the latest state of your OOTP save.
 
 ```bash
-./import.sh Tigers-2026-CBL
+./import.sh {save_name}
 ```
 
 ---
@@ -146,8 +142,8 @@ These skills are available when running Claude Code in this project directory. I
 Full statistical profile for any player — career batting or pitching stats, advanced metrics (wRC+, OPS+, FIP, xFIP, K-BB%, barrel%), current-season splits, and an LLM-written analysis summary. Opens an HTML report in your browser.
 
 ```
-/player-stats Colt Keith
-/player-stats Jackson Jobe
+/player-stats Bryce Harper
+/player-stats Aaron Judge
 /player-stats Tarik Skubal
 ```
 
