@@ -11,6 +11,11 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def db_name_from_save(save_name: str) -> str:
+    """Derive a PostgreSQL database name from a save name."""
+    return save_name.lower().replace("-", "_").replace(" ", "_")
+
+
 def get_reports_dir(save_name: str, report_type: str) -> Path:
     """Return the report directory for a save/type, creating it if needed.
 

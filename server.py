@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 import threading
-from http.server import SimpleHTTPRequestHandler, HTTPServer
+from http.server import SimpleHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -328,6 +328,9 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, get_saves_data())
         elif self.path == "/reports/jobs":
             _json_response(self, get_jobs_data())
+        elif self.path.startswith("/reports/jobs/") and self.path.endswith("/stream"):
+            job_id = self.path[len("/reports/jobs/"):-len("/stream")]
+            self._handle_job_stream(job_id)
         else:
             super().do_GET()
 
@@ -402,8 +405,9 @@ class Handler(SimpleHTTPRequestHandler):
             return
         job_id = f"{skill}-{int(time.time())}"
         log = []
+        cmd_arg = args if skill == "adhoc" else f"/{skill} {args}"
         proc = subprocess.Popen(
-            ["claude", "-p", f"/{skill} {args}"],
+            ["claude", "-p", cmd_arg],
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -412,6 +416,44 @@ class Handler(SimpleHTTPRequestHandler):
         threading.Thread(target=_stream_output, args=(proc, log), daemon=True).start()
         _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
         _json_response(self, {"job_id": job_id}, 202)
+
+    def _handle_job_stream(self, job_id):
+        entry = _running_jobs.get(job_id)
+        if not entry:
+            self.send_error(404, "Job not found")
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        sent = 0
+        try:
+            while True:
+                log = entry["log"]
+                while sent < len(log):
+                    line = log[sent]
+                    self.wfile.write(f"data: {json.dumps(line)}\n\n".encode())
+                    self.wfile.flush()
+                    sent += 1
+
+                if entry["proc"].poll() is not None:
+                    # Process finished — drain any remaining lines, then signal done
+                    log = entry["log"]
+                    while sent < len(log):
+                        line = log[sent]
+                        self.wfile.write(f"data: {json.dumps(line)}\n\n".encode())
+                        self.wfile.flush()
+                        sent += 1
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                    return
+
+                time.sleep(0.1)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # Client disconnected
 
     def _handle_clear_job(self, body):
         job_id = body.get("job_id", "").strip()
@@ -553,4 +595,4 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     port = 8000
     print(f"OOTP Reports → http://localhost:{port}")
-    HTTPServer(("", port), Handler).serve_forever()
+    ThreadingHTTPServer(("", port), Handler).serve_forever()

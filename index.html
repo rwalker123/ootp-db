@@ -142,6 +142,15 @@
                      overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
   .import-log-body.minimized { display: none; }
   .import-log-body.maximized { min-height: 60vh; max-height: 80vh; }
+  .import-log-body.rendered { white-space: normal; word-break: normal; }
+  .log-line { white-space: pre-wrap; font-family: monospace; font-size: 11px; min-height: 1.2em; }
+  .log-table { border-collapse: collapse; margin: 6px 0; font-size: 11px; font-family: monospace; }
+  .log-table th { background: #3a3a4e; color: #9ec8e3; padding: 4px 10px; text-align: left;
+                  font-size: 10px; font-weight: 600; text-transform: uppercase;
+                  letter-spacing: 0.4px; border: 1px solid #444; white-space: nowrap; }
+  .log-table td { padding: 3px 10px; color: #d4d4d4; border: 1px solid #333; text-align: left; white-space: nowrap; }
+  .log-table tr:nth-child(even) td { background: #252530; }
+  .log-table tr:hover td { background: #3a3a50; color: #fff; }
 </style>
 </head>
 <body>
@@ -161,6 +170,7 @@
         <option value="player-rating">Player Rating</option>
         <option value="free-agents">Free Agents</option>
         <option value="draft-targets">Draft Targets</option>
+        <option value="adhoc">Ad-hoc Query</option>
       </select>
       <div id="gen-fields" class="gen-fields"></div>
       <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
@@ -219,6 +229,7 @@ document.addEventListener('click', () => {
 
 let _savePollTimer = null;
 let _lastRunningKey = null;
+let _lastActiveKey = null;
 
 async function loadSaves() {
   const r = await fetch('/saves');
@@ -226,13 +237,22 @@ async function loadSaves() {
   const data = await r.json();
 
   const runningKey = JSON.stringify(data.running);
-  const structureChanged = runningKey !== _lastRunningKey;
+  const activeKey = data.active || '';
+  const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey;
   _lastRunningKey = runningKey;
+  _lastActiveKey = activeKey;
 
   if (structureChanged || !document.querySelector('#saves-section .section-title')) {
     renderSaves(data);
   } else {
-    updateLogsInPlace(data.logs || {});
+    const logs = data.logs || {};
+    const missingPanel = Object.keys(logs).some(name => {
+      if (!logs[name].length) return false;
+      const id = 'log-' + name.replace(/[^a-z0-9]/gi, '_');
+      return !document.getElementById('logpanel-' + id);
+    });
+    if (missingPanel) renderSaves(data);
+    else updateLogsInPlace(logs);
   }
 
   // Update header
@@ -387,6 +407,19 @@ function logMaximize(id) {
   if (!body.classList.contains('minimized')) body.scrollTop = body.scrollHeight;
 }
 
+function logCopy(id) {
+  const body = document.getElementById(id);
+  if (!body) return;
+  const text = body.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-' + id);
+    if (!btn) return;
+    const orig = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
+}
+
 function logClose(id, saveName) {
   fetch('/saves/clear-log', {
     method: 'POST',
@@ -395,6 +428,46 @@ function logClose(id, saveName) {
   });
   const panel = document.getElementById('logpanel-' + id);
   if (panel) panel.remove();
+}
+
+function renderInline(s) {
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  return s;
+}
+
+function parseMdTableRow(line) {
+  const parts = line.split('|');
+  return parts.slice(1, parts.length - 1).map(c => c.trim());
+}
+
+function renderMdTable(lines) {
+  const isSep = l => /^\s*\|[\s\-:|]+\|\s*$/.test(l);
+  const data = lines.filter(l => !isSep(l));
+  if (!data.length) return '';
+  const [hdr, ...body] = data;
+  const ths = parseMdTableRow(hdr).map(c => `<th>${renderInline(esc(c))}</th>`).join('');
+  const trs = body.map(r =>
+    '<tr>' + parseMdTableRow(r).map(c => `<td>${renderInline(esc(c))}</td>`).join('') + '</tr>'
+  ).join('');
+  return `<table class="log-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+function renderMarkdownLog(lines) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().startsWith('|')) {
+      const tbl = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) tbl.push(lines[i++]);
+      out.push(renderMdTable(tbl));
+    } else {
+      out.push(`<div class="log-line">${renderInline(colorLogLine(line))}</div>`);
+      i++;
+    }
+  }
+  return out.join('');
 }
 
 function colorLogLine(raw) {
@@ -451,6 +524,7 @@ async function setActive(saveName) {
   });
   if (r.ok) {
     await loadSaves();
+    await reloadReports();
   } else {
     const msg = await r.text();
     alert('Failed to set active save: ' + msg);
@@ -650,15 +724,23 @@ const GEN_SKILLS = {
   'draft-targets': { label: 'Draft Targets', fields: [
     { id: 'gen-criteria', placeholder: 'e.g. high ceiling SS under 20', required: true },
   ]},
+  'adhoc': { label: 'Ad-hoc Query', fields: [
+    { id: 'gen-prompt', placeholder: 'Ask anything about the OOTP data…', required: true },
+  ]},
 };
 
 function updateGenFields() {
   const skill = document.getElementById('gen-skill').value;
   const def = GEN_SKILLS[skill];
-  document.getElementById('gen-fields').innerHTML = def.fields.map(f =>
-    `<input id="${f.id}" type="text" placeholder="${f.placeholder}"
-      onkeydown="if(event.key==='Enter')generateReport()">`
-  ).join('');
+  document.getElementById('gen-fields').innerHTML = def.fields.map(f => {
+    if (skill === 'adhoc') {
+      return `<input id="${f.id}" type="text" placeholder="${f.placeholder}"
+        style="min-width:320px"
+        onkeydown="if(event.key==='Enter')generateReport()">`;
+    }
+    return `<input id="${f.id}" type="text" placeholder="${f.placeholder}"
+      onkeydown="if(event.key==='Enter')generateReport()">`;
+  }).join('');
 }
 
 function buildArgs(skill) {
@@ -668,8 +750,92 @@ function buildArgs(skill) {
   return vals.map(v => v.trim()).filter(Boolean).join(' ');
 }
 
-let _jobPollTimer = null;
-let _lastJobsKey = null;
+const _activeStreams = {};  // job_id -> EventSource
+const _jobData = {};        // job_id -> { skill, args, log[], running }
+
+function _jobPanelId(jobId) {
+  return 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
+}
+
+function _renderJobPanel(jobId) {
+  const job = _jobData[jobId];
+  if (!job) return '';
+  const id = _jobPanelId(jobId);
+  const status = job.running ? 'Running…' : 'Done';
+  const logText = renderMarkdownLog(job.log);
+  const label = `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
+  return `<div class="import-log" id="logpanel-${id}">
+    <div class="import-log-header">
+      <span class="log-title">${label}</span>
+      <span class="log-status" id="status-${id}">${status}</span>
+      <span class="log-controls">
+        <button onclick="logCopy('${id}')" title="Copy log" id="copy-${id}">⎘</button>
+        <button onclick="logMinimize('${id}')" title="Minimize">−</button>
+        <button onclick="logMaximize('${id}')" title="Maximize">⤢</button>
+        <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''} id="close-${id}">✕</button>
+      </span>
+    </div>
+    <div class="import-log-body rendered" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>
+  </div>`;
+}
+
+function _appendJobLine(jobId, line) {
+  const id = _jobPanelId(jobId);
+  const body = document.getElementById(id);
+  if (!body) return;
+  const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+  body.innerHTML = renderMarkdownLog(_jobData[jobId].log);
+  if (nearBottom) body.scrollTop = body.scrollHeight;
+}
+
+function _markJobDone(jobId) {
+  if (_jobData[jobId]) _jobData[jobId].running = false;
+  const id = _jobPanelId(jobId);
+  const statusEl = document.getElementById('status-' + id);
+  if (statusEl) statusEl.textContent = 'Done';
+  const closeBtn = document.getElementById('close-' + id);
+  if (closeBtn) closeBtn.disabled = false;
+}
+
+function _openJobPanel(jobId) {
+  const id = _jobPanelId(jobId);
+  if (document.getElementById('logpanel-' + id)) return;
+  const el = document.getElementById('job-logs');
+  el.insertAdjacentHTML('afterbegin', _renderJobPanel(jobId));
+  const body = document.getElementById(id);
+  if (body) body.scrollTop = body.scrollHeight;
+}
+
+function listenToJob(jobId) {
+  if (_activeStreams[jobId]) return;
+  _openJobPanel(jobId);
+
+  const es = new EventSource(`/reports/jobs/${encodeURIComponent(jobId)}/stream`);
+  _activeStreams[jobId] = es;
+
+  es.onmessage = (e) => {
+    if (e.data === '[DONE]') {
+      es.close();
+      delete _activeStreams[jobId];
+      _markJobDone(jobId);
+      reloadReports();
+      return;
+    }
+    try {
+      const line = JSON.parse(e.data);
+      if (_jobData[jobId]) {
+        _jobData[jobId].log.push(line);
+        _appendJobLine(jobId, line);
+      }
+    } catch(err) {}
+  };
+
+  es.onerror = () => {
+    es.close();
+    delete _activeStreams[jobId];
+    _markJobDone(jobId);
+  };
+}
 
 async function generateReport() {
   const skill = document.getElementById('gen-skill').value;
@@ -688,65 +854,22 @@ async function generateReport() {
   btn.disabled = false;
   if (!r.ok) { alert('Failed to start: ' + await r.text()); return; }
 
-  startJobPolling();
+  const { job_id } = await r.json();
+  _jobData[job_id] = { skill, args, log: [], running: true };
+  listenToJob(job_id);
 }
 
 async function startJobPolling() {
-  clearTimeout(_jobPollTimer);
+  // On page load: fetch existing jobs once, attach SSE to any still running
   const jobs = await fetch('/reports/jobs').then(r => r.ok ? r.json() : {});
-
-  const jobsKey = JSON.stringify(Object.entries(jobs).map(([id, j]) => [id, j.running]));
-  const structureChanged = jobsKey !== _lastJobsKey;
-  const wasRunning = _lastJobsKey !== null && JSON.parse(_lastJobsKey).some(([, r]) => r);
-  _lastJobsKey = jobsKey;
-
-  if (structureChanged) {
-    renderJobLogs(jobs);
-  } else {
-    updateJobLogsInPlace(jobs);
-  }
-
-  const anyRunning = Object.values(jobs).some(j => j.running);
-  if (anyRunning) {
-    _jobPollTimer = setTimeout(startJobPolling, 1500);
-  } else if (wasRunning) {
-    reloadReports();  // only reload when a job just finished
-  }
-}
-
-function updateJobLogsInPlace(jobs) {
   for (const [jobId, job] of Object.entries(jobs)) {
-    const id = 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
-    const body = document.getElementById(id);
-    if (!body) continue;
-    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
-    body.innerHTML = job.log.map(l => colorLogLine(l)).join('\n') || '<span style="color:#666">Running…</span>';
-    if (nearBottom) body.scrollTop = body.scrollHeight;
+    _jobData[jobId] = { ...job };
+    if (job.running) {
+      listenToJob(jobId);
+    } else {
+      _openJobPanel(jobId);
+    }
   }
-}
-
-function renderJobLogs(jobs) {
-  const el = document.getElementById('job-logs');
-  const panels = Object.entries(jobs).map(([jobId, job]) => {
-    const id = 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
-    const status = job.running ? 'Running…' : 'Done';
-    const logText = job.log.map(l => colorLogLine(l)).join('\n');
-    const label = `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
-    return `<div class="import-log" id="logpanel-${id}">
-      <div class="import-log-header">
-        <span class="log-title">${label}</span>
-        <span class="log-status">${status}</span>
-        <span class="log-controls">
-          <button onclick="logMinimize('${id}')" title="Minimize">−</button>
-          <button onclick="logMaximize('${id}')" title="Maximize">⤢</button>
-          <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''}>✕</button>
-        </span>
-      </div>
-      <div class="import-log-body" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>
-    </div>`;
-  }).join('');
-  el.innerHTML = panels;
-  el.querySelectorAll('.import-log-body').forEach(b => { b.scrollTop = b.scrollHeight; });
 }
 
 async function clearJob(id, jobId) {

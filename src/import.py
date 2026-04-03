@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from shared_css import db_name_from_save
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -236,7 +237,7 @@ def main():
         print("Error: POSTGRES_URL not set in .env")
         sys.exit(1)
 
-    db_name = save_name.lower().replace("-", "_").replace(" ", "_")
+    db_name = db_name_from_save(save_name)
 
     # Create database if it doesn't exist
     try:

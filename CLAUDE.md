@@ -10,7 +10,7 @@ and a heredoc to avoid shell quoting issues:
 ```bash
 .venv/bin/python3 << 'PYEOF'
 from sqlalchemy import create_engine, text
-engine = create_engine("postgresql://postgres@localhost:5432/tigers_2026_cbl")
+engine = create_engine("postgresql://postgres@localhost:5432/<active_db_name>")
 with engine.connect() as conn:
     result = conn.execute(text("SELECT ...")).fetchall()
     for row in result:
@@ -25,16 +25,20 @@ PYEOF
 - The active save and database name are tracked in `saves.json` at the project root.
   Read it to get the current active DB: `json.loads(open("saves.json").read())["active"]`
   gives the save name; the DB name is `save_name.lower().replace("-", "_")`.
-  For the current save `Tigers-2026-CBL`, the database is `tigers_2026_cbl`.
 - The MLB league_id is **203** — always filter by `league_id = 203` unless the user 
   specifically asks about minor leagues. Other league_ids are minor league levels.
-- The current sim season is **2028**. Current-season data is in the main tables 
-  (e.g. `team_record`, `team_batting_stats`). Prior seasons are in `_history` tables.
+- Current-season data is in the main tables (e.g. `team_record`, `team_batting_stats`).
+  Prior seasons are in `_history` tables.
 - Refer to the Database Schema Overview below for table structures, primary keys, 
   column conventions, and stat abbreviations. Do NOT explore the schema at query time — 
   it is fully documented here.
 - **Only use column names documented in the schema below.** Do not guess or invent 
   column names. If unsure, check the schema section first.
+- **When ranking or listing players by quality, always use `player_ratings.rating_overall`**
+  (the composite 0–100 score computed by `src/ratings.py`) rather than `players_value.oa_rating`
+  or `players_value.oa` (OOTP's raw 20–80 scale). The `player_ratings` table also has
+  per-dimension scores (`rating_offense`, `rating_defense`, etc.) and is pre-filtered to
+  MLB-level players. See the Analytics Engine section for its full schema.
 
 ### Common Query Patterns
 World Series winner for a given year (won_playoffs = 1 means won the championship):
@@ -173,7 +177,7 @@ imports don't change it (it will be switchable from the web UI in the future).
 - Do not use the MySQL export — it generates MySQL-specific SQL that is not compatible 
   with PostgreSQL
 - The script auto-creates the database if needed; no manual `createdb` step required
-- Database name is derived from the save name: `Tigers-2026-CBL` → `tigers_2026_cbl`
+- Database name is derived from the save name (lowercase, hyphens/spaces → underscores): `Tigers-2026-CBL` → `tigers_2026_cbl`, `Restore the Roar` → `restore_the_roar`
 
 ## Database Schema Overview
 
@@ -536,6 +540,33 @@ Maximum 2 highlight columns per search. Column keys come from `player_ratings`.
 - Hover: `tr:hover td { background: #e0e8f0 }`
 - Score colors: green ≥70, yellow 40–69, red <40
 - Classes: `.good` (green bold), `.poor` (red bold), `.summary` (left-bordered callout)
+
+---
+
+## Player Ratings Table (`player_ratings`)
+
+Computed by `src/ratings.py` — run after `analytics.py`. Contains one row per MLB-level
+player with composite 0–100 ratings. **Use this table, not `players_value`, when ranking
+or comparing players.**
+
+**Identity:** `player_id`, `first_name`, `last_name`, `team_abbr`, `position`, `age`,
+`oa` (OOTP overall), `pot` (OOTP potential), `player_type` ("batter" or "pitcher")
+
+**Composite ratings (0–100 scale):**
+- `rating_overall` — primary composite score; use this to rank players
+- `rating_offense` — hitting value
+- `rating_contact_quality` — contact + exit velocity
+- `rating_discipline` — walk/strikeout approach
+- `rating_defense` — fielding at primary position
+- `rating_potential` — upside/development ceiling
+- `rating_durability` — injury resistance
+- `rating_development` — recent trajectory trend
+- `rating_clubhouse` — personality/leadership
+- `rating_baserunning` — speed and baserunning
+
+**Flags:** `flag_injury_risk` (bool), `flag_leader` (bool), `flag_high_ceiling` (bool)
+
+**Carried-over stats:** `wrc_plus`, `war`, `prone_overall`
 
 ---
 

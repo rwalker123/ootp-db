@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from shared_css import get_report_css, get_reports_dir
+from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +23,7 @@ def get_engine(save_name):
     if not postgres_host:
         print("Error: POSTGRES_URL not set in .env")
         sys.exit(1)
-    db_name = save_name.lower().replace("-", "_")
+    db_name = db_name_from_save(save_name)
     return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
