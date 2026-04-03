@@ -35,6 +35,7 @@ _OOTP_SEARCH = [
 
 _running_imports: dict = {}  # save_name -> {"proc": Popen, "log": [str]}
 _running_jobs: dict = {}    # job_id -> {"proc": Popen, "log": [str], "skill": str, "args": str}
+_jobs_lock = threading.Lock()
 
 
 def _stream_output(proc, log):
@@ -72,14 +73,24 @@ def _load_saves_registry():
     return {"saves": {}}
 
 
+def _job_is_running(entry):
+    proc = entry.get("proc")
+    if proc is not None:
+        return proc.poll() is None
+    return not entry.get("done", False)
+
+
 def get_jobs_data():
+    with _jobs_lock:
+        snapshot = list(_running_jobs.items())
     jobs = {}
-    for job_id, entry in _running_jobs.items():
+    for job_id, entry in snapshot:
         jobs[job_id] = {
             "skill": entry["skill"],
             "args": entry["args"],
             "log": list(entry["log"]),
-            "running": entry["proc"].poll() is None,
+            "running": _job_is_running(entry),
+            "file_path": entry.get("file_path"),
         }
     return jobs
 
@@ -423,7 +434,8 @@ class Handler(SimpleHTTPRequestHandler):
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         threading.Thread(target=_stream_output, args=(proc, log), daemon=True).start()
-        _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
+        with _jobs_lock:
+            _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
         _json_response(self, {"job_id": job_id}, 202)
 
     def _handle_job_stream(self, job_id):
@@ -448,8 +460,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.wfile.flush()
                     sent += 1
 
-                if entry["proc"].poll() is not None:
-                    # Process finished — drain any remaining lines, then signal done
+                if not _job_is_running(entry):
+                    # Job finished — drain any remaining lines, then signal done
                     log = entry["log"]
                     while sent < len(log):
                         line = log[sent]
@@ -466,8 +478,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_clear_job(self, body):
         job_id = body.get("job_id", "").strip()
-        if job_id in _running_jobs:
-            del _running_jobs[job_id]
+        with _jobs_lock:
+            _running_jobs.pop(job_id, None)
         self._respond(200, "ok")
 
     def _handle_clear_log(self, body):
@@ -507,26 +519,57 @@ class Handler(SimpleHTTPRequestHandler):
             self._respond(400, "Report has no refresh metadata — regenerate it first")
             return
 
+        job_id = f"refresh-{int(time.time() * 1000)}"
+        log = []
+        entry = {"skill": skill, "args": args, "log": log, "proc": None, "done": False, "file_path": file_path}
+        with _jobs_lock:
+            _running_jobs[job_id] = entry
+
         if mode == "full":
-            self._run_full(skill, args)
-            return
+            # Back up the report; restore it if Claude fails so the file isn't lost
+            backup = target.with_suffix(".bak")
+            shutil.copy2(target, backup)
+            target.unlink()  # force cache miss so the skill regenerates
+            cmd = ["claude", "-p", f"/{skill} {args}"]
+            proc = subprocess.Popen(
+                cmd, cwd=str(ROOT),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+            entry["proc"] = proc
 
-        analyses = _extract_analyses(current)
-        target.unlink()
+            def _restore_on_failure():
+                _stream_output(proc, log)
+                if proc.returncode != 0 and not target.exists() and backup.exists():
+                    shutil.move(str(backup), str(target))
+                    log.append("Error: Claude job failed — original report restored.")
+                else:
+                    backup.unlink(missing_ok=True)
 
-        sys.path.insert(0, str(SRC))
-        try:
-            new_path = self._run_data(skill, args, save, body.get("kwargs_override"))
-        except Exception as e:
-            self._respond(500, str(e))
-            return
+            threading.Thread(target=_restore_on_failure, daemon=True).start()
+        else:
+            analyses = _extract_analyses(current)
+            target.unlink(missing_ok=True)
+            kwargs_override = body.get("kwargs_override")
 
-        if analyses and new_path:
-            new_content = Path(new_path).read_text()
-            new_content = _reinject_analyses(new_content, analyses)
-            Path(new_path).write_text(new_content)
+            def _run_in_thread():
+                sys.path.insert(0, str(SRC))
+                try:
+                    log.append(f"Regenerating {skill} report…")
+                    new_path = self._run_data(skill, args, save, kwargs_override)
+                    if analyses and new_path:
+                        new_content = Path(new_path).read_text()
+                        new_content = _reinject_analyses(new_content, analyses)
+                        Path(new_path).write_text(new_content)
+                    log.append(f"Done.")
+                except Exception as e:
+                    log.append(f"Error: {e}")
+                finally:
+                    entry["done"] = True
 
-        self._respond(200, "ok")
+            threading.Thread(target=_run_in_thread, daemon=True).start()
+
+        _json_response(self, {"job_id": job_id}, 202)
 
     def _run_data(self, skill, args, save, kwargs_override=None):
         if skill == "player-stats":
@@ -579,14 +622,6 @@ class Handler(SimpleHTTPRequestHandler):
             return path
 
         raise ValueError(f"Unknown skill: {skill}")
-
-    def _run_full(self, skill, args):
-        cmd = ["claude", "-p", f"/{skill} {args}"]
-        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
-        if proc.returncode != 0:
-            self._respond(500, proc.stderr or "claude CLI failed")
-        else:
-            self._respond(200, "ok")
 
     def _respond(self, code, body):
         payload = body.encode()
