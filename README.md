@@ -267,3 +267,23 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 - ⚡ Elite work ethic
 - 🧠 High IQ
 - 💰 Demanding / above-slot bonus risk
+
+---
+
+## Contributing
+
+Contributions are welcome. Only the repo owner can merge PRs.
+
+Complete the [Setup](#setup) steps at the top of this document before contributing.
+
+### Workflow
+
+1. Create a branch from `main`:
+   ```bash
+   git checkout -b feat/your-feature
+   ```
+2. Make your changes and commit them — direct commits to `main` are blocked.
+3. Push your branch and open a pull request against `main`.
+4. The repo owner ([@rwalker123](https://github.com/rwalker123)) reviews and merges all PRs.
+
+Branches are automatically deleted after a PR is merged.
