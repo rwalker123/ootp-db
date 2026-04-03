@@ -2,6 +2,10 @@
 
 Turn your OOTP Baseball 27 save into a full analytics suite. OOTP Analyst imports your data, computes advanced metrics, and puts AI-driven scouting tools at your fingertips.
 
+AI features run locally through [Claude](https://claude.ai) — no data leaves your machine. The project currently depends on Claude, but could be adapted to work with your preferred LLM. PRs welcome!
+
+OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. It has not been tested with the Steam version or on Windows. Pull requests adding support for either are very welcome.
+
 ## Prerequisites
 
 - [Python 3.11+](https://www.python.org/downloads/)
