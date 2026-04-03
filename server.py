@@ -337,6 +337,15 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, run_all_checks())
         elif self.path == "/saves":
             _json_response(self, get_saves_data())
+        elif self.path == "/git-status":
+            status_file = ROOT / ".update-status"
+            result = {"updates_available": False}
+            if status_file.exists():
+                try:
+                    result = json.loads(status_file.read_text())
+                except (OSError, json.JSONDecodeError):
+                    pass
+            _json_response(self, result)
         elif self.path == "/reports/jobs":
             _json_response(self, get_jobs_data())
         elif self.path.startswith("/reports/jobs/") and self.path.endswith("/stream"):

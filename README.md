@@ -54,9 +54,13 @@ sudo -u postgres createuser --superuser $USER
 
 ## Setup
 
+Download and unzip: `https://github.com/rwalker123/ootp-db/archive/refs/heads/main.zip`
+
+> If you plan to contribute to the project, see [Contributing](#contributing) below for the fork-and-clone workflow instead.
+
 ```bash
-# Clone and enter the project
-cd ootp-db
+# Enter the unzipped directory
+cd ootp-db-main
 
 # Create a virtual environment
 python3 -m venv .venv
@@ -64,9 +68,6 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Activate git hooks (blocks direct commits to main, scans for secrets)
-pre-commit install
 
 # Configure environment
 cp .env.example .env
@@ -274,16 +275,28 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 
 Contributions are welcome. Only the repo owner can merge PRs.
 
-Complete the [Setup](#setup) steps at the top of this document before contributing.
-
 ### Workflow
 
-1. Create a branch from `main`:
+1. Fork the repo: `https://github.com/rwalker123/ootp-db/fork` — creates your own copy, no need to be added as a collaborator.
+2. Clone your fork:
+   ```bash
+   git clone https://github.com/<your-username>/ootp-db.git
+   cd ootp-db
+   ```
+3. Complete the [Setup](#setup) steps above (venv, pip install, .env), then also activate git hooks:
+   ```bash
+   pre-commit install
+   ```
+4. Create a branch from `main`:
    ```bash
    git checkout -b feat/your-feature
    ```
-2. Make your changes and commit them — direct commits to `main` are blocked.
-3. Push your branch and open a pull request against `main`.
-4. The repo owner ([@rwalker123](https://github.com/rwalker123)) reviews and merges all PRs.
+5. Make your changes and commit them — direct commits to `main` are blocked.
+6. Push to your fork:
+   ```bash
+   git push origin feat/your-feature
+   ```
+7. Open a pull request against `rwalker123/ootp-db main`.
+8. The repo owner ([@rwalker123](https://github.com/rwalker123)) reviews and merges all PRs.
 
 Branches are automatically deleted after a PR is merged.
