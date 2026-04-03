@@ -274,24 +274,7 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 
 Contributions are welcome. Only the repo owner can merge PRs.
 
-### Setup
-
-```bash
-# Clone the repo
-git clone https://github.com/rwalker123/ootp-db.git
-cd ootp-db
-
-# Create a virtual environment and install dependencies
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Activate git hooks (blocks direct commits to main, scans for secrets)
-pre-commit install
-
-# Configure environment
-cp .env.example .env
-```
+Complete the [Setup](#setup) steps at the top of this document before contributing.
 
 ### Workflow
 
