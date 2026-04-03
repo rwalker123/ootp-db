@@ -120,9 +120,14 @@ The report appears inline below the query field and includes a small toolbar in 
 
 > **Tip:** The AI will naturally frame reports around your team when it knows who you manage. In the screenshot above, it calls out the Tigers specifically in the summary — because that context lives in Claude's memory. Tell Claude which team you manage once and it will color-code its analysis accordingly from that point on.
 
-### Database Report
+### Pre-Built Reports
 
-At the bottom of the page, the **Database Report** panel shows the live log output from the most recent import run. It streams in real time as the import progresses — useful for tracking which tables are loading and catching any warnings. You can collapse, expand, copy, and close the panel as you wish. The log data is not persisted and stored in memory, restarting the server will clear any that you haven't closed. A cost estimate for any AI operations run during the session appears at the bottom of the page.
+![OOTP Analyst Pre-Built Reports](docs/screenshots/OOTP%20Analyst%20PreBuilt.png)
+
+Below the query field, the UI surfaces all previously generated reports organized by type — Draft Targets, Free Agents, IFA Targets, Player Reports, and Rating Reports. Each entry shows the report name, when it was generated, and an **Open** button to relaunch it in your browser.
+
+Reports are saved as HTML files on disk, so they persist across sessions. When you re-import a save, any report older than the import is flagged as out of date, giving you a clear signal of what's stale and worth regenerating. More report types are on the way — give the existing ones a try.
+
 
 ## Under the Hood
 
