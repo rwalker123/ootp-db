@@ -93,6 +93,7 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
 
 5. Export your data: click **Database Tools > Export CSV Files**. Do not use the MySQL export option.
 6. Click **Import** next to a save to load it into the database.
+7. Note that in my research, it appears advanced analytic stats are only for the current season. When you import data, previous season advanced analytics are not overwritten. Theoretically, this can give you a long term analysis that the AI can use to evaluate trends in your players.
 
 That's it. You can refresh your import at any time to get the latest save data.
 
