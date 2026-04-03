@@ -112,7 +112,7 @@ ootp-db/
 ```
 
 ## import.py Behavior
-- Accept a save name or path as a CLI argument (e.g. `Tigers-2026-CBL` or `/path/to/Tigers-2026-CBL.lg`)
+- Accept a save name or path as a CLI argument (e.g. `My-Save-2026` or `/path/to/My-Save-2026.lg`)
 - Resolve the `.lg` directory via: (1) direct path arg, (2) auto-discovery in known OOTP macOS
   locations (`~/Library/Containers/com.ootpdevelopments.ootp*` and
   `~/Library/Application Support/Out of the Park Developments/OOTP Baseball *`),
@@ -154,14 +154,14 @@ cp .env.example .env
 ./import.sh list
 
 # Import by save name (auto-discovered)
-./import.sh Tigers-2026-CBL
+./import.sh My-Save-2026
 
 # Or import by full path to the .lg directory
-./import.sh /path/to/Tigers-2026-CBL.lg
+./import.sh /path/to/My-Save-2026.lg
 ```
 
 ## Re-running After a Sim
-Just run `./import.sh Tigers-2026-CBL` again. All tables are dropped and recreated, so the 
+Just run `./import.sh My-Save-2026` again. All tables are dropped and recreated, so the 
 database always reflects the current state of the OOTP save.
 
 ## saves.json
@@ -177,7 +177,7 @@ imports don't change it (it will be switchable from the web UI in the future).
 - Do not use the MySQL export — it generates MySQL-specific SQL that is not compatible 
   with PostgreSQL
 - The script auto-creates the database if needed; no manual `createdb` step required
-- Database name is derived from the save name (lowercase, hyphens/spaces → underscores): `Tigers-2026-CBL` → `tigers_2026_cbl`, `Restore the Roar` → `restore_the_roar`
+- Database name is derived from the save name (lowercase, hyphens/spaces → underscores): `My-Save-2026` → `my_save_2026`, `Restore the Roar` → `restore_the_roar`
 
 ## Database Schema Overview
 
@@ -241,6 +241,7 @@ The OOTP CSV export produces 71 tables. Below is the structure organized by doma
 | `players_batting` (136K) | `player_id` | team_id, league_id | Batting ratings (overall/vsR/vsL/talent), running ratings |
 | `players_pitching` (136K) | `player_id` | team_id, league_id | Pitching ratings (stuff/movement/control), pitch repertoire ratings |
 | `players_fielding` (136K) | `player_id` | team_id, league_id | Fielding ratings by position, experience by position |
+| `players_scouted_ratings` (45K) | `player_id, scouting_team_id` | scouting_coach_id, scouting_accuracy | Per-scout view of all ratings across all four tiers (overall/vsR/vsL/talent) for batting, pitching, and fielding. `scouting_team_id=0` with `scouting_coach_id=-1` = ground-truth true ratings; `scouting_team_id=N` = team N's scout view. Only present when "Additional complete scouted ratings" is enabled in OOTP export settings. |
 | `players_value` (14K) | `player_id` | team_id, league_id | Computed player values (offensive, pitching, overall, by position) |
 | `players_contract` (14K) | `player_id` | team_id, league_id | Current contract details and salary by year |
 | `players_contract_extension` (14K) | `player_id` | team_id, league_id | Extension offer details |
@@ -260,10 +261,12 @@ depending on scout accuracy. The CSV values will generally be close to your team
 view but may differ by 5 points on individual ratings.
 
 **`players_batting`** — Batting & running ratings:
-- `batting_ratings_overall_*` — Current ability (overall). **Exported as zeros** — OOTP 
-  suppresses current batting ability in the CSV export.
-- `batting_ratings_vsr_*` / `batting_ratings_vsl_*` — Current vs RHP/LHP. **Also zeros.**
-- `batting_ratings_talent_*` — Potential/talent ceiling. **These have real values.**
+- `batting_ratings_overall_*` — Current ability (overall). **Exported as zeros by default.**
+  When "Additional complete scouted ratings" is enabled in OOTP export settings, these have
+  real values — but prefer `players_scouted_ratings` (scouting_team_id=0) as the authoritative
+  source, as `players_batting` may reflect a slightly scout-adjusted view.
+- `batting_ratings_vsr_*` / `batting_ratings_vsl_*` — Current vs RHP/LHP. Same as above.
+- `batting_ratings_talent_*` — Potential/talent ceiling. **Always have real values.**
 - Rating categories: `contact`, `gap`, `eye`, `strikeouts` (avoid K), `hp` (HBP tendency), 
   `power`, `babip`
 - `batting_ratings_misc_*` — `bunt`, `bunt_for_hit`, `gb_hitter_type`, `fb_hitter_type`
@@ -271,7 +274,9 @@ view but may differ by 5 points on individual ratings.
 - All ratings are on the 20-80 scouting scale
 
 **`players_pitching`** — Pitching ratings (stuff/movement/control) and pitch repertoire. 
-  Same four tiers (overall/vsR/vsL/talent); overall/vsR/vsL may also be zeroed out.
+  Same four tiers (overall/vsR/vsL/talent); overall/vsR/vsL are zeros by default but have
+  real values when "Additional complete scouted ratings" is enabled. Prefer
+  `players_scouted_ratings` (scouting_team_id=0) as the authoritative source for current ratings.
 
 **`players_fielding`** — Fielding ratings:
 - General: `infield_range`, `infield_arm`, `turn_doubleplay`, `infield_error`, 
@@ -360,6 +365,7 @@ view but may differ by 5 points on individual ratings.
 - `role`: 11=Starting Pitcher, 12=Relief Pitcher, 13=Closer
 - `bats`/`throws`: 1=Right, 2=Left, 3=Switch (batting only)
 - `game_type`: 0=regular season, 2=spring training, 3=playoffs, 4=all-star, 8=futures game
+- `scouting_team_id` (in `players_scouted_ratings`): 0 = ground-truth true ratings (coach_id=-1), N = team N's scout view
 
 #### Foreign Key Conventions
 - `games.home_team` / `games.away_team`: These are team_ids (not named with `_id` suffix)
@@ -574,7 +580,7 @@ or comparing players.**
 
 Run after import to compute advanced stats:
 ```bash
-.venv/bin/python3 src/analytics.py Tigers-2026-CBL
+.venv/bin/python3 src/analytics.py My-Save-2026
 ```
 
 Produces two tables with overall + vs LHP/RHP splits:

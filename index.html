@@ -347,7 +347,7 @@ function renderSaves(data) {
           ${discoveredRows.length ? `<table>${thead}${discoveredRows.join('')}</table>` : ''}
           <div class="save-import-form">
             <label>Import by name or path:</label>
-            <input type="text" id="save-input" placeholder="e.g. Tigers-2026-CBL or /path/to/Save.lg">
+            <input type="text" id="save-input" placeholder="e.g. My-Save-2026 or /path/to/Save.lg">
             <button class="btn-action" onclick="importFromInput()">Import</button>
           </div>
         </details>`
@@ -385,7 +385,7 @@ function renderSaves(data) {
   if (!hasImported) {
     el.innerHTML += `<div class="save-import-form" style="margin-top:12px">
       <label>Import by name or path:</label>
-      <input type="text" id="save-input" placeholder="e.g. Tigers-2026-CBL or /path/to/Save.lg">
+      <input type="text" id="save-input" placeholder="e.g. My-Save-2026 or /path/to/Save.lg">
       <button class="btn-action" onclick="importFromInput()">Import</button>
     </div>`;
   }

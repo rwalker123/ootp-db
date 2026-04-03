@@ -274,6 +274,20 @@ def fetch_batter_data(conn, player_id, common=None):
         dict(pid=player_id)).fetchone()
     data["advanced"] = dict(zip(row._fields, row)) if row else None
 
+    # Current (ground-truth) batting ratings from players_scouted_ratings.
+    # Only present when "Additional complete scouted ratings" is enabled in OOTP export.
+    try:
+        sr = conn.execute(text(
+            "SELECT batting_ratings_overall_contact, batting_ratings_overall_gap, "
+            "batting_ratings_overall_power, batting_ratings_overall_eye, "
+            "batting_ratings_overall_strikeouts, batting_ratings_overall_babip "
+            "FROM players_scouted_ratings "
+            "WHERE player_id = :pid AND scouting_team_id = 0"),
+            dict(pid=player_id)).fetchone()
+        data["scouted_bat"] = sr
+    except Exception:
+        data["scouted_bat"] = None
+
     # Career batting overall
     data["career_overall"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
@@ -401,6 +415,20 @@ def fetch_pitcher_data(conn, player_id, common=None):
             "ORDER BY year DESC"), dict(pid=player_id)).fetchall()
     except Exception:
         data["pitch_adv_history"] = []
+
+    # Current (ground-truth) pitching ratings from players_scouted_ratings.
+    # Only present when "Additional complete scouted ratings" is enabled in OOTP export.
+    try:
+        sr_p = conn.execute(text(
+            "SELECT pitching_ratings_overall_stuff, pitching_ratings_overall_movement, "
+            "pitching_ratings_overall_control, pitching_ratings_overall_hra, "
+            "pitching_ratings_overall_pbabip "
+            "FROM players_scouted_ratings "
+            "WHERE player_id = :pid AND scouting_team_id = 0"),
+            dict(pid=player_id)).fetchone()
+        data["scouted_pit"] = sr_p
+    except Exception:
+        data["scouted_pit"] = None
 
     return data
 
@@ -569,11 +597,17 @@ def generate_batter_section_html(data):
     field_labels = [("IF Range", 0), ("IF Arm", 1), ("Turn DP", 2), ("IF Error", 3),
                     ("OF Range", 4), ("OF Arm", 5), ("OF Error", 6)]
 
-    # Batting Talent Ratings
-    html += '<h2>Batting Talent Ratings</h2><div class="ratings-grid">'
-    html += '<table><tr><th colspan="2">Batting</th></tr>'
-    for label, idx in bat_labels:
-        html += f'<tr><td class="left">{label}</td>{rating_td(br[idx])}</tr>'
+    # Batting Ratings — show Current (scouted) alongside Potential when available
+    sr_b = data.get("scouted_bat")
+    html += '<h2>Batting Ratings</h2><div class="ratings-grid">'
+    if sr_b is not None:
+        html += '<table><tr><th>Batting</th><th>Cur</th><th>Pot</th></tr>'
+        for label, idx in bat_labels:
+            html += f'<tr><td class="left">{label}</td>{rating_td(sr_b[idx])}{rating_td(br[idx])}</tr>'
+    else:
+        html += '<table><tr><th colspan="2">Batting (Potential)</th></tr>'
+        for label, idx in bat_labels:
+            html += f'<tr><td class="left">{label}</td>{rating_td(br[idx])}</tr>'
     html += '</table>'
     html += '<table><tr><th colspan="2">Running</th></tr>'
     for label, idx in run_labels:
@@ -772,13 +806,19 @@ def generate_pitcher_section_html(data):
     lg_pitch = data.get("lg_pitch", {})
     team_abbrs = data["team_abbrs"]
 
-    # Pitching ratings
-    html += '<h2>Pitching Talent Ratings</h2><div class="ratings-grid">'
-    html += '<table><tr><th colspan="2">Ratings</th></tr>'
+    # Pitching ratings — show Current (scouted) alongside Potential when available
+    sr_p = data.get("scouted_pit")
     pitch_labels = [("Stuff", 0), ("Movement", 1), ("Control", 2),
                     ("HR Avoidance", 3), ("BABIP Against", 4)]
-    for label, idx in pitch_labels:
-        html += f'<tr><td class="left">{label}</td>{rating_td(pr[idx])}</tr>'
+    html += '<h2>Pitching Ratings</h2><div class="ratings-grid">'
+    if sr_p is not None:
+        html += '<table><tr><th>Ratings</th><th>Cur</th><th>Pot</th></tr>'
+        for label, idx in pitch_labels:
+            html += f'<tr><td class="left">{label}</td>{rating_td(sr_p[idx])}{rating_td(pr[idx])}</tr>'
+    else:
+        html += '<table><tr><th colspan="2">Ratings (Potential)</th></tr>'
+        for label, idx in pitch_labels:
+            html += f'<tr><td class="left">{label}</td>{rating_td(pr[idx])}</tr>'
     html += '</table>'
 
     html += '<table><tr><th colspan="2">Misc</th></tr>'

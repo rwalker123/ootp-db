@@ -216,8 +216,8 @@ def main():
         print(f"Usage: python {sys.argv[0]} <save_name_or_path>")
         print(f"       python {sys.argv[0]} list")
         print("Examples:")
-        print("  python src/import.py Tigers-2026-CBL")
-        print("  python src/import.py /path/to/Tigers-2026-CBL.lg")
+        print("  python src/import.py My-Save-2026")
+        print("  python src/import.py /path/to/My-Save-2026.lg")
         print("  python src/import.py list")
         sys.exit(1)
 
