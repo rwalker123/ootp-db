@@ -4,7 +4,31 @@ Turn your OOTP Baseball 27 save into a full analytics suite. OOTP Analyst import
 
 AI features run locally through [Claude](https://claude.ai) — no data leaves your machine. The project currently depends on Claude, but could be adapted to work with your preferred LLM. PRs welcome!
 
+**How it works:**
+```
+OOTP CSV export → importer → PostgreSQL → analytics engine → Claude skills + web UI
+```
+OOTP exports your save as CSV files, which the importer loads into a local PostgreSQL database. Each import runs an analytics pipeline on top of the raw data — computing advanced stats like wRC+, FIP, and xFIP, along with composite player ratings. Because advanced stats accumulate across imports rather than being overwritten, you build up a multi-year picture of your players over time. Claude Code skills query that database to generate scouting reports, free agent searches, and draft analyses. A lightweight web UI ties it all together for triggering imports and browsing reports without touching the terminal.
+
 OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. It has not been tested with the Steam version or on Windows. Pull requests adding support for either are very welcome.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Quick Start](#quick-start)
+- [The Web UI](#the-web-ui)
+  - [Saves Table](#saves-table)
+  - [Discovered Saves](#discovered-saves)
+  - [Ad-Hoc Query](#ad-hoc-query)
+  - [Pre-Built Reports](#pre-built-reports)
+- [Manual Usage](#manual-usage)
+- [Claude Code Skills](#claude-code-skills)
+  - [`/player-stats`](#player-stats-first-last)
+  - [`/player-rating`](#player-rating-first-last-focus)
+  - [`/free-agents`](#free-agents-natural-language-criteria)
+  - [`/draft-targets`](#draft-targets-natural-language-criteria)
+- [Contributing](#contributing)
 
 ## Prerequisites
 
@@ -112,7 +136,7 @@ The web UI is the main control panel for managing your saves and running imports
 The top section lists every save that has been imported at least once. Each row shows:
 
 - **Save** — the name of the `.lg` save file, with the active save highlighted in green. The active save is the one all reports query against.
-- **Database** — the PostgreSQL database name derived from the save name (e.g. `Tigers-2026-CBL` → `tigers_2026_cbl`).
+- **Database** — the PostgreSQL database name derived from the save name (e.g. `My-Save-2026` → `my_save_2026`).
 - **Last Import** — the date and time of the most recent successful import.
 - **Refresh** — re-runs the full import pipeline for that save (loads CSVs, recomputes advanced stats and ratings). Use this after each sim to refresh your data.
 - **Set Active** — sets this save as the active save, directing all reports to query its database.
@@ -187,7 +211,27 @@ Just run the same command again. All tables are dropped and recreated, so the da
 
 ## Claude Code Skills
 
-These skills are available when running Claude Code in this project directory. Invoke them with `/skill-name` in the chat prompt.
+Skills are reusable, project-specific Claude Code commands that combine a Python data layer with an LLM analysis layer to produce rich HTML reports. Each skill lives in `.claude/skills/<skill-name>/SKILL.md` — a plain Markdown prompt that defines exactly how Claude should interpret your arguments, query the database, and write its analysis.
+
+Invoke a skill by typing `/skill-name` in the Claude Code chat prompt.
+
+### Customizing a skill
+
+Open its `SKILL.md` and edit freely — adjust the analysis tone, change which stats are highlighted, add a new filter option, or modify the HTML output. Claude reads `SKILL.md` fresh on every invocation, so changes take effect immediately with no restart needed.
+
+### Creating a new skill
+
+Ask Claude to build one for you. A prompt like the following will generate a skill that fits the patterns established in this project:
+
+```
+Create a new Claude Code skill called /team-report that generates an HTML report for a
+given team. Follow the skill architecture in CLAUDE.md exactly: Python entry point in
+src/ handles all DB queries and HTML generation; the agent only parses arguments, writes
+analysis into the <!-- SUMMARY --> placeholder, and opens the report. Use shared_css.py
+for styling and follow the CACHED:/GENERATED: protocol.
+```
+
+The key constraint to include: *"Follow the skill architecture in CLAUDE.md exactly."* This ensures the Python/agent division of responsibility, caching protocol, and visual style are all consistent with the existing skills.
 
 ---
 
