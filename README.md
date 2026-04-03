@@ -87,8 +87,12 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
    This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. The UI shows any remaining pre-requisites (PostgreSQL, etc.) and guides you through setup.
 
 3. The UI auto-discovers OOTP 27 saves. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
-4. Export your data from within OOTP: open your save, go to **Game > Game Settings > Database tab**, and click **Database Tools > Export CSV Files**. Do not use the MySQL export option.
-5. Click **Import** next to a save to load it into the database. 
+4. Before exporting, configure what gets included: go to **Game > Game Settings > Database tab** and click **Database Tools > Configure data export to CSV files**. I Enabled these two options, no guarantee that removing options will work (AI might not be able to find tables it is looking for):
+   - **Additional complete scouted ratings** — required for full player rating reports
+   - **Game logs** — required for play-by-play and game log queries
+
+5. Export your data: click **Database Tools > Export CSV Files**. Do not use the MySQL export option.
+6. Click **Import** next to a save to load it into the database.
 
 That's it. You can refresh your import at any time to get the latest save data.
 
