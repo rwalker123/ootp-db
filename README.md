@@ -1,11 +1,13 @@
-# OOTP Database Importer
+# OOTP Analyst
 
-Import OOTP Baseball 27 CSV data dumps into a local PostgreSQL database. Run it after each sim to keep your database current.
+Turn your OOTP Baseball 27 save into a full analytics suite. OOTP Analyst imports your data, computes advanced metrics, and puts AI-driven scouting tools at your fingertips.
 
 ## Prerequisites
 
-- Python 3.11+
-- PostgreSQL running locally
+- [Python 3.11+](https://www.python.org/downloads/)
+- [PostgreSQL](https://www.postgresql.org/download/) running locally
+- [Claude Code CLI](https://claude.ai/code)
+- [OOTP Baseball 27](https://www.ootpdevelopments.com/out-of-the-park-baseball-home/)
 
 ### Installing Python
 
@@ -70,6 +72,19 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
 ```
 
 > If the importer can't find your OOTP saves automatically, you can add `OOTP_CSV_PATH=` to `.env` pointing to your OOTP installation directory.
+
+## Quick Start
+
+1. Make sure [Python 3.11+](https://www.python.org/downloads/) is installed
+2. Run:
+   ```bash
+   ./web-server.sh
+   ```
+   This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. The UI shows any remaining pre-requisites (PostgreSQL, etc.) and guides you through setup.
+
+3. Once pre-reqs are met, the UI auto-discovers OOTP 27 saves. Click **Import** next to a save to load it into the database. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
+
+That's it. You can refresh you import at any time to get the lastest save data.
 
 ## Exporting CSVs from OOTP
 
