@@ -9,7 +9,7 @@ Computes composite 0-100 ratings for all draft-eligible prospects using:
 - Proximity (college vs HS, age)
 
 Run after import.py:
-    python src/draft_ratings.py Tigers-2026-CBL
+    python src/draft_ratings.py My-Save-2026
 """
 
 import os

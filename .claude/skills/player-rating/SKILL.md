@@ -35,13 +35,14 @@ modifiers (e.g., "defense", "power, discipline").
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from ratings import generate_rating_report
+save_name = json.loads(open("saves.json").read())["active"]
 args = "<FIRST> <LAST>".split()  # substituted from $ARGUMENTS
 first, last = args[0], args[1]
 focus = args[2:] if len(args) > 2 else None
-path, data = generate_rating_report("Tigers-2026-CBL", first, last, focus)
+path, data = generate_rating_report(save_name, first, last, focus)
 if data is None:
     print(f"CACHED:{path}")
 else:
@@ -71,13 +72,15 @@ query to get year-by-year rate stats. Use `dict()` not `{}` for params:
 
 ```bash
 cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import os
 load_dotenv(".env")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/tigers_2026_cbl")
+save_name = json.loads(open("saves.json").read())["active"]
+db_name = save_name.lower().replace(" ", "_").replace("-", "_")
+engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db_name)
 
 def safe_div(n, d):
     return n / d if d and d > 0 else None

@@ -26,10 +26,11 @@ Generate an OOTP player report for **$ARGUMENTS** using `src/report.py` in `/Use
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from report import generate_player_report
-path, data = generate_player_report("Tigers-2026-CBL", "<FIRST>", "<LAST>")
+save_name = json.loads(open("saves.json").read())["active"]
+path, data = generate_player_report(save_name, "<FIRST>", "<LAST>")
 
 if data is None:
     print(f"CACHED:{path}")
@@ -163,7 +164,7 @@ Then print: `~ Model: claude-sonnet-4-6 | ~8–15K in / ~3–6K out | est. 7–1
 - Use `.venv/bin/python3` with sqlalchemy and heredoc syntax
 - MLB league_id = 203, level_id = 1
 - The current sim season is 2028
-- Database: tigers_2026_cbl
+- Database: read active save from saves.json and derive db name (lowercase, hyphens/spaces → underscores)
 
 ### Stats reference bands
 | Hitting | Good | Average | Poor |

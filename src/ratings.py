@@ -9,7 +9,7 @@ Computes composite 0-100 ratings for all MLB players by combining:
 - Career trajectory trends
 
 Run after analytics.py:
-    python src/ratings.py Tigers-2026-CBL
+    python src/ratings.py My-Save-2026
 """
 
 import json
@@ -753,7 +753,24 @@ def load_batter_data(engine):
         ORDER BY player_id, year
     """, engine)
 
-    return stats, players, value, batting, fielding, fielding_cur, trend
+    # Ground-truth current batting ratings from players_scouted_ratings.
+    # Only available when "Additional complete scouted ratings" is enabled in OOTP export.
+    try:
+        scouted_bat = pd.read_sql(f"""
+            SELECT player_id,
+                   batting_ratings_overall_contact AS sr_contact,
+                   batting_ratings_overall_power   AS sr_power,
+                   batting_ratings_overall_eye     AS sr_eye,
+                   batting_ratings_overall_gap     AS sr_gap
+            FROM players_scouted_ratings
+            WHERE scouting_team_id = 0
+              AND player_id IN (SELECT player_id FROM batter_advanced_stats)
+        """, engine)
+    except Exception:
+        scouted_bat = pd.DataFrame(
+            columns=["player_id", "sr_contact", "sr_power", "sr_eye", "sr_gap"])
+
+    return stats, players, value, batting, fielding, fielding_cur, trend, scouted_bat
 
 
 def load_pitcher_data(engine):
@@ -788,18 +805,46 @@ def load_pitcher_data(engine):
         ORDER BY player_id, year
     """, engine)
 
-    return stats, players, value, trend
+    # Ground-truth current pitching ratings from players_scouted_ratings.
+    # Only available when "Additional complete scouted ratings" is enabled in OOTP export.
+    try:
+        scouted_pit = pd.read_sql(f"""
+            SELECT player_id,
+                   pitching_ratings_overall_stuff    AS sr_stuff,
+                   pitching_ratings_overall_movement AS sr_movement,
+                   pitching_ratings_overall_control  AS sr_control
+            FROM players_scouted_ratings
+            WHERE scouting_team_id = 0
+              AND player_id IN (SELECT player_id FROM pitcher_advanced_stats)
+        """, engine)
+    except Exception:
+        scouted_pit = pd.DataFrame(
+            columns=["player_id", "sr_stuff", "sr_movement", "sr_control"])
+
+    return stats, players, value, trend, scouted_pit
 
 
 # ---------------------------------------------------------------------------
 # Sub-score calculations: Batters
 # ---------------------------------------------------------------------------
-def score_offense(row, xwoba_pctile):
-    """Offensive production score from wRC+ and xwOBA."""
+def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0):
+    """Offensive production score from wRC+ and xwOBA.
+
+    Blends in OOTP's ground-truth current batting rating for players with thin
+    MLB career stats (< 500 PA): up to 60% OOTP weight at 0 PA, tapering to 0%
+    at 500+ PA. This improves accuracy for prospects and recent callups where
+    small-sample outcome stats are noisy.
+    """
     wrc = row.get("wrc_plus", 100)
     wrc_score = clamp((wrc - 50) * (100 / 120))
     xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else 50
-    return wrc_score * 0.7 + xwoba_score * 0.3
+    stats_score = wrc_score * 0.7 + xwoba_score * 0.3
+
+    if ootp_bat_score is not None and career_pa < 500:
+        ootp_weight = max(0.0, min(0.6, (500 - career_pa) / 500 * 0.6))
+        return stats_score * (1 - ootp_weight) + ootp_bat_score * ootp_weight
+
+    return stats_score
 
 
 def score_contact_quality(row, pctiles):
@@ -1127,7 +1172,7 @@ def get_trend_metrics_pitching(trend_df, cfip):
 # ---------------------------------------------------------------------------
 def compute_batter_ratings(engine):
     """Compute ratings for all position players."""
-    stats, players, value, batting, fielding, fielding_cur, trend = load_batter_data(engine)
+    stats, players, value, batting, fielding, fielding_cur, trend, scouted_bat = load_batter_data(engine)
 
     # Merge all data
     df = stats.merge(players, on="player_id", how="left", suffixes=("", "_p"))
@@ -1135,6 +1180,7 @@ def compute_batter_ratings(engine):
     df = df.merge(batting, on="player_id", how="left")
     df = df.merge(fielding, on="player_id", how="left")
     df = df.merge(fielding_cur, on="player_id", how="left")
+    df = df.merge(scouted_bat, on="player_id", how="left")
 
     # Compute percentile ranks for contact stats
     contact_pctile_cols = ["barrel_pct", "hard_hit_pct", "avg_ev", "xslg", "xwoba"]
@@ -1145,6 +1191,9 @@ def compute_batter_ratings(engine):
 
     # Career trends
     trend_data = get_trend_metrics_batting(trend)
+
+    # Career PA totals (all MLB years) — used for OOTP rating blend threshold
+    career_pa_totals = trend.groupby("player_id")["pa"].sum().to_dict()
 
     results = []
     for idx, row in df.iterrows():
@@ -1164,8 +1213,14 @@ def compute_batter_ratings(engine):
         # Trend
         trend_current, trend_prev = trend_data.get(pid, (None, None))
 
+        # OOTP current batting score for thin-stat blend (20-80 → 0-100)
+        sr_vals = [row.get(c) for c in ("sr_contact", "sr_power", "sr_eye", "sr_gap")]
+        sr_vals = [v for v in sr_vals if v is not None and not pd.isna(v) and v > 0]
+        ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - 20) / 60 * 100) if sr_vals else None
+        career_pa = int(career_pa_totals.get(pid, 0))
+
         # Sub-scores
-        s_offense = score_offense(row, player_pctiles.get("xwoba", 50))
+        s_offense = score_offense(row, player_pctiles.get("xwoba", 50), ootp_bat_score, career_pa)
         s_contact = score_contact_quality(row, player_pctiles)
         s_discipline = score_discipline(row)
         s_defense = score_defense(row, row, pos)
@@ -1244,10 +1299,11 @@ def compute_batter_ratings(engine):
 
 def compute_pitcher_ratings(engine):
     """Compute ratings for all pitchers."""
-    stats, players, value, trend = load_pitcher_data(engine)
+    stats, players, value, trend, scouted_pit = load_pitcher_data(engine)
 
     df = stats.merge(players, on="player_id", how="left", suffixes=("", "_p"))
     df = df.merge(value, on="player_id", how="left")
+    df = df.merge(scouted_pit, on="player_id", how="left")
 
     # Percentile ranks for contact suppression (inverse)
     suppress_cols = ["barrel_pct_against", "hard_hit_pct_against", "avg_ev_against"]
@@ -1268,6 +1324,9 @@ def compute_pitcher_ratings(engine):
         cfip = float(r[1])
 
     trend_data = get_trend_metrics_pitching(trend, cfip)
+
+    # Career IP totals (all MLB years) — used for OOTP rating blend threshold
+    career_ip_totals = trend.groupby("player_id")["ip"].sum().to_dict()
 
     results = []
     for idx, row in df.iterrows():
@@ -1293,6 +1352,19 @@ def compute_pitcher_ratings(engine):
             pot_prev = None
 
         s_run_prev = score_run_prevention(row)
+
+        # Blend OOTP current pitching rating into run prevention for thin-IP pitchers.
+        # Stuff/movement/control are averaged (20-80 → 0-100) and mixed in up to 60%
+        # at 0 IP, tapering to 0% at 100+ career MLB IP.
+        sr_pit_vals = [row.get(c) for c in ("sr_stuff", "sr_movement", "sr_control")]
+        sr_pit_vals = [v for v in sr_pit_vals if v is not None and not pd.isna(v) and v > 0]
+        if sr_pit_vals:
+            ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - 20) / 60 * 100)
+            career_ip = float(career_ip_totals.get(pid, 0))
+            if career_ip < 100:
+                ootp_weight = max(0.0, min(0.6, (100 - career_ip) / 100 * 0.6))
+                s_run_prev = s_run_prev * (1 - ootp_weight) + ootp_pit_score * ootp_weight
+
         s_dominance = score_dominance(row)
         s_suppress = score_contact_suppression(player_pctiles)
         s_command = score_command(row)
@@ -1395,7 +1467,7 @@ def letter_grade(score):
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: python {sys.argv[0]} <save_name>")
-        print("Example: python src/ratings.py Tigers-2026-CBL")
+        print("Example: python src/ratings.py My-Save-2026")
         sys.exit(1)
 
     save_name = sys.argv[1]

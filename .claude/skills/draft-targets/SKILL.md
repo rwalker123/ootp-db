@@ -29,8 +29,8 @@ below to the agent. Do NOT do the work inline in the current conversation.
 ## Prerequisites
 
 The appropriate ratings table must exist:
-- **Draft pool**: `draft_ratings` table — if missing, run `.venv/bin/python3 src/draft_ratings.py Tigers-2026-CBL`
-- **IFA pool**: `ifa_ratings` table — if missing, run `.venv/bin/python3 src/ifa_ratings.py Tigers-2026-CBL`
+- **Draft pool**: `draft_ratings` table — if missing, run `.venv/bin/python3 src/draft_ratings.py <active-save-name>`
+- **IFA pool**: `ifa_ratings` table — if missing, run `.venv/bin/python3 src/ifa_ratings.py <active-save-name>`
 
 ## Agent prompt template
 
@@ -157,13 +157,14 @@ Default limit: 25 results.
 
 ```bash
 cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from draft_targets import generate_draft_targets_report
+save_name = json.loads(open("saves.json").read())["active"]
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"
-path, rows = generate_draft_targets_report("Tigers-2026-CBL", criteria, where, order_by=order_by)
+path, rows = generate_draft_targets_report(save_name, criteria, where, order_by=order_by)
 print(f"GENERATED:{path}")
 print(f"RESULT_COUNT:{len(rows)}")
 for r in rows:
@@ -175,13 +176,14 @@ PYEOF
 
 ```bash
 cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from ifa_targets import generate_ifa_targets_report
+save_name = json.loads(open("saves.json").read())["active"]
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"
-path, rows = generate_ifa_targets_report("Tigers-2026-CBL", criteria, where, order_by=order_by)
+path, rows = generate_ifa_targets_report(save_name, criteria, where, order_by=order_by)
 print(f"GENERATED:{path}")
 print(f"RESULT_COUNT:{len(rows)}")
 for r in rows:

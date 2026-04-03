@@ -9,7 +9,7 @@ Produces two tables:
   - pitcher_advanced_stats: all pitchers with FIP, xFIP, contact quality, etc.
 
 Run after import.py:
-    python src/analytics.py Tigers-2026-CBL
+    python src/analytics.py My-Save-2026
 """
 
 import os
@@ -671,7 +671,7 @@ def archive_to_history(engine, batter_df, pitcher_df, year):
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: python {sys.argv[0]} <save_name>")
-        print("Example: python src/analytics.py Tigers-2026-CBL")
+        print("Example: python src/analytics.py My-Save-2026")
         sys.exit(1)
 
     save_name = sys.argv[1]

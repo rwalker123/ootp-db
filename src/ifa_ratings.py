@@ -9,7 +9,7 @@ Computes composite 0-100 ratings for all international amateur free agent prospe
 - Age (16=prime, 20=late)
 
 Run after import.py:
-    python src/ifa_ratings.py Tigers-2026-CBL
+    python src/ifa_ratings.py My-Save-2026
 """
 
 import os

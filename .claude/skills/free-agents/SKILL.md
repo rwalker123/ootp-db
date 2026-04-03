@@ -94,14 +94,15 @@ Using the WHERE clause, JOIN clause, order_by, and highlight from Step 1:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys
+import sys, json
 sys.path.insert(0, "src")
 from free_agents import generate_free_agents_report
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 join = "<AGENT_FILLS_IN_JOIN_CLAUSE_IF_NEEDED>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 highlight = <AGENT_FILLS_IN_HIGHLIGHT_OR_NONE>
-path, rows = generate_free_agents_report("Tigers-2026-CBL", criteria, where, join,
+save_name = json.loads(open("saves.json").read())["active"]
+path, rows = generate_free_agents_report(save_name, criteria, where, join,
     highlight=highlight)
 print(f"GENERATED:{path}")
 print(f"RESULT_COUNT:{len(rows)}")
