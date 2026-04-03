@@ -35,6 +35,7 @@ _OOTP_SEARCH = [
 
 _running_imports: dict = {}  # save_name -> {"proc": Popen, "log": [str]}
 _running_jobs: dict = {}    # job_id -> {"proc": Popen, "log": [str], "skill": str, "args": str}
+_jobs_lock = threading.Lock()
 
 
 def _stream_output(proc, log):
@@ -80,8 +81,10 @@ def _job_is_running(entry):
 
 
 def get_jobs_data():
+    with _jobs_lock:
+        snapshot = list(_running_jobs.items())
     jobs = {}
-    for job_id, entry in _running_jobs.items():
+    for job_id, entry in snapshot:
         jobs[job_id] = {
             "skill": entry["skill"],
             "args": entry["args"],
@@ -431,7 +434,8 @@ class Handler(SimpleHTTPRequestHandler):
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         threading.Thread(target=_stream_output, args=(proc, log), daemon=True).start()
-        _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
+        with _jobs_lock:
+            _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
         _json_response(self, {"job_id": job_id}, 202)
 
     def _handle_job_stream(self, job_id):
@@ -474,8 +478,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _handle_clear_job(self, body):
         job_id = body.get("job_id", "").strip()
-        if job_id in _running_jobs:
-            del _running_jobs[job_id]
+        with _jobs_lock:
+            _running_jobs.pop(job_id, None)
         self._respond(200, "ok")
 
     def _handle_clear_log(self, body):
@@ -518,9 +522,13 @@ class Handler(SimpleHTTPRequestHandler):
         job_id = f"refresh-{int(time.time() * 1000)}"
         log = []
         entry = {"skill": skill, "args": args, "log": log, "proc": None, "done": False, "file_path": file_path}
-        _running_jobs[job_id] = entry
+        with _jobs_lock:
+            _running_jobs[job_id] = entry
 
         if mode == "full":
+            # Back up the report; restore it if Claude fails so the file isn't lost
+            backup = target.with_suffix(".bak")
+            shutil.copy2(target, backup)
             target.unlink()  # force cache miss so the skill regenerates
             cmd = ["claude", "-p", f"/{skill} {args}"]
             proc = subprocess.Popen(
@@ -529,10 +537,19 @@ class Handler(SimpleHTTPRequestHandler):
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
             entry["proc"] = proc
-            threading.Thread(target=_stream_output, args=(proc, log), daemon=True).start()
+
+            def _restore_on_failure():
+                _stream_output(proc, log)
+                if proc.returncode != 0 and not target.exists() and backup.exists():
+                    shutil.move(str(backup), str(target))
+                    log.append("Error: Claude job failed — original report restored.")
+                else:
+                    backup.unlink(missing_ok=True)
+
+            threading.Thread(target=_restore_on_failure, daemon=True).start()
         else:
             analyses = _extract_analyses(current)
-            target.unlink()
+            target.unlink(missing_ok=True)
             kwargs_override = body.get("kwargs_override")
 
             def _run_in_thread():

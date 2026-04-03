@@ -581,8 +581,15 @@ async function refreshReport(filePath, mode, kwargsEncoded) {
     if (html) {
       const meta = extractMeta(html);
       const row = document.getElementById('row-' + CSS.escape(filePath));
-      if (row && meta.ts) row.querySelector('.ts').textContent = meta.ts;
-      if (row) row.querySelector('.stale-cell').innerHTML = '';
+      if (row) {
+        const tsCell = row.querySelector('.ts');
+        const staleCell = row.querySelector('.stale-cell');
+        const previousTs = tsCell ? tsCell.textContent : '';
+        if (meta.ts) {
+          if (tsCell) tsCell.textContent = meta.ts;
+          if (staleCell && meta.ts !== previousTs) staleCell.innerHTML = '';
+        }
+      }
     }
   });
 }
@@ -886,7 +893,7 @@ function listenToJob(jobId, onDone) {
     es.close();
     delete _activeStreams[jobId];
     _markJobDone(jobId);
-    if (onDone) onDone();
+    if (!onDone) reloadReports();
   };
 }
 
