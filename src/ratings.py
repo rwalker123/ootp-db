@@ -1192,6 +1192,9 @@ def compute_batter_ratings(engine):
     # Career trends
     trend_data = get_trend_metrics_batting(trend)
 
+    # Career PA totals (all MLB years) — used for OOTP rating blend threshold
+    career_pa_totals = trend.groupby("player_id")["pa"].sum().to_dict()
+
     results = []
     for idx, row in df.iterrows():
         pid = row["player_id"]
@@ -1214,7 +1217,7 @@ def compute_batter_ratings(engine):
         sr_vals = [row.get(c) for c in ("sr_contact", "sr_power", "sr_eye", "sr_gap")]
         sr_vals = [v for v in sr_vals if v is not None and not pd.isna(v) and v > 0]
         ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - 20) / 60 * 100) if sr_vals else None
-        career_pa = int(row.get("pa", 0) or 0)
+        career_pa = int(career_pa_totals.get(pid, 0))
 
         # Sub-scores
         s_offense = score_offense(row, player_pctiles.get("xwoba", 50), ootp_bat_score, career_pa)
@@ -1322,6 +1325,9 @@ def compute_pitcher_ratings(engine):
 
     trend_data = get_trend_metrics_pitching(trend, cfip)
 
+    # Career IP totals (all MLB years) — used for OOTP rating blend threshold
+    career_ip_totals = trend.groupby("player_id")["ip"].sum().to_dict()
+
     results = []
     for idx, row in df.iterrows():
         pid = row["player_id"]
@@ -1354,7 +1360,7 @@ def compute_pitcher_ratings(engine):
         sr_pit_vals = [v for v in sr_pit_vals if v is not None and not pd.isna(v) and v > 0]
         if sr_pit_vals:
             ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - 20) / 60 * 100)
-            career_ip = float(row.get("ip", 0) or 0)
+            career_ip = float(career_ip_totals.get(pid, 0))
             if career_ip < 100:
                 ootp_weight = max(0.0, min(0.6, (100 - career_ip) / 100 * 0.6))
                 s_run_prev = s_run_prev * (1 - ootp_weight) + ootp_pit_score * ootp_weight
