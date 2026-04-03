@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OOTP Reports</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+         font-size: 13px; background: #f5f5f5; color: #222; }
+  .container { max-width: 1000px; margin: 24px auto; background: #fff;
+               border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); overflow: hidden; }
+
+  .page-header { background: #1a1a2e; color: #fff; padding: 20px 24px; }
+  .page-title { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .active-save { font-size: 12px; color: #aaa; margin-top: 6px; }
+
+  .section { padding: 16px 24px; border-top: 1px solid #eee; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                   letter-spacing: 0.8px; color: #555; margin-bottom: 10px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { background: #2c2c3e; color: #fff; padding: 7px 10px; text-align: center;
+       font-size: 11px; font-weight: 600; text-transform: uppercase;
+       letter-spacing: 0.5px; white-space: nowrap; }
+  td { padding: 6px 10px; text-align: center; vertical-align: middle;
+       white-space: nowrap; border-bottom: 1px solid #eee; }
+  tr:nth-child(even) td { background: #f9f9f9; }
+  tr:hover td { background: #f0f4f8; }
+  .left { text-align: left; }
+
+  a { color: #2266cc; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .stale { color: #cc7700; font-weight: bold; font-size: 12px; }
+  .ts { color: #888; }
+  .empty { color: #aaa; font-style: italic; }
+
+  .badge-oa  { display: inline-block; padding: 2px 8px; border-radius: 4px;
+               background: #2266cc; color: white; font-weight: bold; font-size: 12px; }
+  .badge-pot { display: inline-block; padding: 2px 8px; border-radius: 4px;
+               background: #228844; color: white; font-weight: bold; font-size: 12px; }
+  .badge-active { display: inline-block; padding: 1px 7px; border-radius: 10px;
+                  background: #d4edda; color: #155724; font-size: 11px;
+                  font-weight: 600; margin-left: 6px; vertical-align: middle; }
+
+  /* Status panel */
+  .status-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 24px;
+                border-top: 1px solid #eee; align-items: center; }
+  .status-bar-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+                      letter-spacing: 0.8px; color: #555; margin-right: 4px; }
+  .status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
+                 border-radius: 20px; font-size: 11px; font-weight: 600; cursor: default; }
+  .status-pill.ok  { background: #d4edda; color: #155724; }
+  .status-pill.err { background: #f8d7da; color: #721c24; cursor: pointer; }
+  .status-pill.err:hover { background: #f5c2c7; }
+
+  .status-detail { display: none; padding: 10px 24px 14px;
+                   border-top: 1px solid #eee; background: #fafafa; }
+  .status-detail.open { display: block; }
+  .status-detail table { font-size: 12px; }
+  .status-detail td { padding: 4px 10px; text-align: left; border-bottom: 1px solid #eee; }
+  .status-detail td:first-child { font-weight: 600; white-space: nowrap; }
+  .fix-hint { color: #856404; font-family: monospace; font-size: 11px;
+              background: #fff3cd; padding: 2px 6px; border-radius: 3px; }
+
+  /* Action buttons */
+  .btn-delete { background: none; border: 1px solid #ddd; border-radius: 4px;
+                color: #aaa; font-size: 11px; padding: 2px 8px; cursor: pointer; line-height: 1.4; }
+  .btn-delete:hover { border-color: #e74c3c; color: #e74c3c; background: #fff5f5; }
+
+  .btn-action { background: none; border: 1px solid #2266cc; border-radius: 4px;
+                color: #2266cc; font-size: 11px; padding: 2px 8px; cursor: pointer;
+                line-height: 1.4; margin-left: 4px; }
+  .btn-action:hover { background: #e8f0ff; }
+  .btn-action:disabled { opacity: 0.5; cursor: default; }
+  .btn-action.secondary { border-color: #888; color: #555; }
+  .btn-action.secondary:hover { background: #f0f0f0; border-color: #555; }
+
+  /* Split refresh button */
+  .btn-refresh-wrap { display: inline-flex; border-radius: 4px; overflow: hidden;
+                      border: 1px solid #2266cc; }
+  .btn-refresh-wrap button { background: none; border: none; cursor: pointer;
+                              font-size: 11px; line-height: 1.4; color: #2266cc; }
+  .btn-refresh      { padding: 2px 8px; }
+  .btn-refresh:hover { background: #e8f0ff; }
+  .btn-refresh-arrow { padding: 2px 6px; border-left: 1px solid #2266cc; }
+  .btn-refresh-arrow:hover { background: #e8f0ff; }
+  .btn-refresh-wrap:disabled, .btn-refresh-wrap.busy button { opacity: 0.5; cursor: default; }
+
+  /* Dropdown */
+  .refresh-menu { position: absolute; background: #fff; border: 1px solid #ccc;
+                  border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                  z-index: 100; min-width: 160px; }
+  .refresh-menu button { display: block; width: 100%; text-align: left; background: none;
+                         border: none; padding: 8px 12px; font-size: 12px; cursor: pointer; }
+  .refresh-menu button:hover { background: #f0f4ff; }
+
+  /* Saves section */
+  .save-not-imported td { color: #888; }
+  .save-import-form { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .save-import-form input { flex: 1; padding: 5px 8px; border: 1px solid #ccc;
+                             border-radius: 4px; font-size: 12px; color: #222; }
+  .save-import-form input:focus { outline: none; border-color: #2266cc; }
+  .save-import-form label { font-size: 11px; color: #666; white-space: nowrap; }
+
+  /* Spinner for running imports */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid #ccc;
+             border-top-color: #2266cc; border-radius: 50%;
+             animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 4px; }
+
+  /* Generate report bar */
+  .generate-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .generate-bar select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px;
+                          font-size: 12px; color: #222; background: #fff; cursor: pointer; }
+  .generate-bar select:focus { outline: none; border-color: #2266cc; }
+  .gen-fields { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
+  .gen-fields input { flex: 1; min-width: 140px; padding: 5px 8px; border: 1px solid #ccc;
+                       border-radius: 4px; font-size: 12px; color: #222; }
+  .gen-fields input:focus { outline: none; border-color: #2266cc; }
+
+  /* Discovered saves collapsible */
+  .discovered-details { margin-top: 10px; }
+  .discovered-details summary { font-size: 11px; color: #2266cc; cursor: pointer;
+                                 padding: 4px 2px; user-select: none; }
+  .discovered-details summary:hover { text-decoration: underline; }
+  .discovered-details table { margin-top: 6px; }
+
+  /* Import log panel */
+  .import-log { margin-top: 12px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+  .import-log-header { background: #2c2c3e; color: #ccc; padding: 5px 10px;
+                       font-size: 11px; font-weight: 600; display: flex;
+                       justify-content: space-between; align-items: center; gap: 8px; }
+  .import-log-header .log-title { color: #7ec8e3; flex: 1; }
+  .import-log-header .log-status { color: #aaa; }
+  .import-log-header .log-controls { display: flex; gap: 4px; }
+  .import-log-header .log-controls button {
+    background: none; border: 1px solid #555; border-radius: 3px; color: #aaa;
+    font-size: 10px; padding: 1px 5px; cursor: pointer; line-height: 1.4; }
+  .import-log-header .log-controls button:hover { border-color: #aaa; color: #fff; }
+  .import-log-body { background: #1e1e1e; color: #d4d4d4; font-family: monospace;
+                     font-size: 11px; padding: 8px 10px; max-height: 220px;
+                     overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .import-log-body.minimized { display: none; }
+  .import-log-body.maximized { min-height: 60vh; max-height: 80vh; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="page-header">
+    <div class="page-title">OOTP Reports</div>
+    <div class="active-save" id="active-save">Loading…</div>
+  </div>
+  <div id="status-bar" class="status-bar"><span style="color:#aaa;font-size:12px">Checking prerequisites…</span></div>
+  <div id="status-detail" class="status-detail"></div>
+  <div id="saves-section" class="section"></div>
+  <div class="section" id="generate-section">
+    <div class="section-title">Generate Report</div>
+    <div class="generate-bar">
+      <select id="gen-skill" onchange="updateGenFields()">
+        <option value="player-stats">Player Stats</option>
+        <option value="player-rating">Player Rating</option>
+        <option value="free-agents">Free Agents</option>
+        <option value="draft-targets">Draft Targets</option>
+      </select>
+      <div id="gen-fields" class="gen-fields"></div>
+      <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
+    </div>
+    <div id="job-logs"></div>
+  </div>
+  <div id="content"></div>
+</div>
+
+<script>
+async function tryFetch(url) {
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.text() : null;
+  } catch(e) { return null; }
+}
+
+function parseSubdirs(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  return [...doc.querySelectorAll('a[href]')]
+    .map(a => a.getAttribute('href'))
+    .filter(h => h.endsWith('/') && !h.startsWith('?') && !h.startsWith('/') && h !== '../');
+}
+
+function parseHtmlLinks(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  return [...doc.querySelectorAll('a[href]')]
+    .map(a => a.getAttribute('href'))
+    .filter(h => h.endsWith('.html') && !h.startsWith('?') && !h.startsWith('/') && !h.startsWith('http'));
+}
+
+function extractMeta(html) {
+  const title  = (html.match(/<title>(.*?)<\/title>/) || [])[1] || null;
+  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || [])[1] || null;
+  const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
+  const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
+  const skill  = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
+  const args   = (html.match(/<meta name="ootp-args" content="([^"]+)"/) || [])[1] || null;
+  const kwargs = (html.match(/<meta name="ootp-kwargs" content="([^"]+)"/) || [])[1] || null;
+  return { title, ts, oa, pot, skill, args, kwargs };
+}
+
+function dirLabel(key) {
+  return key.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.refresh-menu').forEach(m => m.remove());
+});
+
+// ---------------------------------------------------------------------------
+// Saves section
+// ---------------------------------------------------------------------------
+
+let _savePollTimer = null;
+let _lastRunningKey = null;
+
+async function loadSaves() {
+  const r = await fetch('/saves');
+  if (!r.ok) return;
+  const data = await r.json();
+
+  const runningKey = JSON.stringify(data.running);
+  const structureChanged = runningKey !== _lastRunningKey;
+  _lastRunningKey = runningKey;
+
+  if (structureChanged || !document.querySelector('#saves-section .section-title')) {
+    renderSaves(data);
+  } else {
+    updateLogsInPlace(data.logs || {});
+  }
+
+  // Update header
+  const activeEl = document.getElementById('active-save');
+  if (data.active) {
+    const last = data.saves[data.active] && data.saves[data.active].last_import;
+    activeEl.textContent = 'Active save: ' + data.active + (last ? '  •  Last import: ' + last : '');
+  } else {
+    activeEl.textContent = 'No active save';
+  }
+
+  // Poll every 1s while imports are running, stop when done
+  clearTimeout(_savePollTimer);
+  _savePollTimer = data.running.length > 0 ? setTimeout(loadSaves, 1000) : null;
+}
+
+function renderSaves(data) {
+  const el = document.getElementById('saves-section');
+  const { active, saves, discovered, running, logs = {} } = data;
+
+  // Imported saves rows
+  const importedRows = Object.entries(saves).map(([name, info]) => {
+    const isActive = name === active;
+    const isRunning = running.includes(name);
+    const nameCell = isActive
+      ? `★ <strong>${esc(name)}</strong><span class="badge-active">Active</span>`
+      : esc(name);
+    const actions = isRunning
+      ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
+      : buildImportBtn(name, isActive);
+    return `<tr>
+      <td class="left">${nameCell}</td>
+      <td>${esc(info.db_name)}</td>
+      <td class="ts">${info.last_import || '—'}</td>
+      <td>${actions}</td>
+    </tr>`;
+  });
+
+  // Discovered-only rows (not yet imported, but may be running)
+  const discoveredRows = Object.entries(discovered)
+    .filter(([name]) => running.includes(name))  // always show if currently importing
+    .concat(Object.entries(discovered).filter(([name]) => !running.includes(name)))
+    .map(([name]) => {
+      const isRunning = running.includes(name);
+      const actions = isRunning
+        ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
+        : `<button class="btn-action" onclick="importSave(${jsStr(name)})">Import</button>`;
+      return `<tr class="save-not-imported">
+        <td class="left">${esc(name)}</td>
+        <td>—</td>
+        <td class="ts">—</td>
+        <td>${actions}</td>
+      </tr>`;
+    });
+
+  const hasImported = importedRows.length > 0;
+  const thead = `<tr><th class="left">Save</th><th>Database</th><th>Last Import</th><th></th></tr>`;
+
+  // If nothing at all found
+  if (!importedRows.length && !discoveredRows.length) {
+    var table = `<span class="empty">No saves found. Run <code>./import.sh list</code> to discover saves.</span>`;
+  } else if (!hasImported) {
+    // Nothing imported yet — show everything flat
+    var table = `<table>${thead}${discoveredRows.join('')}</table>`;
+  } else {
+    // Imported saves always visible; discovered collapsed unless any are running
+    const runningDiscovered = Object.keys(discovered).filter(n => running.includes(n));
+    const collapsedOpen = runningDiscovered.length > 0 ? ' open' : '';
+    const discoveredSection = discoveredRows.length || true  // always show when imported saves exist
+      ? `<details class="discovered-details"${collapsedOpen}>
+          <summary>${discoveredRows.length} more save${discoveredRows.length !== 1 ? 's' : ''} available to import</summary>
+          ${discoveredRows.length ? `<table>${thead}${discoveredRows.join('')}</table>` : ''}
+          <div class="save-import-form">
+            <label>Import by name or path:</label>
+            <input type="text" id="save-input" placeholder="e.g. Tigers-2026-CBL or /path/to/Save.lg">
+            <button class="btn-action" onclick="importFromInput()">Import</button>
+          </div>
+        </details>`
+      : '';
+    var table = `<table>${thead}${importedRows.join('')}</table>${discoveredSection}`;
+  }
+
+  // Build log panels for any save with output (running or just finished)
+
+  const logPanels = Object.entries(logs).map(([name, lines]) => {
+    if (!lines.length) return '';
+    const id = 'log-' + name.replace(/[^a-z0-9]/gi, '_');
+    const status = running.includes(name) ? 'Importing…' : 'Done';
+    const logText = lines.map(l => colorLogLine(l)).join('\n');
+    return `<div class="import-log" id="logpanel-${id}">
+      <div class="import-log-header">
+        <span class="log-title">${esc(name)}</span>
+        <span class="log-status">${status}</span>
+        <span class="log-controls">
+          <button onclick="logMinimize('${id}')" title="Minimize">−</button>
+          <button onclick="logMaximize('${id}')" title="Maximize">⤢</button>
+          <button onclick="logClose('${id}', ${jsStr(name)})" title="Close"${running.includes(name) ? ' disabled' : ''}>✕</button>
+        </span>
+      </div>
+      <div class="import-log-body" id="${id}">${logText}</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="section-title">Saves</div>
+    ${table}
+    ${logPanels}`;
+
+  // When no imported saves yet, add the import form outside the collapsible
+  if (!hasImported) {
+    el.innerHTML += `<div class="save-import-form" style="margin-top:12px">
+      <label>Import by name or path:</label>
+      <input type="text" id="save-input" placeholder="e.g. Tigers-2026-CBL or /path/to/Save.lg">
+      <button class="btn-action" onclick="importFromInput()">Import</button>
+    </div>`;
+  }
+
+  // Auto-scroll log panels to bottom
+  el.querySelectorAll('.import-log-body').forEach(el => { el.scrollTop = el.scrollHeight; });
+}
+
+function buildImportBtn(name, isActive) {
+  const refreshBtn = `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`;
+  if (isActive) return refreshBtn;
+  return `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>${refreshBtn}`;
+}
+
+function updateLogsInPlace(logs) {
+  for (const [name, lines] of Object.entries(logs)) {
+    if (!lines.length) continue;
+    const id = 'log-' + name.replace(/[^a-z0-9]/gi, '_');
+    const body = document.getElementById(id);
+    if (!body) continue;
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+    body.innerHTML = lines.map(l => colorLogLine(l)).join('\n');
+    if (nearBottom) body.scrollTop = body.scrollHeight;
+  }
+}
+
+function logMinimize(id) {
+  const body = document.getElementById(id);
+  if (!body) return;
+  body.classList.toggle('minimized');
+  body.classList.remove('maximized');
+}
+
+function logMaximize(id) {
+  const body = document.getElementById(id);
+  if (!body) return;
+  body.classList.toggle('maximized');
+  body.classList.remove('minimized');
+  if (!body.classList.contains('minimized')) body.scrollTop = body.scrollHeight;
+}
+
+function logClose(id, saveName) {
+  fetch('/saves/clear-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ save: saveName }),
+  });
+  const panel = document.getElementById('logpanel-' + id);
+  if (panel) panel.remove();
+}
+
+function colorLogLine(raw) {
+  const s = esc(raw);
+  if (/Error:|^error:/i.test(raw))      return `<span style="color:#f47c7c">${s}</span>`;
+  if (/⚠|skipped\s*\(/.test(raw))      return `<span style="color:#f0c060">${s}</span>`;
+  if (/^✓/.test(raw))                   return `<span style="color:#6dbb6d">${s}</span>`;
+  if (/^Done:/.test(raw))               return `<span style="color:#fff;font-weight:bold">${s}</span>`;
+  if (/^Created database:/.test(raw))   return `<span style="color:#7ec8e3">${s}</span>`;
+  if (/^\s+(PK|IX) /.test(raw))        return `<span style="color:#777">${s}</span>`;
+  return s;
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Wrap a string as a single-quoted JS literal safe for use inside onclick="..."
+function jsStr(s) {
+  return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+}
+
+async function importSave(saveName) {
+  const r = await fetch('/saves/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ save: saveName }),
+  });
+  if (r.ok || r.status === 202) {
+    await loadSaves();  // re-render to show spinner, start polling
+  } else {
+    const msg = await r.text();
+    alert('Import failed: ' + msg);
+  }
+}
+
+async function importFromInput() {
+  const input = document.getElementById('save-input');
+  const val = input.value.trim();
+  if (!val) return;
+  input.value = '';
+  await importSave(val);
+}
+
+async function setActive(saveName) {
+  const r = await fetch('/saves/set-active', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ save: saveName }),
+  });
+  if (r.ok) {
+    await loadSaves();
+  } else {
+    const msg = await r.text();
+    alert('Failed to set active save: ' + msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reports section
+// ---------------------------------------------------------------------------
+
+async function refreshReport(filePath, mode, kwargsEncoded) {
+  const wrap = document.querySelector(`[data-refresh="${CSS.escape(filePath)}"]`);
+  if (wrap) wrap.classList.add('busy');
+
+  let kwargs = null;
+  if (kwargsEncoded) {
+    try { kwargs = JSON.parse(kwargsEncoded); } catch(e) {}
+  }
+
+  const r = await fetch('/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: filePath, mode, kwargs_override: kwargs }),
+  });
+
+  if (wrap) wrap.classList.remove('busy');
+
+  if (r.ok) {
+    const html = await tryFetch(filePath);
+    if (html) {
+      const meta = extractMeta(html);
+      const row = document.getElementById('row-' + CSS.escape(filePath));
+      if (row && meta.ts) {
+        row.querySelector('.ts').textContent = meta.ts;
+        row.querySelector('.stale-cell').innerHTML = '';
+        if (wrap) wrap.remove();
+      }
+    }
+  } else {
+    const msg = await r.text();
+    alert('Refresh failed: ' + msg);
+  }
+}
+
+function buildRefreshBtn(filePath, kwargsEncoded) {
+  const escaped = filePath.replace(/'/g, "\\'");
+  const kw = kwargsEncoded ? kwargsEncoded.replace(/'/g, "\\'") : '';
+  return `<span class="btn-refresh-wrap" data-refresh="${CSS.escape(filePath)}">
+    <button class="btn-refresh" onclick="refreshReport('${escaped}','data','${kw}')">↻ Refresh</button>
+    <button class="btn-refresh-arrow" onclick="showRefreshMenu(event,'${escaped}','${kw}')">▾</button>
+  </span>`;
+}
+
+function showRefreshMenu(e, filePath, kwargsEncoded) {
+  e.stopPropagation();
+  document.querySelectorAll('.refresh-menu').forEach(m => m.remove());
+  const btn = e.currentTarget;
+  const menu = document.createElement('div');
+  menu.className = 'refresh-menu';
+  menu.style.cssText = `position:absolute;top:${btn.getBoundingClientRect().bottom + scrollY}px;left:${btn.getBoundingClientRect().left}px`;
+  menu.innerHTML = `
+    <button onclick="document.querySelectorAll('.refresh-menu').forEach(m=>m.remove());refreshReport('${filePath}','data','${kwargsEncoded}')">↻ Data only (fast)</button>
+    <button onclick="document.querySelectorAll('.refresh-menu').forEach(m=>m.remove());refreshReport('${filePath}','full','${kwargsEncoded}')">✦ Data + Analysis (slow)</button>
+  `;
+  document.body.appendChild(menu);
+}
+
+async function buildSection(basePath, dirKey, lastImport) {
+  const listing = await tryFetch(basePath + dirKey);
+  if (!listing) return null;
+
+  const links = parseHtmlLinks(listing);
+  if (links.length === 0) return null;
+
+  const reports = await Promise.all(links.map(async link => {
+    const filename = link.split('/').pop();
+    const html = await tryFetch(basePath + dirKey + filename);
+    const meta = html ? extractMeta(html) : {};
+    return { filename, ...meta };
+  }));
+
+  reports.sort((a, b) => {
+    if (!a.ts && !b.ts) return a.filename.localeCompare(b.filename);
+    if (!a.ts) return 1;
+    if (!b.ts) return -1;
+    return b.ts.localeCompare(a.ts);
+  });
+
+  const showRatings = reports.some(r => r.oa || r.pot);
+  const extraTh = showRatings ? '<th>OA</th><th>POT</th>' : '';
+
+  const rows = reports.map(rpt => {
+    const stale = lastImport && rpt.ts && lastImport > rpt.ts;
+    const staleCell = stale
+      ? `<span class="stale">STALE</span>${rpt.skill ? buildRefreshBtn(basePath + dirKey + rpt.filename, rpt.kwargs) : ''}`
+      : '';
+    const extraTd = showRatings
+      ? `<td>${rpt.oa ? `<span class="badge-oa">${rpt.oa}</span>` : '—'}</td>`
+      + `<td>${rpt.pot ? `<span class="badge-pot">${rpt.pot}</span>` : '—'}</td>`
+      : '';
+    const displayTitle = rpt.title || rpt.filename.replace('.html', '').replace(/[-_]/g, ' ');
+    const filePath = `${basePath}${dirKey}${rpt.filename}`;
+    return `<tr id="row-${CSS.escape(filePath)}">
+      <td class="left"><a href="${filePath}">${displayTitle}</a></td>
+      ${extraTd}
+      <td class="ts">${rpt.ts || '—'}</td>
+      <td class="stale-cell">${staleCell}</td>
+      <td><button class="btn-delete" onclick="deleteReport('${filePath}')">Delete</button></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="section">
+    <div class="section-title">${dirLabel(dirKey.replace(/\/$/, ''))}</div>
+    <table>
+      <tr><th class="left">Report</th>${extraTh}<th>Generated</th><th></th><th></th></tr>
+      ${rows}
+    </table>
+  </div>`;
+}
+
+async function deleteReport(filePath) {
+  const r = await fetch(filePath, { method: 'DELETE' });
+  if (r.ok) {
+    const row = document.getElementById('row-' + CSS.escape(filePath));
+    if (row) row.remove();
+  } else {
+    alert('Delete failed: ' + r.status);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Status checks
+// ---------------------------------------------------------------------------
+
+async function loadStatus() {
+  const bar = document.getElementById('status-bar');
+  const detail = document.getElementById('status-detail');
+
+  const data = await tryFetch('/status');
+  if (!data) {
+    bar.innerHTML = '<span style="color:#aaa;font-size:12px">Status unavailable (not served via web-server.sh?)</span>';
+    return;
+  }
+
+  const checks = JSON.parse(data);
+  const allOk = checks.every(c => c.ok);
+
+  bar.innerHTML = '<span class="status-bar-label">Prerequisites</span>'
+    + checks.map(c => {
+        const cls = c.ok ? 'ok' : 'err';
+        const icon = c.ok ? '✓' : '✗';
+        const tip = c.ok ? '' : ' title="Click for fix"';
+        return `<span class="status-pill ${cls}"${tip} onclick="toggleStatus()">${icon} ${c.name}</span>`;
+      }).join('');
+
+  if (!allOk) {
+    bar.innerHTML += ' <span style="font-size:11px;color:#721c24;margin-left:4px">— click a red item for details</span>';
+  }
+
+  const rows = checks.map(c => {
+    const icon = c.ok ? '<span style="color:#155724">✓</span>' : '<span style="color:#721c24">✗</span>';
+    const fix = c.fix ? `<br><span class="fix-hint">→ ${c.fix}</span>` : '';
+    return `<tr>
+      <td>${icon} ${c.name}</td>
+      <td>${c.detail || '—'}${fix}</td>
+    </tr>`;
+  }).join('');
+
+  detail.innerHTML = `<table>${rows}</table>`;
+
+  if (!allOk) detail.classList.add('open');
+}
+
+function toggleStatus() {
+  document.getElementById('status-detail').classList.toggle('open');
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Generate report
+// ---------------------------------------------------------------------------
+
+const GEN_SKILLS = {
+  'player-stats':  { label: 'Player Stats',  fields: [
+    { id: 'gen-name', placeholder: 'First Last  (e.g. Colt Keith)', required: true },
+  ]},
+  'player-rating': { label: 'Player Rating', fields: [
+    { id: 'gen-name', placeholder: 'First Last  (e.g. Colt Keith)', required: true },
+    { id: 'gen-focus', placeholder: 'Focus: power, defense  (optional)', required: false },
+  ]},
+  'free-agents':   { label: 'Free Agents',   fields: [
+    { id: 'gen-criteria', placeholder: 'e.g. lefty SP under 28, low injury risk', required: true },
+  ]},
+  'draft-targets': { label: 'Draft Targets', fields: [
+    { id: 'gen-criteria', placeholder: 'e.g. high ceiling SS under 20', required: true },
+  ]},
+};
+
+function updateGenFields() {
+  const skill = document.getElementById('gen-skill').value;
+  const def = GEN_SKILLS[skill];
+  document.getElementById('gen-fields').innerHTML = def.fields.map(f =>
+    `<input id="${f.id}" type="text" placeholder="${f.placeholder}"
+      onkeydown="if(event.key==='Enter')generateReport()">`
+  ).join('');
+}
+
+function buildArgs(skill) {
+  const def = GEN_SKILLS[skill];
+  const vals = def.fields.map(f => (document.getElementById(f.id) || {}).value || '');
+  if (def.fields.some((f, i) => f.required && !vals[i].trim())) return null;
+  return vals.map(v => v.trim()).filter(Boolean).join(' ');
+}
+
+let _jobPollTimer = null;
+let _lastJobsKey = null;
+
+async function generateReport() {
+  const skill = document.getElementById('gen-skill').value;
+  const args = buildArgs(skill);
+  if (!args) { alert('Please fill in the required fields.'); return; }
+
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+
+  const r = await fetch('/reports/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skill, args }),
+  });
+
+  btn.disabled = false;
+  if (!r.ok) { alert('Failed to start: ' + await r.text()); return; }
+
+  startJobPolling();
+}
+
+async function startJobPolling() {
+  clearTimeout(_jobPollTimer);
+  const jobs = await fetch('/reports/jobs').then(r => r.ok ? r.json() : {});
+
+  const jobsKey = JSON.stringify(Object.entries(jobs).map(([id, j]) => [id, j.running]));
+  const structureChanged = jobsKey !== _lastJobsKey;
+  const wasRunning = _lastJobsKey !== null && JSON.parse(_lastJobsKey).some(([, r]) => r);
+  _lastJobsKey = jobsKey;
+
+  if (structureChanged) {
+    renderJobLogs(jobs);
+  } else {
+    updateJobLogsInPlace(jobs);
+  }
+
+  const anyRunning = Object.values(jobs).some(j => j.running);
+  if (anyRunning) {
+    _jobPollTimer = setTimeout(startJobPolling, 1500);
+  } else if (wasRunning) {
+    reloadReports();  // only reload when a job just finished
+  }
+}
+
+function updateJobLogsInPlace(jobs) {
+  for (const [jobId, job] of Object.entries(jobs)) {
+    const id = 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
+    const body = document.getElementById(id);
+    if (!body) continue;
+    const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+    body.innerHTML = job.log.map(l => colorLogLine(l)).join('\n') || '<span style="color:#666">Running…</span>';
+    if (nearBottom) body.scrollTop = body.scrollHeight;
+  }
+}
+
+function renderJobLogs(jobs) {
+  const el = document.getElementById('job-logs');
+  const panels = Object.entries(jobs).map(([jobId, job]) => {
+    const id = 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
+    const status = job.running ? 'Running…' : 'Done';
+    const logText = job.log.map(l => colorLogLine(l)).join('\n');
+    const label = `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
+    return `<div class="import-log" id="logpanel-${id}">
+      <div class="import-log-header">
+        <span class="log-title">${label}</span>
+        <span class="log-status">${status}</span>
+        <span class="log-controls">
+          <button onclick="logMinimize('${id}')" title="Minimize">−</button>
+          <button onclick="logMaximize('${id}')" title="Maximize">⤢</button>
+          <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''}>✕</button>
+        </span>
+      </div>
+      <div class="import-log-body" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = panels;
+  el.querySelectorAll('.import-log-body').forEach(b => { b.scrollTop = b.scrollHeight; });
+}
+
+async function clearJob(id, jobId) {
+  await fetch('/reports/clear-job', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId }),
+  });
+  const panel = document.getElementById('logpanel-' + id);
+  if (panel) panel.remove();
+}
+
+async function reloadReports() {
+  const savesData = await fetch('/saves').then(r => r.ok ? r.json() : null);
+  const active = savesData && savesData.active;
+  const lastImport = active && savesData.saves[active]?.last_import || null;
+  const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
+  const listing = await tryFetch(reportsBase);
+  const subdirs = listing ? parseSubdirs(listing) : [];
+  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const html = sections.filter(Boolean).join('');
+  document.getElementById('content').innerHTML =
+    html || '<div class="section"><span class="empty">No reports yet.</span></div>';
+}
+
+async function main() {
+  updateGenFields();  // populate initial skill fields
+  startJobPolling();  // pick up any jobs left from a previous page load
+  loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
+  loadStatus();   // fire and forget
+
+  const savesData = await fetch('/saves').then(r => r.ok ? r.json() : null);
+  const active = savesData && savesData.active;
+  const lastImport = active && savesData.saves[active] && savesData.saves[active].last_import || null;
+
+  const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
+  const reportsListing = await tryFetch(reportsBase);
+  const subdirs = reportsListing ? parseSubdirs(reportsListing) : [];
+  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const html = sections.filter(Boolean).join('');
+
+  document.getElementById('content').innerHTML =
+    html || '<div class="section"><span class="empty">No reports yet.</span></div>';
+}
+
+main();
+</script>
+</body>
+</html>
