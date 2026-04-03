@@ -3,6 +3,7 @@
 
 import json
 import os
+import platform
 import re
 import sys
 import time
@@ -16,18 +17,27 @@ from sqlalchemy import create_engine, text
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SAVES_JSON = PROJECT_ROOT / "saves.json"
 
-# Known OOTP install root patterns on macOS, searched in order
-_OOTP_SEARCH = [
-    (
-        Path.home() / "Library/Containers",
-        "com.ootpdevelopments.ootp*/Data/Application Support/"
-        "Out of the Park Developments/OOTP Baseball */saved_games",
-    ),
-    (
-        Path.home() / "Library/Application Support",
-        "Out of the Park Developments/OOTP Baseball */saved_games",
-    ),
-]
+# Known OOTP install root patterns, searched in order, per platform
+if platform.system() == "Windows":
+    _OOTP_SEARCH = [
+        (
+            Path.home() / "Documents" / "Out of the Park Developments",
+            "OOTP Baseball */saved_games",
+        ),
+    ]
+else:
+    # macOS (and Linux fallback)
+    _OOTP_SEARCH = [
+        (
+            Path.home() / "Library/Containers",
+            "com.ootpdevelopments.ootp*/Data/Application Support/"
+            "Out of the Park Developments/OOTP Baseball */saved_games",
+        ),
+        (
+            Path.home() / "Library/Application Support",
+            "Out of the Park Developments/OOTP Baseball */saved_games",
+        ),
+    ]
 
 
 def singularize(name):

@@ -7,6 +7,45 @@ Import OOTP Baseball 27 CSV data dumps into a local PostgreSQL database. Run it 
 - Python 3.11+
 - PostgreSQL running locally
 
+### Installing Python
+
+**macOS:** The easiest option is [Homebrew](https://brew.sh):
+```bash
+brew install python@3.11
+```
+Or download the installer from [python.org](https://www.python.org/downloads/).
+
+**Windows:** Download the installer from [python.org](https://www.python.org/downloads/). Make sure to check "Add Python to PATH" during installation.
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt update && sudo apt install python3.11 python3.11-venv
+```
+
+### Installing PostgreSQL
+
+**macOS:** The simplest option is [Postgres.app](https://postgresapp.com) — download, drag to Applications, and launch. It runs in your menu bar. Then add the CLI tools to your PATH (instructions on the Postgres.app site).
+
+Alternatively via Homebrew:
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+```
+
+**Windows:** Download the installer from [postgresql.org](https://www.postgresql.org/download/windows/). The installer includes pgAdmin and sets up a service automatically.
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt update && sudo apt install postgresql postgresql-contrib
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+```
+
+After installing on Linux, create a superuser role matching your OS username so the importer can connect without a password:
+```bash
+sudo -u postgres createuser --superuser $USER
+```
+
 ## Setup
 
 ```bash
@@ -24,12 +63,13 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your OOTP installation path:
+Edit `.env` if needed — the default works for most setups:
 
 ```
-OOTP_CSV_PATH=/Users/<username>/Library/Containers/com.ootpdevelopments.ootp27macqlm/Data/Application Support/Out of the Park Developments/OOTP Baseball 27
-POSTGRES_URL=postgresql://localhost
+POSTGRES_URL=postgresql://postgres@localhost:5432
 ```
+
+> If the importer can't find your OOTP saves automatically, you can add `OOTP_CSV_PATH=` to `.env` pointing to your OOTP installation directory.
 
 ## Exporting CSVs from OOTP
 
