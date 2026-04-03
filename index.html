@@ -42,6 +42,12 @@
                   background: #d4edda; color: #155724; font-size: 11px;
                   font-weight: 600; margin-left: 6px; vertical-align: middle; }
 
+  /* Update banner */
+  .update-banner { background: #fff3cd; border-bottom: 1px solid #ffc107;
+                   color: #856404; padding: 8px 24px; font-size: 12px; }
+  .update-banner a { color: #856404; font-weight: 600; }
+  .update-banner code { background: #ffeaa0; padding: 1px 4px; border-radius: 3px; }
+
   /* Status panel */
   .status-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 24px;
                 border-top: 1px solid #eee; align-items: center; }
@@ -159,6 +165,7 @@
     <div class="page-title">OOTP Analyst</div>
     <div class="active-save" id="active-save">Loading…</div>
   </div>
+  <div id="update-banner" class="update-banner" style="display:none"></div>
   <div id="status-bar" class="status-bar"><span style="color:#aaa;font-size:12px">Checking prerequisites…</span></div>
   <div id="status-detail" class="status-detail"></div>
   <div id="saves-section" class="section"></div>
@@ -955,7 +962,22 @@ async function reloadReports() {
     html || '<div class="section"><span class="empty">No reports yet.</span></div>';
 }
 
+async function checkUpdates() {
+  const data = await tryFetch('/git-status');
+  if (!data) return;
+  const { updates_available, install_type } = JSON.parse(data);
+  if (!updates_available) return;
+  const banner = document.getElementById('update-banner');
+  if (install_type === 'zip') {
+    banner.innerHTML = '⚠ A new version is available — <a href="https://github.com/rwalker123/ootp-db/archive/refs/heads/main.zip">download the latest zip</a>.';
+  } else {
+    banner.innerHTML = '⚠ A new version is available — run <code>git pull</code> to update.';
+  }
+  banner.style.display = '';
+}
+
 async function main() {
+  checkUpdates();     // fire and forget — shows banner if .update-status says so
   updateGenFields();  // populate initial skill fields
   loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
   loadStatus();   // fire and forget

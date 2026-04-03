@@ -5,5 +5,7 @@ __pycache__/
 reports/
 saves.json
 .last_import
+.update-status
+.downloaded
 .claude/memory/
 .claude/settings.local.json
