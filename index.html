@@ -669,7 +669,7 @@ async function buildSection(basePath, dirKey, lastImport) {
     const displayTitle = rpt.title || rpt.filename.replace('.html', '').replace(/[-_]/g, ' ');
     const filePath = `${basePath}${dirKey}${rpt.filename}`;
     return `<tr id="row-${CSS.escape(filePath)}">
-      <td class="left"><a href="${filePath}">${displayTitle}</a></td>
+      <td class="left"><a href="${filePath}" target="_blank">${displayTitle}</a></td>
       ${extraTd}
       <td class="ts">${rpt.ts || '—'}</td>
       <td class="stale-cell">${staleCell}</td>
