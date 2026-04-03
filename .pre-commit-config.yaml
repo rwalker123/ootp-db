@@ -1,4 +1,12 @@
 repos:
+  - repo: local
+    hooks:
+      - id: no-commit-to-main
+        name: Don't commit directly to main
+        entry: bash -c 'branch=$(git symbolic-ref --short HEAD 2>/dev/null); if [ "$branch" = "main" ]; then echo "Error: direct commits to main are not allowed. Create a branch first: git checkout -b my-branch"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:

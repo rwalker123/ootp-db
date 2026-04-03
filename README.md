@@ -65,6 +65,9 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Activate git hooks (blocks direct commits to main, scans for secrets)
+pre-commit install
+
 # Configure environment
 cp .env.example .env
 ```
