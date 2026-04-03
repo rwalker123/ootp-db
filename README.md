@@ -88,6 +88,32 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
 
 That's it. You can refresh your import at any time to get the latest save data.
 
+## The Web UI
+
+The web UI is the main control panel for managing your saves and running imports. Open it by running `./web-server.sh` — it will launch automatically at `http://localhost:8000`.
+
+### Saves Table
+
+![OOTP Analyst Import screen](docs/screenshots/OOTP%20Analyst%20Import.png)
+
+The top section lists every save that has been imported at least once. Each row shows:
+
+- **Save** — the name of the `.lg` save file, with the active save highlighted in green. The active save is the one all reports query against.
+- **Database** — the PostgreSQL database name derived from the save name (e.g. `Tigers-2026-CBL` → `tigers_2026_cbl`).
+- **Last Import** — the date and time of the most recent successful import.
+- **Refresh** — re-runs the full import pipeline for that save (loads CSVs, recomputes advanced stats and ratings). Use this after each sim to refresh your data.
+- **Set Active** — sets this save as the active save, directing all reports to query its database.
+
+### Discovered Saves
+
+Below the imported saves, the UI lists any OOTP saves it found on your system that haven't been imported yet. These rows show only the save name — the database and last import columns are empty until you run an import. Click **Import** to load a new save for the first time.
+
+If a save you expect isn't showing up, set `OOTP_CSV_PATH` in `.env` to point to your OOTP installation directory.
+
+### Database Report
+
+At the bottom of the page, the **Database Report** panel shows the live log output from the most recent import run. It streams in real time as the import progresses — useful for tracking which tables are loading and catching any warnings. You can collapse, expand, copy, and close the panel as you wish. The log data is not persisted and stored in memory, restarting the server will clear any that you haven't closed. A cost estimate for any AI operations run during the session appears at the bottom of the page.
+
 ## Under the Hood
 
 ## Manual Usage
