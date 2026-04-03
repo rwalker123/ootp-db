@@ -267,3 +267,40 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 - ⚡ Elite work ethic
 - 🧠 High IQ
 - 💰 Demanding / above-slot bonus risk
+
+---
+
+## Contributing
+
+Contributions are welcome. Only the repo owner can merge PRs.
+
+### Setup
+
+```bash
+# Clone the repo
+git clone https://github.com/rwalker123/ootp-db.git
+cd ootp-db
+
+# Create a virtual environment and install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Activate git hooks (blocks direct commits to main, scans for secrets)
+pre-commit install
+
+# Configure environment
+cp .env.example .env
+```
+
+### Workflow
+
+1. Create a branch from `main`:
+   ```bash
+   git checkout -b feat/your-feature
+   ```
+2. Make your changes and commit them — direct commits to `main` are blocked.
+3. Push your branch and open a pull request against `main`.
+4. The repo owner ([@rwalker123](https://github.com/rwalker123)) reviews and merges all PRs.
+
+Branches are automatically deleted after a PR is merged.
