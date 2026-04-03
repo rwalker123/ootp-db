@@ -110,6 +110,16 @@ Below the imported saves, the UI lists any OOTP saves it found on your system th
 
 If a save you expect isn't showing up, set `OOTP_CSV_PATH` in `.env` to point to your OOTP installation directory.
 
+### Ad-Hoc Query
+
+![OOTP Analyst Query screen](docs/screenshots/OOTP%20Analyst%20Query.png)
+
+The **Ad-Hoc Query** field lets you ask natural language questions about your save data. Type any question and click **Run** — the AI translates it into SQL, queries the active database, and renders the results as a formatted report with tables and a written summary.
+
+The report appears inline below the query field and includes a small toolbar in the top-right corner. Use **Copy** to copy the full report to your clipboard. Results are in-memory only — they are not saved to disk and will be cleared when you close or refresh the page.
+
+> **Tip:** The AI will naturally frame reports around your team when it knows who you manage. In the screenshot above, it calls out the Tigers specifically in the summary — because that context lives in Claude's memory. Tell Claude which team you manage once and it will color-code its analysis accordingly from that point on.
+
 ### Database Report
 
 At the bottom of the page, the **Database Report** panel shows the live log output from the most recent import run. It streams in real time as the import progresses — useful for tracking which tables are loading and catching any warnings. You can collapse, expand, copy, and close the panel as you wish. The log data is not persisted and stored in memory, restarting the server will clear any that you haven't closed. A cost estimate for any AI operations run during the session appears at the bottom of the page.
