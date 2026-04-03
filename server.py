@@ -339,10 +339,13 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, get_saves_data())
         elif self.path == "/git-status":
             status_file = ROOT / ".update-status"
+            result = {"updates_available": False}
             if status_file.exists():
-                _json_response(self, json.loads(status_file.read_text()))
-            else:
-                _json_response(self, {"updates_available": False})
+                try:
+                    result = json.loads(status_file.read_text())
+                except (OSError, json.JSONDecodeError):
+                    pass
+            _json_response(self, result)
         elif self.path == "/reports/jobs":
             _json_response(self, get_jobs_data())
         elif self.path.startswith("/reports/jobs/") and self.path.endswith("/stream"):

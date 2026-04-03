@@ -965,7 +965,12 @@ async function reloadReports() {
 async function checkUpdates() {
   const data = await tryFetch('/git-status');
   if (!data) return;
-  const { updates_available, install_type } = JSON.parse(data);
+  let updates_available, install_type;
+  try {
+    ({ updates_available, install_type } = JSON.parse(data));
+  } catch (e) {
+    return;
+  }
   if (!updates_available) return;
   const banner = document.getElementById('update-banner');
   if (install_type === 'zip') {
