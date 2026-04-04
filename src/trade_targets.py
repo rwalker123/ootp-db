@@ -406,7 +406,7 @@ def generate_trade_targets_report(
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
 
-    html = f"""<!DOCTYPE html>
+    html_doc = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Trade Targets — {offer_label_esc}</title>
 {_ootp_meta}
 <style>{get_report_css("1200px")}</style></head><body>
@@ -445,6 +445,6 @@ def generate_trade_targets_report(
 </body></html>"""
 
     report_path = get_reports_dir(save_name, "trade_targets") / f"{slug}.html"
-    report_path.write_text(html)
+    report_path.write_text(html_doc)
 
     return str(report_path), dict(offered=offered, targets=targets)
