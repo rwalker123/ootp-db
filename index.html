@@ -435,12 +435,12 @@ async function autoDetectMyTeam(savesData) {
       return;
     }
     if (resp.candidates && resp.candidates.length > 0) {
-      showMyTeamPicker(name, resp.candidates);
+      showMyTeamPicker(name, resp.candidates, '');
     }
   }
 }
 
-function showMyTeamPicker(saveName, candidates) {
+function showMyTeamPicker(saveName, candidates, currentAbbr) {
   const cellId = `my-team-cell-${saveName.replace(/[^a-z0-9]/gi, '_')}`;
   const cell = document.getElementById(cellId);
   if (!cell) return;
@@ -451,15 +451,20 @@ function showMyTeamPicker(saveName, candidates) {
   cell.innerHTML = `<span class="team-picker">
     <select id="team-pick-${esc(key)}">${opts}</select>
     <button class="btn-action" style="padding:2px 6px" onclick="confirmMyTeam(${jsStr(saveName)})">Set</button>
+    <button class="btn-action secondary" style="padding:2px 6px" onclick="cancelMyTeam(${jsStr(saveName)}, ${jsStr(currentAbbr)})">Cancel</button>
   </span>`;
 }
 
 async function pickMyTeam(saveName) {
+  const key = saveName.replace(/[^a-z0-9]/gi, '_');
+  const cell = document.getElementById(`my-team-cell-${key}`);
+  const badge = cell && cell.querySelector('.badge-team');
+  const currentAbbr = badge ? badge.textContent : '';
   const r = await fetch(`/saves/my-team-candidates?save=${encodeURIComponent(saveName)}`);
   if (!r.ok) return;
   const resp = await r.json();
   const candidates = resp.candidates || [];
-  if (candidates.length > 0) showMyTeamPicker(saveName, candidates);
+  if (candidates.length > 0) showMyTeamPicker(saveName, candidates, currentAbbr);
 }
 
 async function confirmMyTeam(saveName) {
@@ -467,12 +472,28 @@ async function confirmMyTeam(saveName) {
   const sel = document.getElementById(`team-pick-${key}`);
   if (!sel) return;
   const [teamId, abbr] = sel.value.split('|');
+  // Immediately restore the cell — avoids staying in picker mode when team didn't change
+  const cell = document.getElementById(`my-team-cell-${key}`);
+  if (cell) {
+    cell.innerHTML = `<span class="badge-team">${esc(abbr)}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(saveName)})" title="Change team">✎</button>`;
+  }
   await fetch('/saves/set-my-team', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ save: saveName, team_id: parseInt(teamId, 10), team_abbr: abbr }),
   });
-  loadSaves();
+  loadSaves();  // will also re-render if team actually changed
+}
+
+function cancelMyTeam(saveName, currentAbbr) {
+  const key = saveName.replace(/[^a-z0-9]/gi, '_');
+  const cell = document.getElementById(`my-team-cell-${key}`);
+  if (!cell) return;
+  if (currentAbbr) {
+    cell.innerHTML = `<span class="badge-team">${esc(currentAbbr)}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(saveName)})" title="Change team">✎</button>`;
+  } else {
+    cell.innerHTML = `<span class="ts">—</span>`;
+  }
 }
 
 function updateLogsInPlace(logs) {
