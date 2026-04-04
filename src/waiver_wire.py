@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Waiver wire claim evaluator report generator for OOTP Baseball."""
 
+import html
 import json
 import os
 import sys
@@ -204,6 +205,10 @@ def get_comparison_positions(position, player_type):
         return PITCHER_POS
     if pos in OF_POS:
         return OF_POS
+    if pos in CORNER_IF_POS:
+        return CORNER_IF_POS
+    if pos in MIDDLE_IF_POS:
+        return MIDDLE_IF_POS
     return {pos}
 
 
@@ -391,7 +396,7 @@ def _get_team_name(conn, team_id):
 
 # ─── HTML builders ────────────────────────────────────────────────────────────
 
-def _build_candidate_header(p, adv, waiver_context):
+def _build_candidate_header(p, adv):
     pos_label = POS_MAP.get(int(p.get("position") or 0), "?")
     bats = BATS_MAP.get(int(p.get("bats") or 0), "?")
     throws = THROWS_MAP.get(int(p.get("throws") or 0), "?")
@@ -544,7 +549,7 @@ def _build_ratings_section(p):
 </div>"""
 
 
-def _build_contract_section(p, current_year_label):
+def _build_contract_section(p):
     years = int(p.get("years") or 0)
     cy = int(p.get("current_year") or 0)
     salary_cells = ""
@@ -725,20 +730,20 @@ def _build_adv_stats_batter(adv):
     </thead>
     <tbody>
       <tr>
-        <td>{adv.get("batted_balls") or "—"}</td>
-        <td style="font-weight:bold;color:{c_ev(adv.get("avg_ev")) if adv.get("avg_ev") else "#888"}">{f2(adv.get("avg_ev")) if adv.get("avg_ev") else "—"}</td>
-        <td>{f2(adv.get("max_ev")) if adv.get("max_ev") else "—"}</td>
-        <td>{f2(adv.get("avg_la")) if adv.get("avg_la") else "—"}°</td>
-        <td style="font-weight:bold;color:{c_hard(adv.get("hard_hit_pct")) if adv.get("hard_hit_pct") else "#888"}">{fp(adv.get("hard_hit_pct")) if adv.get("hard_hit_pct") else "—"}</td>
-        <td style="font-weight:bold;color:{c_barrel(adv.get("barrel_pct")) if adv.get("barrel_pct") else "#888"}">{fp(adv.get("barrel_pct")) if adv.get("barrel_pct") else "—"}</td>
-        <td>{fp(adv.get("sweet_spot_pct")) if adv.get("sweet_spot_pct") else "—"}</td>
-        <td>{fp(adv.get("gb_pct")) if adv.get("gb_pct") else "—"}</td>
-        <td>{fp(adv.get("ld_pct")) if adv.get("ld_pct") else "—"}</td>
-        <td>{fp(adv.get("fb_pct")) if adv.get("fb_pct") else "—"}</td>
-        <td>{f3(adv.get("xba")) if adv.get("xba") else "—"}</td>
-        <td>{f3(adv.get("xslg")) if adv.get("xslg") else "—"}</td>
-        <td style="font-weight:bold;color:{c_xwoba(adv.get("xwoba")) if adv.get("xwoba") else "#888"}">{f3(adv.get("xwoba")) if adv.get("xwoba") else "—"}</td>
-        <td>{f3(adv.get("xbacon")) if adv.get("xbacon") else "—"}</td>
+        <td>{adv.get("batted_balls") if adv.get("batted_balls") is not None else "—"}</td>
+        <td style="font-weight:bold;color:{c_ev(adv.get("avg_ev")) if adv.get("avg_ev") is not None else "#888"}">{f2(adv.get("avg_ev")) if adv.get("avg_ev") is not None else "—"}</td>
+        <td>{f2(adv.get("max_ev")) if adv.get("max_ev") is not None else "—"}</td>
+        <td>{f2(adv.get("avg_la")) if adv.get("avg_la") is not None else "—"}°</td>
+        <td style="font-weight:bold;color:{c_hard(adv.get("hard_hit_pct")) if adv.get("hard_hit_pct") is not None else "#888"}">{fp(adv.get("hard_hit_pct")) if adv.get("hard_hit_pct") is not None else "—"}</td>
+        <td style="font-weight:bold;color:{c_barrel(adv.get("barrel_pct")) if adv.get("barrel_pct") is not None else "#888"}">{fp(adv.get("barrel_pct")) if adv.get("barrel_pct") is not None else "—"}</td>
+        <td>{fp(adv.get("sweet_spot_pct")) if adv.get("sweet_spot_pct") is not None else "—"}</td>
+        <td>{fp(adv.get("gb_pct")) if adv.get("gb_pct") is not None else "—"}</td>
+        <td>{fp(adv.get("ld_pct")) if adv.get("ld_pct") is not None else "—"}</td>
+        <td>{fp(adv.get("fb_pct")) if adv.get("fb_pct") is not None else "—"}</td>
+        <td>{f3(adv.get("xba")) if adv.get("xba") is not None else "—"}</td>
+        <td>{f3(adv.get("xslg")) if adv.get("xslg") is not None else "—"}</td>
+        <td style="font-weight:bold;color:{c_xwoba(adv.get("xwoba")) if adv.get("xwoba") is not None else "#888"}">{f3(adv.get("xwoba")) if adv.get("xwoba") is not None else "—"}</td>
+        <td>{f3(adv.get("xbacon")) if adv.get("xbacon") is not None else "—"}</td>
       </tr>
     </tbody>
   </table>
@@ -1247,9 +1252,9 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 
     # Build HTML
     css = get_report_css("1200px")
-    header_html = _build_candidate_header(candidate, adv, {})
+    header_html = _build_candidate_header(candidate, adv)
     ratings_html = _build_ratings_section(candidate)
-    contract_html = _build_contract_section(candidate, "2026")
+    contract_html = _build_contract_section(candidate)
     adv_html = (
         _build_adv_stats_batter(adv)
         if player_type == "batter"
@@ -1271,8 +1276,8 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ootp-skill" content="waiver-claim">
-  <meta name="ootp-args" content="{first_name} {last_name}">
-  <meta name="ootp-save" content="{save_name}">
+  <meta name="ootp-args" content="{html.escape(first_name)} {html.escape(last_name)}">
+  <meta name="ootp-save" content="{html.escape(save_name)}">
   <title>{title}</title>
   <style>{css}</style>
 </head>
@@ -1380,13 +1385,13 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) < 3:
-        print("Usage: waiver_wire.py <save_name> <first_name> <last_name>")
+    if len(sys.argv) < 4:
+        print("Usage: waiver_wire.py <save_name> <first_name> <last_name> [last_name...]")
         sys.exit(1)
 
     save = sys.argv[1]
     fn = sys.argv[2]
-    ln = sys.argv[3]
+    ln = " ".join(sys.argv[3:])
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
     path, data = generate_waiver_claim_report(save, fn, ln)

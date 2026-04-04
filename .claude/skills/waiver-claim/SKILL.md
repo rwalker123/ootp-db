@@ -32,7 +32,7 @@ Evaluate a waiver wire claim for **$ARGUMENTS**.
 
 ### Step 1: Generate (or retrieve cached) the report
 
-Parse the first two words of $ARGUMENTS as the player's first and last name.
+Parse $ARGUMENTS: the first word is the first name, all remaining words form the last name (e.g., "Jackson Jobe" → first=Jackson last=Jobe; "Ronald De La Cruz" → first=Ronald last=De La Cruz).
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
