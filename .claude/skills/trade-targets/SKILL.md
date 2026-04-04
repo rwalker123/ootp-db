@@ -1,12 +1,12 @@
 ---
 name: trade-targets
-description: Find realistic trade return candidates on other MLB teams in exchange for one or more Tigers players. Shows value-matched targets by position need with contract details.
-argument-hint: <player(s) to offer, optionally what you need, e.g. "Colt Keith" or "Framber Valdez, want young IF">
+description: Find realistic trade return candidates (offering your player) or cost-to-acquire candidates (targeting another team's player). Value-matched by OA with contract details.
+argument-hint: <player(s) or criteria, e.g. "Colt Keith" or "acquiring Aaron Judge" or "surplus OF, need SP">
 ---
 
 # Trade Target Finder
 
-Given one or more Tigers players to offer, find realistic return candidates on other teams.
+Given one or more players to offer or acquire, find the matching trade candidates.
 
 ## IMPORTANT: Always use a fresh agent
 
@@ -21,6 +21,9 @@ Do NOT do the work inline.
 /trade-targets surplus outfielders, need starting pitching
 /trade-targets Framber Valdez, want a young corner infielder with upside
 /trade-targets Riley Greene, controllable SP in return
+/trade-targets acquiring Aaron Judge
+/trade-targets what would it cost to get Shohei Ohtani
+/trade-targets targeting Corbin Carroll
 ```
 
 ## Agent prompt template
@@ -29,11 +32,37 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Find trade targets for the Detroit Tigers based on: **"$ARGUMENTS"** in `/Users/raywalker/source/ootp-db`.
+Find trade targets based on: **"$ARGUMENTS"** in `/Users/raywalker/source/ootp-db`.
 
-### Step 1: Look Up Offered Player(s)
+### Step 0: Detect Direction and Load My Team
 
-Query the Tigers roster to identify what's being offered:
+Before looking up players, determine trade direction and load team identity:
+
+```bash
+.venv/bin/python3 << 'PYEOF'
+import json
+registry = json.loads(open("saves.json").read())
+save = registry["active"]
+save_info = registry.get("saves", {}).get(save, {})
+my_team_id = save_info.get("my_team_id") or 10
+my_team_abbr = save_info.get("my_team_abbr") or "???"
+print(f"save={save}")
+print(f"my_team_id={my_team_id}")
+print(f"my_team_abbr={my_team_abbr}")
+PYEOF
+```
+
+**Direction detection** — scan `$ARGUMENTS` for keywords (case-insensitive):
+- `acquiring`, `targeting`, `want to get`, `to get`, `cost to get`, `what would it cost` → **mode = "acquiring"**
+- Everything else (default) → **mode = "offering"**
+
+**Mode meanings:**
+- `offering`: You're trading away a player on your team. `offered_where` matches your player; `target_where` filters other teams.
+- `acquiring`: You want a player on another team. `offered_where` matches that player; `target_where` filters players on your team you'd give up.
+
+### Step 1: Look Up the Key Player(s)
+
+Query the roster to identify the players in the trade. Team to search depends on mode:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
@@ -43,19 +72,24 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 load_dotenv(Path(".env"))
-save = json.loads(open("saves.json").read())["active"]
+registry = json.loads(open("saves.json").read())
+save = registry["active"]
+my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
 db = save.lower().replace("-", "_").replace(" ", "_")
 engine = create_engine(f"{os.getenv('POSTGRES_URL')}/{db}")
 with engine.connect() as conn:
+    # For "offering" mode: search your team. For "acquiring": search all MLB teams.
     result = conn.execute(text("""
         SELECT p.player_id, p.first_name, p.last_name, pr.position, pr.age,
                pr.oa, pr.pot, pr.rating_overall, pr.player_type, pr.wrc_plus, pr.war,
-               pc.years, pc.current_year, pc.salary0, prs.mlb_service_years
+               pc.years, pc.current_year, pc.salary0, prs.mlb_service_years,
+               t.abbr as team_abbr
         FROM players p
         JOIN player_ratings pr ON pr.player_id = p.player_id
         LEFT JOIN players_contract pc ON pc.player_id = p.player_id
         LEFT JOIN players_roster_status prs ON prs.player_id = p.player_id
-        WHERE p.team_id = 10 AND p.free_agent = 0 AND p.retired = 0
+        LEFT JOIN teams t ON t.team_id = p.team_id
+        WHERE p.league_id = 203 AND p.free_agent = 0 AND p.retired = 0
         ORDER BY pr.rating_overall DESC
     """)).fetchall()
     for r in result:
@@ -63,7 +97,9 @@ with engine.connect() as conn:
 PYEOF
 ```
 
-Identify the player(s) matching `$ARGUMENTS`. If the user named specific players, find exact name matches. If they described a category (e.g., "surplus outfielders"), pick the lowest-rated players at that position.
+**Offering mode**: Identify the player(s) on your team (team_id = my_team_id) matching `$ARGUMENTS`. If they described a category (e.g., "surplus outfielders"), pick the lowest-rated at that position on your team.
+
+**Acquiring mode**: Identify the target player on any OTHER team matching the name in `$ARGUMENTS`. That player is what you want; build `offered_where` to match them by name.
 
 **Record for each offered player:**
 - player_id, name, position, age, rating_overall, player_type
@@ -95,10 +131,12 @@ Adjust the range (max ±4 OA points total, not cumulative):
 - **FA-year** (years_remaining ≤ 1): −4 (rental discount)
 - **Package deal** (2+ players): use the highest-OA player's tier as the anchor
 
-### Step 3: Identify Tigers' Needs
+### Step 3: Identify Your Team's Needs (offering mode only)
+
+Skip this step in **acquiring** mode — you already know what you're giving up (players on your team in the target OA range).
 
 If `$ARGUMENTS` specifies a target type (e.g., "need starting pitching", "want a SS"), use that.
-Otherwise, check which positions are thin:
+Otherwise, check which positions are thin on your team:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
@@ -108,17 +146,19 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 load_dotenv(Path(".env"))
-save = json.loads(open("saves.json").read())["active"]
+registry = json.loads(open("saves.json").read())
+save = registry["active"]
+my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
 db = save.lower().replace("-", "_").replace(" ", "_")
 engine = create_engine(f"{os.getenv('POSTGRES_URL')}/{db}")
 with engine.connect() as conn:
-    result = conn.execute(text("""
+    result = conn.execute(text(f"""
         SELECT pr.position, count(*) as cnt,
                round(avg(pr.rating_overall)::numeric, 1) as avg_rating,
                max(pr.rating_overall) as best_rating
         FROM team_roster tr
         JOIN player_ratings pr ON pr.player_id = tr.player_id
-        WHERE tr.team_id = 10 AND tr.list_id IN (1, 2)
+        WHERE tr.team_id = {my_team_id} AND tr.list_id IN (1, 2)
         GROUP BY pr.position
         ORDER BY avg_rating ASC
     """)).fetchall()
@@ -179,14 +219,18 @@ move candidates based on:
 import sys, json
 sys.path.insert(0, "src")
 from trade_targets import generate_trade_targets_report
-save_name = json.loads(open("saves.json").read())["active"]
-offered_where = "<AGENT FILLS: SQL WHERE matching offered Tigers player(s)>"
-target_where = "<AGENT FILLS: SQL WHERE for return targets>"
+registry = json.loads(open("saves.json").read())
+save_name = registry["active"]
+my_team_id = registry.get("saves", {}).get(save_name, {}).get("my_team_id") or 10
+offered_where = "<AGENT FILLS: SQL WHERE matching offered/targeted player(s)>"
+target_where = "<AGENT FILLS: SQL WHERE for return/give-up targets>"
 target_join = "<AGENT FILLS: JOIN clause for bas/pas, or empty string>"
-offer_label = "<AGENT FILLS: human label, e.g. 'Colt Keith'>"
+offer_label = "<AGENT FILLS: human label, e.g. 'Colt Keith' or 'Aaron Judge'>"
 highlight = <AGENT FILLS: list of (col_key, label) tuples or None>
+mode = "<AGENT FILLS: 'offering' or 'acquiring'>"
 path, data = generate_trade_targets_report(
     save_name, offer_label, offered_where, target_where,
+    my_team_id=my_team_id, mode=mode,
     target_join=target_join, highlight=highlight
 )
 print(f"GENERATED:{path}")
@@ -205,9 +249,17 @@ If `OFFERED:0` — the player name wasn't found. Re-check the Step 1 results for
 
 The HTML file has a `<!-- TRADE_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 `<div class="summary">` containing 2–4 sentences:
-- Lead with what the Tigers can realistically get back (value tier + position)
+
+**Offering mode:**
+- Lead with what `{my_team_abbr}` can realistically get back (value tier + position)
 - Name the top 1–2 specific targets and why they fit
 - Flag any concerns: no-trade clauses, injury risk, value mismatch, thin market
+- If filters were relaxed: note which one and what that means for the market
+
+**Acquiring mode:**
+- Lead with what it would cost `{my_team_abbr}` to acquire the target (OA tier + what you'd give up)
+- Name the top 1–2 specific players from `{my_team_abbr}`'s roster who match that cost
+- Flag concerns: giving up too much, whether it's the right time to buy
 - If filters were relaxed: note which one and what that means for the market
 
 Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:

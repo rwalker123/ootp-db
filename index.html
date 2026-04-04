@@ -41,6 +41,15 @@
   .badge-active { display: inline-block; padding: 1px 7px; border-radius: 10px;
                   background: #d4edda; color: #155724; font-size: 11px;
                   font-weight: 600; margin-left: 6px; vertical-align: middle; }
+  .badge-team  { display: inline-block; padding: 1px 7px; border-radius: 4px;
+                 background: #1a1a2e; color: #f0c040; font-size: 11px;
+                 font-weight: 700; letter-spacing: 0.5px; }
+  .btn-team-edit { background: none; border: none; color: #aaa; font-size: 11px;
+                   cursor: pointer; padding: 0 3px; vertical-align: middle; }
+  .btn-team-edit:hover { color: #2266cc; }
+  .team-picker { display: inline-flex; gap: 4px; align-items: center; }
+  .team-picker select { font-size: 11px; padding: 2px 4px; border: 1px solid #ccc;
+                        border-radius: 3px; color: #222; }
 
   /* Update banner */
   .update-banner { background: #fff3cd; border-bottom: 1px solid #ffc107;
@@ -242,6 +251,7 @@ document.addEventListener('click', () => {
 let _savePollTimer = null;
 let _lastRunningKey = null;
 let _lastActiveKey = null;
+let _lastSavesKey = null;
 let _prevRunningCount = null;
 
 async function loadSaves() {
@@ -251,12 +261,15 @@ async function loadSaves() {
 
   const runningKey = JSON.stringify(data.running);
   const activeKey = data.active || '';
-  const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey;
+  const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k, v.my_team_id || null])));
+  const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey || savesKey !== _lastSavesKey;
   _lastRunningKey = runningKey;
   _lastActiveKey = activeKey;
+  _lastSavesKey = savesKey;
 
   if (structureChanged || !document.querySelector('#saves-section .section-title')) {
     renderSaves(data);
+    autoDetectMyTeam(data.saves);
   } else {
     const logs = data.logs || {};
     const missingPanel = Object.keys(logs).some(name => {
@@ -304,10 +317,15 @@ function renderSaves(data) {
     const actions = isRunning
       ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
       : buildImportBtn(name, isActive);
+    const cellId = `my-team-cell-${name.replace(/[^a-z0-9]/gi, '_')}`;
+    const myTeamCell = info.my_team_id
+      ? `<span class="badge-team">${esc(info.my_team_abbr || '')}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(name)})" title="Change team">✎</button>`
+      : `<span class="ts">—</span>`;
     return `<tr>
       <td class="left">${nameCell}</td>
       <td>${esc(info.db_name)}</td>
       <td class="ts">${info.last_import || '—'}</td>
+      <td id="${esc(cellId)}">${myTeamCell}</td>
       <td>${actions}</td>
     </tr>`;
   });
@@ -325,12 +343,13 @@ function renderSaves(data) {
         <td class="left">${esc(name)}</td>
         <td>—</td>
         <td class="ts">—</td>
+        <td></td>
         <td>${actions}</td>
       </tr>`;
     });
 
   const hasImported = importedRows.length > 0;
-  const thead = `<tr><th class="left">Save</th><th>Database</th><th>Last Import</th><th></th></tr>`;
+  const thead = `<tr><th class="left">Save</th><th>Database</th><th>Last Import</th><th>My Team</th><th></th></tr>`;
 
   // If nothing at all found
   if (!importedRows.length && !discoveredRows.length) {
@@ -399,6 +418,61 @@ function buildImportBtn(name, isActive) {
   const refreshBtn = `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`;
   if (isActive) return refreshBtn;
   return `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>${refreshBtn}`;
+}
+
+// ---------------------------------------------------------------------------
+// My Team auto-detect + picker
+// ---------------------------------------------------------------------------
+
+async function autoDetectMyTeam(savesData) {
+  const needsDetect = Object.entries(savesData).filter(([, info]) => !info.my_team_id);
+  for (const [name] of needsDetect) {
+    const r = await fetch(`/saves/my-team-candidates?save=${encodeURIComponent(name)}`);
+    if (!r.ok) continue;
+    const resp = await r.json();
+    if (resp.auto_set) {
+      loadSaves();  // server wrote my_team_id; re-fetch with updated data
+      return;
+    }
+    if (resp.candidates && resp.candidates.length > 0) {
+      showMyTeamPicker(name, resp.candidates);
+    }
+  }
+}
+
+function showMyTeamPicker(saveName, candidates) {
+  const cellId = `my-team-cell-${saveName.replace(/[^a-z0-9]/gi, '_')}`;
+  const cell = document.getElementById(cellId);
+  if (!cell) return;
+  const key = saveName.replace(/[^a-z0-9]/gi, '_');
+  const opts = candidates.map(c =>
+    `<option value="${esc(String(c.team_id))}|${esc(c.abbr)}">${esc(c.abbr)} — ${esc(c.name)} ${esc(c.nickname)}</option>`
+  ).join('');
+  cell.innerHTML = `<span class="team-picker">
+    <select id="team-pick-${esc(key)}">${opts}</select>
+    <button class="btn-action" style="padding:2px 6px" onclick="confirmMyTeam(${jsStr(saveName)})">Set</button>
+  </span>`;
+}
+
+async function pickMyTeam(saveName) {
+  const r = await fetch(`/saves/my-team-candidates?save=${encodeURIComponent(saveName)}`);
+  if (!r.ok) return;
+  const resp = await r.json();
+  const candidates = resp.candidates || [];
+  if (candidates.length > 0) showMyTeamPicker(saveName, candidates);
+}
+
+async function confirmMyTeam(saveName) {
+  const key = saveName.replace(/[^a-z0-9]/gi, '_');
+  const sel = document.getElementById(`team-pick-${key}`);
+  if (!sel) return;
+  const [teamId, abbr] = sel.value.split('|');
+  await fetch('/saves/set-my-team', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ save: saveName, team_id: parseInt(teamId, 10), team_abbr: abbr }),
+  });
+  loadSaves();
 }
 
 function updateLogsInPlace(logs) {

@@ -15,8 +15,6 @@ from sqlalchemy import create_engine, text
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
-TIGERS_TEAM_ID = 10
-
 
 def get_engine(save_name):
     env_path = PROJECT_ROOT / ".env"
@@ -263,6 +261,8 @@ def generate_trade_targets_report(
     offer_label,
     offered_where,
     target_where,
+    my_team_id,
+    mode="offering",
     target_join="",
     order_by="pr.rating_overall DESC",
     limit=25,
@@ -270,11 +270,12 @@ def generate_trade_targets_report(
 ):
     """Generate a trade targets HTML report.
 
-    offer_label:   Human-readable label for what's being offered, e.g. "Colt Keith".
-    offered_where: SQL WHERE fragment matching Tigers player(s) by name, e.g.
-                   "p.last_name='Keith' AND p.first_name='Colt'".
-    target_where:  SQL WHERE fragment for desired return targets, e.g.
-                   "pr.position IN (3,4,5,6) AND pr.rating_overall BETWEEN 50 AND 65".
+    offer_label:   Human-readable label, e.g. "Colt Keith".
+    offered_where: SQL WHERE fragment for the player(s) on the offer side.
+    target_where:  SQL WHERE fragment for the return side.
+    my_team_id:    The managed team's team_id (read from saves.json).
+    mode:          "offering" — you're trading away your player, seeking returns.
+                   "acquiring" — you want someone else's player; show what you'd give up.
     target_join:   Optional JOIN clause for advanced stats tables.
     highlight:     List of (col_key, display_label) tuples for extra columns, or None.
 
@@ -284,12 +285,19 @@ def generate_trade_targets_report(
     last_import = get_last_import_time()
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
+    if mode == "acquiring":
+        offered_team_filter = f"p.team_id != {my_team_id} AND p.league_id = 203"
+        target_team_filter = f"p.team_id = {my_team_id}"
+    else:
+        offered_team_filter = f"p.team_id = {my_team_id}"
+        target_team_filter = f"p.team_id != {my_team_id} AND p.league_id = 203"
+
     offered_sql = (
         _SELECT
         + _FROM
         + f"""
         WHERE p.free_agent = 0 AND p.retired = 0
-          AND p.team_id = {TIGERS_TEAM_ID}
+          AND {offered_team_filter}
           AND ({offered_where})
         ORDER BY pr.rating_overall DESC
         LIMIT 10
@@ -302,8 +310,7 @@ def generate_trade_targets_report(
         + (f"\n{target_join}" if target_join else "")
         + f"""
         WHERE p.free_agent = 0 AND p.retired = 0
-          AND p.team_id != {TIGERS_TEAM_ID}
-          AND p.league_id = 203
+          AND {target_team_filter}
           AND ({target_where})
         ORDER BY {order_by}
         LIMIT {limit}
@@ -321,38 +328,53 @@ def generate_trade_targets_report(
     else:
         slug = re.sub(r"[^a-z0-9_]", "", offer_label.lower().replace(" ", "_"))[:50]
 
-    # Offered table (no Team column — always Tigers)
+    if mode == "acquiring":
+        offered_show_team = True   # show where the target player plays
+        target_show_team = False   # targets are your own players
+        offered_section_title = "Player You're Targeting"
+        targets_section_title = f"What You'd Need to Give Up ({len(targets)} players)"
+        page_meta = f"Acquiring: {offer_label}"
+    else:
+        offered_show_team = False  # your players — team is implied
+        target_show_team = True
+        offered_section_title = "What You're Offering"
+        targets_section_title = f"Return Targets ({len(targets)} players)"
+        page_meta = f"Offering: {offer_label}"
+
     key_header_off = "FIP" if (offered and offered[0]["player_type"] == "pitcher") else "wRC+"
-    offered_header = build_table_header(show_team=False, key_header=key_header_off, highlight=None)
-    offered_rows_html = build_table_rows(offered, show_team=False, highlight=None)
+    offered_header = build_table_header(show_team=offered_show_team, key_header=key_header_off, highlight=None)
+    offered_rows_html = build_table_rows(offered, show_team=offered_show_team, highlight=None)
 
-    # Targets table
     key_header_tgt = "FIP" if (targets and targets[0]["player_type"] == "pitcher") else "wRC+"
-    targets_header = build_table_header(show_team=True, key_header=key_header_tgt, highlight=highlight)
-    targets_rows_html = build_table_rows(targets, show_team=True, highlight=highlight)
+    targets_header = build_table_header(show_team=target_show_team, key_header=key_header_tgt, highlight=highlight)
+    targets_rows_html = build_table_rows(targets, show_team=target_show_team, highlight=highlight)
 
-    # Spotlights
+    # Spotlights — check offered side for no-trade in acquiring mode; targets side otherwise
     spotlight = ""
-    no_trade_list = [r for r in targets if r.get("no_trade")]
+    spotlight_list = offered if mode == "acquiring" else targets
+    no_trade_list = [r for r in spotlight_list if r.get("no_trade")]
     injury_list = [r for r in targets if (r.get("prone_overall") or 0) > 150]
-    elite_list = [r for r in targets if (r.get("rating_overall") or 0) >= 75]
+    elite_list = [r for r in (offered if mode == "acquiring" else targets)
+                  if (r.get("rating_overall") or 0) >= 75]
 
     if no_trade_list:
         names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in no_trade_list)
+        label = "Target has a no-trade clause" if mode == "acquiring" else "No-Trade Clause"
         spotlight += (
             f'<div style="background:#fff8e6;border:1px solid #cc9900;padding:10px 14px;'
             f'border-radius:4px;margin:8px 0;font-size:13px">'
-            f"<b>🔒 No-Trade Clause:</b> {names} — acquiring team must negotiate carefully.</div>"
+            f"<b>🔒 {label}:</b> {names} — their team must consent to the deal.</div>"
         )
     if injury_list:
         names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in injury_list)
+        label = "Injury-prone pieces you'd move" if mode == "acquiring" else "Injury Risk"
         spotlight += (
             f'<div style="background:#fff0f0;border:1px solid #cc8888;padding:10px 14px;'
             f'border-radius:4px;margin:8px 0;font-size:13px">'
-            f"<b>⚠ Injury Risk:</b> {names} — Fragile or Wrecked injury rating; "
+            f"<b>⚠ {label}:</b> {names} — Fragile or Wrecked injury rating; "
             f"factor into trade value assessment.</div>"
         )
-    if elite_list:
+    if elite_list and mode != "acquiring":
         names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in elite_list)
         spotlight += (
             f'<div style="background:#f0fff0;border:1px solid #88cc88;padding:10px 14px;'
@@ -363,6 +385,7 @@ def generate_trade_targets_report(
 
     _ootp_kwargs_esc = json.dumps(dict(
         offered_where=offered_where, target_where=target_where,
+        my_team_id=my_team_id, mode=mode,
         target_join=target_join, order_by=order_by, limit=limit, highlight=highlight
     )).replace('"', '&quot;')
     _args_esc = offer_label.replace("&", "&amp;").replace('"', "&quot;")
@@ -381,13 +404,13 @@ def generate_trade_targets_report(
 
 <div class="page-header">
   <div class="player-name">Trade Targets</div>
-  <div class="player-meta">Offering: {offer_label}</div>
-  <div class="import-ts">{len(targets)} target{"s" if len(targets) != 1 else ""} found
+  <div class="player-meta">{page_meta}</div>
+  <div class="import-ts">{len(targets)} player{"s" if len(targets) != 1 else ""} found
     &bull; Last DB import: {last_import or "unknown"} &bull; Generated: {generated_at}</div>
 </div>
 
 <div class="section">
-  <div class="section-title">What You're Offering</div>
+  <div class="section-title">{offered_section_title}</div>
   <table>
   {offered_header}
   {offered_rows_html}
@@ -399,7 +422,7 @@ def generate_trade_targets_report(
 </div>
 
 <div class="section">
-  <div class="section-title">Return Targets ({len(targets)} players)</div>
+  <div class="section-title">{targets_section_title}</div>
   <table>
   {targets_header}
   {targets_rows_html}

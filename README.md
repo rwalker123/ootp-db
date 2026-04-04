@@ -317,8 +317,7 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 ---
 
 ### `/trade-targets <player or criteria>`
-
-Given one or more Tigers players you're willing to move, finds realistic return candidates on other teams. Value-matching is based on OOTP's own OA rating (the currency the AI uses when evaluating trades), not the composite analytical score — so the results reflect what other teams would actually consider giving up rather than who is analytically equivalent.
+Given one or more players you're willing to move, finds realistic return candidates on other teams. Value-matching is based on OOTP's own OA rating (the currency the AI uses when evaluating trades), not the composite analytical score — so the results reflect what other teams would actually consider giving up rather than who is analytically equivalent.
 
 ```
 /trade-targets Colt Keith
