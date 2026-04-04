@@ -213,7 +213,7 @@ Just run the same command again. All tables are dropped and recreated, so the da
 
 ## Claude Code Skills
 
-Skills are reusable, project-specific Claude Code commands that combine a Python data layer with an LLM analysis layer to produce rich HTML reports. Each skill lives in `.claude/skills/<skill-name>/SKILL.md` — a plain Markdown prompt that defines exactly how Claude should interpret your arguments, query the database, and write its analysis.
+Skills are reusable, project-specific commands that combine a Python data layer with an LLM analysis layer to produce rich HTML reports. Each skill lives in `.claude/skills/<skill-name>/SKILL.md` — a plain Markdown prompt that defines exactly how Claude should interpret your arguments, query the database, and write its analysis.
 
 Invoke a skill by typing `/skill-name` in the Claude Code chat prompt.
 
