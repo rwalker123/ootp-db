@@ -2,7 +2,6 @@
 """Contract extension advisor report generator for OOTP Baseball."""
 
 import html as html_mod
-import json
 import os
 import sys
 from datetime import datetime

@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 
 _TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_STYLE_RE = re.compile(r"<style[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_RE = re.compile(r"<script[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
 _WS_RE = re.compile(r"\s+")
 
@@ -24,6 +26,8 @@ def _extract_title(html: str) -> str | None:
 
 
 def html_to_search_text(html: str) -> str:
+    html = _STYLE_RE.sub(" ", html)
+    html = _SCRIPT_RE.sub(" ", html)
     plain = _TAG_RE.sub(" ", html)
     plain = html_module.unescape(plain)
     return _WS_RE.sub(" ", plain).strip()

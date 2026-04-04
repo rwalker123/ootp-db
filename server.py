@@ -338,6 +338,10 @@ def _reports_search_save_roots(save_param, all_saves):
     if not name:
         return []
     root = REPORTS_ROOT / name
+    try:
+        root.resolve().relative_to(REPORTS_ROOT.resolve())
+    except ValueError:
+        return []
     return [root] if root.is_dir() else []
 
 
@@ -755,7 +759,7 @@ class Handler(SimpleHTTPRequestHandler):
                     new_path = self._run_data(skill, args, save, kwargs_override)
                     if analyses and new_path:
                         new_path_p = Path(new_path)
-                        new_content = new_path_p.read_text()
+                        new_content = new_path_p.read_text(encoding="utf-8")
                         new_content = _reinject_analyses(new_content, analyses)
                         from report_write import write_report_html
 
