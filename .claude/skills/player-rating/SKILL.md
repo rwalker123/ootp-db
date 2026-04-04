@@ -26,7 +26,7 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Generate an OOTP player rating report for **$ARGUMENTS** in `/Users/raywalker/source/ootp-db`.
+Generate an OOTP player rating report for **$ARGUMENTS**.
 
 ### Step 1: Generate (or retrieve cached) the rating report
 
@@ -71,7 +71,7 @@ Using the first/last name and `player_type` from the data dict, run this supplem
 query to get year-by-year rate stats. Use `dict()` not `{}` for params:
 
 ```bash
-cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys, json
 sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
@@ -186,7 +186,7 @@ Read the HTML file, replace `<!-- RATING_SUMMARY -->` with the summary, write it
 Then open the report — use the exact path that was printed after `GENERATED:` above:
 
 ```bash
-open /Users/raywalker/source/ootp-db/reports/ratings/<filename>.html
+open reports/ratings/<filename>.html
 ```
 
 ### Step 3: Print terminal summary

@@ -99,6 +99,19 @@ def _save_registry(registry):
     (ROOT / "saves.json").write_text(json.dumps(registry, indent=2))
 
 
+def _get_csv_mtime(csv_path):
+    """Return ISO timestamp of most recently modified CSV file, or None."""
+    import glob as _glob
+    if not csv_path:
+        return None
+    files = _glob.glob(os.path.join(csv_path, "*.csv"))
+    if not files:
+        return None
+    from datetime import datetime
+    max_mtime = max(os.path.getmtime(f) for f in files)
+    return datetime.fromtimestamp(max_mtime).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def get_saves_data():
     registry = _load_saves_registry()
     imported = registry.get("saves", {})
@@ -114,9 +127,15 @@ def get_saves_data():
             running.append(name)
         logs[name] = list(entry["log"])  # snapshot to avoid race with reader thread
 
+    # Enrich each save with csv_mtime so the frontend can detect new CSV exports
+    enriched = {}
+    for name, info in imported.items():
+        enriched[name] = dict(info)
+        enriched[name]["csv_mtime"] = _get_csv_mtime(info.get("csv_path"))
+
     return {
         "active": active,
-        "saves": imported,
+        "saves": enriched,
         "discovered": not_imported,
         "running": running,
         "logs": logs,
@@ -798,6 +817,17 @@ class Handler(SimpleHTTPRequestHandler):
             if path is None:
                 raise ValueError(
                     "Player not found on MLB roster for contract extension report"
+                )
+            return path
+
+        if skill == "waiver-claim":
+            from waiver_wire import generate_waiver_claim_report
+            first, *rest = args.split()
+            last = " ".join(rest)
+            path, _ = generate_waiver_claim_report(save, first, last)
+            if path is None:
+                raise ValueError(
+                    "Player not found for waiver claim report"
                 )
             return path
 

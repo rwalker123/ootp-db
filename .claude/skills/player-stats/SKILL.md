@@ -20,7 +20,7 @@ Use this as the agent prompt, substituting the player name from $ARGUMENTS:
 
 ---
 
-Generate an OOTP player report for **$ARGUMENTS** using `src/report.py` in `/Users/raywalker/source/ootp-db`.
+Generate an OOTP player report for **$ARGUMENTS** using `src/report.py`.
 
 ### Step 1: Generate (or retrieve cached) the report
 
@@ -150,7 +150,7 @@ Read the HTML file, replace the placeholder comments with the summaries, write i
 Then open the report — use the exact path that was printed after `GENERATED:` above:
 
 ```bash
-open /Users/raywalker/source/ootp-db/reports/players/<filename>.html
+open reports/players/<filename>.html
 ```
 
 ### Step 3: Print a 2-3 line terminal summary

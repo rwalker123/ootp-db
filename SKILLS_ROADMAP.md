@@ -66,7 +66,7 @@ Identify top prospects in the draft pool matching given criteria.
 
 ---
 
-### [ ] 3. Waiver Wire Evaluator (`/waiver-claim`)
+### [x] 3. Waiver Wire Evaluator (`/waiver-claim`)
 
 Given a player on waivers, evaluate whether to claim them and who on the current roster they would replace.
 
@@ -85,6 +85,7 @@ Given a player on waivers, evaluate whether to claim them and who on the current
 - Recommendation with rationale
 
 **Considerations:**
+- Follow the skill architecture in CLAUDE.md exactly.
 - Must account for 40-man roster limits and DFA implications
 - Contract obligation of claimed player vs current player
 - Injury risk flags — don't claim if replacing a healthy starter with injury risk

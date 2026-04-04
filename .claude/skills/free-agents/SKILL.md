@@ -28,7 +28,7 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Search for free agents matching **"$ARGUMENTS"** in `/Users/raywalker/source/ootp-db`.
+Search for free agents matching **"$ARGUMENTS"**.
 
 ### Step 1: Parse Criteria
 
@@ -126,7 +126,7 @@ The HTML file has a `<!-- FA_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
 
 ```bash
-open /Users/raywalker/source/ootp-db/reports/free_agents/<filename>.html
+open reports/free_agents/<filename>.html
 ```
 
 ### Step 4: Print Terminal Summary

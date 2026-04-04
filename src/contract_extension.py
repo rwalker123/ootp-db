@@ -2,6 +2,7 @@
 """Contract extension advisor report generator for OOTP Baseball."""
 
 import html as html_mod
+import json
 import os
 import sys
 from datetime import datetime
@@ -478,12 +479,25 @@ def generate_contract_extension_report(save_name, first_name, last_name):
     Returns (path_str, data_dict) on generation, or (path_str, None) on cache hit.
     Returns (None, None) if the player is not found.
     """
+    saves = json.loads((PROJECT_ROOT / "saves.json").read_text())
+    save_data = saves.get("saves", {}).get(save_name, {})
+    my_team_abbr = save_data.get("my_team_abbr") or "your team"
+    my_team_id = int(save_data.get("my_team_id") or 0)
+
     engine = get_engine(save_name)
     last_import = get_last_import_time()
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # ── 1. Main player query ────────────────────────────────────────────
     with engine.connect() as conn:
+        if my_team_id:
+            _row = conn.execute(text(
+                "SELECT name, nickname FROM teams WHERE team_id = :tid LIMIT 1"
+            ), dict(tid=my_team_id)).mappings().fetchone()
+            my_team_name = f"{_row['name']} {_row['nickname']}" if _row else my_team_abbr
+        else:
+            my_team_name = my_team_abbr
+
         player_row = conn.execute(
             text("""
             SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,
@@ -909,6 +923,8 @@ def generate_contract_extension_report(save_name, first_name, last_name):
         median_comp_salary=fmt_salary(median_comp_salary),
         top_comps=comp_names,
         adv_years_available=len(adv_rows),
+        my_team_abbr=my_team_abbr,
+        my_team_name=my_team_name,
         **_adv_data_dict(adv_most_recent, player_type),
     )
 
