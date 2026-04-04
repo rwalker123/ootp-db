@@ -180,6 +180,12 @@ For each unprocessed comment/finding:
    - **Style nit**: Subjective preference, not a bug or security issue
    - **Disagree**: The reviewer's assessment is incorrect (explain why)
 
+**Important — evaluate suggestions critically:** When a reviewer includes a code suggestion,
+do NOT apply it verbatim. Read the surrounding logic and verify the suggestion is internally
+consistent and matches the intent of the code. Reviewer suggestions can be wrong or introduce
+new inconsistencies. If the suggestion doesn't hold up, mark the comment as **Disagree** and
+explain why.
+
 ## Step 7: Present the report
 
 Output a structured report grouped by assessment:

@@ -403,7 +403,7 @@ Works for any player — not just those currently on waivers. You can evaluate a
 The HTML report opens in your browser with six sections:
 
 - **Claim Recommendation** — LLM-written verdict (CLAIM / PASS / MONITOR) with value comparison, contract cost analysis, and risk flags
-- **Tigers Roster Comparison** — all Tigers players at the same position group (OF grouped together; SP and RP/CL grouped separately), ordered by rating, with the waiver candidate highlighted
+- **Your Roster Comparison** — all your players at the same position group (OF grouped together; SP and RP/CL grouped separately), ordered by rating, with the waiver candidate highlighted
 - **Current Season Stats** — batting (AVG/OBP/SLG/OPS/wRC+/WAR/Avg EV) or pitching (ERA/FIP/xFIP/WHIP/K%/BB%/WAR)
 - **Rating Breakdown** — 9-dimension composite score breakdown (offense, contact, discipline, defense, baserunning, potential, durability, development, clubhouse)
 - **Contract Obligation** — full salary timeline if claimed, years remaining, and total obligation
@@ -416,8 +416,8 @@ The HTML report opens in your browser with six sections:
 - **MONITOR** — lateral move, or timing isn't urgent (plenty of claim window left, roster is full)
 
 **Key data in the comparison:**
-- `rating_vs_best`: candidate rating minus the Tigers' best player at the position — negative means a downgrade
-- `rating_vs_worst`: candidate rating minus the Tigers' weakest player — positive means a clear upgrade opportunity
+- `rating_vs_best`: candidate rating minus your best player at the position — negative means a downgrade
+- `rating_vs_worst`: candidate rating minus your weakest player at the position — positive means a clear upgrade opportunity
 - Contract obligation is shown in full; the LLM flags the specific player who would need to be DFA'd if the 40-man is at capacity
 
 Reports are cached by player until the next DB import.

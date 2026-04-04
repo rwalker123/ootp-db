@@ -465,15 +465,15 @@ def _build_candidate_header(p, adv):
     key_stat = ""
     if player_type == "batter":
         wrc = p.get("wrc_plus")
-        key_stat = f"wRC+: <b>{int(wrc) if wrc else '—'}</b>"
+        key_stat = f"wRC+: <b>{int(wrc) if wrc is not None else '—'}</b>"
         if adv:
             ba = adv.get("ba")
-            key_stat += f" | AVG: <b>{float(ba):.3f}</b>" if ba else ""
+            key_stat += f" | AVG: <b>{float(ba):.3f}</b>" if ba is not None else ""
     else:
         if adv:
             era = adv.get("era")
             fip = adv.get("fip")
-            key_stat = f"ERA: <b>{float(era):.2f}</b> | FIP: <b>{float(fip):.2f}</b>" if era and fip else ""
+            key_stat = f"ERA: <b>{float(era):.2f}</b> | FIP: <b>{float(fip):.2f}</b>" if era is not None and fip is not None else ""
 
     prone = p.get("prone_overall") or p.get("pr_prone")
     inj_label = injury_label(prone)
@@ -481,14 +481,18 @@ def _build_candidate_header(p, adv):
 
     svc_yrs = p.get("mlb_service_years") or 0
 
+    first_name_esc = html.escape(str(p.get("first_name", "")))
+    last_name_esc = html.escape(str(p.get("last_name", "")))
+    team_disp_esc = html.escape(str(team_disp))
+
     return f"""
 <div class="page-header">
   <div class="header-top">
     <div>
-      <div class="player-name">{p.get("first_name", "")} {p.get("last_name", "")}</div>
+      <div class="player-name">{first_name_esc} {last_name_esc}</div>
       <div class="player-meta">
         {pos_label}{f" ({role_label})" if pos_label == "P" else ""} &bull;
-        {team_disp} &bull; Age {p.get("age", "?")} &bull;
+        {team_disp_esc} &bull; Age {p.get("age", "?")} &bull;
         {bats}/{throws} &bull;
         <span class="badge badge-oa">OA {oa}</span>&nbsp;
         <span class="badge badge-pot">POT {pot}</span>
@@ -552,12 +556,16 @@ def _build_ratings_section(p):
 def _build_contract_section(p):
     years = int(p.get("years") or 0)
     cy = int(p.get("current_year") or 0)
-    salary_cells = ""
-    total = 0
+    salaries = []
     for i in range(years):
         sal = p.get(f"salary{i}")
         if sal is None:
             break
+        salaries.append((i, sal))
+
+    salary_cells = ""
+    total = 0
+    for i, sal in salaries:
         is_current = (i == cy)
         style = " style='font-weight:bold;background:#fff3cd'" if is_current else ""
         salary_cells += f"<td{style}>{fmt_salary(sal)}</td>"
@@ -569,7 +577,7 @@ def _build_contract_section(p):
     options = p.get("options_used") or 0
 
     header_cells = "".join(
-        f"<th>Yr {i + 1}{' (Now)' if i == cy else ''}</th>" for i in range(years)
+        f"<th>Yr {i + 1}{' (Now)' if i == cy else ''}</th>" for i, _ in salaries
     )
 
     obligation_note = ""
@@ -1268,7 +1276,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
     recommendation_html = _build_recommendation_placeholder()
 
     full_name = f"{first_name}_{last_name}".lower().replace(" ", "_")
-    title = f"Waiver Claim: {first_name} {last_name}"
+    title = html.escape(f"Waiver Claim: {first_name} {last_name}")
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1352,29 +1360,29 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         my_team_name=my_team_name,
         report_path=str(report_path),
         # Advanced stats — batters
-        adv_avg_ev=round(float(adv["avg_ev"]), 1) if adv and adv.get("avg_ev") else None,
-        adv_hard_hit_pct=_pct_fmt(adv.get("hard_hit_pct")) if adv else None,
-        adv_barrel_pct=_pct_fmt(adv.get("barrel_pct")) if adv else None,
-        adv_xwoba=round(float(adv["xwoba"]), 3) if adv and adv.get("xwoba") else None,
-        adv_k_pct=_pct_fmt(adv.get("k_pct")) if adv else None,
-        adv_bb_pct=_pct_fmt(adv.get("bb_pct")) if adv else None,
-        adv_wrc_plus_vs_lhp=int(adv["wrc_plus_vs_lhp"]) if adv and adv.get("wrc_plus_vs_lhp") else None,
-        adv_wrc_plus_vs_rhp=int(adv["wrc_plus_vs_rhp"]) if adv and adv.get("wrc_plus_vs_rhp") else None,
+        adv_avg_ev=round(float(adv["avg_ev"]), 1) if adv and adv.get("avg_ev") is not None else None,
+        adv_hard_hit_pct=_pct_fmt(adv.get("hard_hit_pct")) if adv and adv.get("hard_hit_pct") is not None else None,
+        adv_barrel_pct=_pct_fmt(adv.get("barrel_pct")) if adv and adv.get("barrel_pct") is not None else None,
+        adv_xwoba=round(float(adv["xwoba"]), 3) if adv and adv.get("xwoba") is not None else None,
+        adv_k_pct=_pct_fmt(adv.get("k_pct")) if adv and adv.get("k_pct") is not None else None,
+        adv_bb_pct=_pct_fmt(adv.get("bb_pct")) if adv and adv.get("bb_pct") is not None else None,
+        adv_wrc_plus_vs_lhp=int(adv["wrc_plus_vs_lhp"]) if adv and adv.get("wrc_plus_vs_lhp") is not None else None,
+        adv_wrc_plus_vs_rhp=int(adv["wrc_plus_vs_rhp"]) if adv and adv.get("wrc_plus_vs_rhp") is not None else None,
         adv_pa_vs_lhp=adv.get("pa_vs_lhp") if adv else None,
         adv_pa_vs_rhp=adv.get("pa_vs_rhp") if adv else None,
         # Advanced stats — pitchers
-        adv_era=round(float(adv["era"]), 2) if adv and adv.get("era") else None,
-        adv_fip=round(float(adv["fip"]), 2) if adv and adv.get("fip") else None,
-        adv_xfip=round(float(adv["xfip"]), 2) if adv and adv.get("xfip") else None,
-        adv_k_bb_pct=_pct_fmt(adv.get("k_bb_pct")) if adv else None,
-        adv_gb_pct=_pct_fmt(adv.get("gb_pct")) if adv else None,
-        adv_hard_hit_pct_against=_pct_fmt(adv.get("hard_hit_pct_against")) if adv else None,
-        adv_barrel_pct_against=_pct_fmt(adv.get("barrel_pct_against")) if adv else None,
-        adv_xwoba_against=round(float(adv["xwoba_against"]), 3) if adv and adv.get("xwoba_against") else None,
-        adv_era_vs_lhb=round(float(adv["era_vs_lhb"]), 2) if adv and adv.get("era_vs_lhb") else None,
-        adv_era_vs_rhb=round(float(adv["era_vs_rhb"]), 2) if adv and adv.get("era_vs_rhb") else None,
-        adv_fip_vs_lhb=round(float(adv["fip_vs_lhb"]), 2) if adv and adv.get("fip_vs_lhb") else None,
-        adv_fip_vs_rhb=round(float(adv["fip_vs_rhb"]), 2) if adv and adv.get("fip_vs_rhb") else None,
+        adv_era=round(float(adv["era"]), 2) if adv and adv.get("era") is not None else None,
+        adv_fip=round(float(adv["fip"]), 2) if adv and adv.get("fip") is not None else None,
+        adv_xfip=round(float(adv["xfip"]), 2) if adv and adv.get("xfip") is not None else None,
+        adv_k_bb_pct=_pct_fmt(adv.get("k_bb_pct")) if adv and adv.get("k_bb_pct") is not None else None,
+        adv_gb_pct=_pct_fmt(adv.get("gb_pct")) if adv and adv.get("gb_pct") is not None else None,
+        adv_hard_hit_pct_against=_pct_fmt(adv.get("hard_hit_pct_against")) if adv and adv.get("hard_hit_pct_against") is not None else None,
+        adv_barrel_pct_against=_pct_fmt(adv.get("barrel_pct_against")) if adv and adv.get("barrel_pct_against") is not None else None,
+        adv_xwoba_against=round(float(adv["xwoba_against"]), 3) if adv and adv.get("xwoba_against") is not None else None,
+        adv_era_vs_lhb=round(float(adv["era_vs_lhb"]), 2) if adv and adv.get("era_vs_lhb") is not None else None,
+        adv_era_vs_rhb=round(float(adv["era_vs_rhb"]), 2) if adv and adv.get("era_vs_rhb") is not None else None,
+        adv_fip_vs_lhb=round(float(adv["fip_vs_lhb"]), 2) if adv and adv.get("fip_vs_lhb") is not None else None,
+        adv_fip_vs_rhb=round(float(adv["fip_vs_rhb"]), 2) if adv and adv.get("fip_vs_rhb") is not None else None,
         adv_bf_vs_lhb=adv.get("bf_vs_lhb") if adv else None,
         adv_bf_vs_rhb=adv.get("bf_vs_rhb") if adv else None,
     )
