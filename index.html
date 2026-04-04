@@ -177,6 +177,7 @@
         <option value="player-rating">Player Rating</option>
         <option value="free-agents">Free Agents</option>
         <option value="draft-targets">Draft Targets</option>
+        <option value="trade-targets">Trade Targets</option>
         <option value="adhoc">Ad-hoc Query</option>
       </select>
       <div id="gen-fields" class="gen-fields"></div>
@@ -764,6 +765,9 @@ const GEN_SKILLS = {
   ]},
   'draft-targets': { label: 'Draft Targets', fields: [
     { id: 'gen-criteria', placeholder: 'e.g. high ceiling SS under 20', required: true },
+  ]},
+  'trade-targets': { label: 'Trade Targets', fields: [
+    { id: 'gen-criteria', placeholder: 'e.g. Colt Keith  or  Framber Valdez, want young IF', required: true },
   ]},
   'adhoc': { label: 'Ad-hoc Query', fields: [
     { id: 'gen-prompt', placeholder: 'Ask anything about the OOTP data…', required: true },

@@ -630,6 +630,19 @@ class Handler(SimpleHTTPRequestHandler):
             )
             return path
 
+        if skill == "trade-targets":
+            from trade_targets import generate_trade_targets_report
+            path, _ = generate_trade_targets_report(
+                save, args,
+                offered_where=kw.get("offered_where", "1=1"),
+                target_where=kw.get("target_where", "1=1"),
+                target_join=kw.get("target_join", ""),
+                order_by=order or "pr.rating_overall DESC",
+                limit=limit,
+                highlight=kw.get("highlight"),
+            )
+            return path
+
         raise ValueError(f"Unknown skill: {skill}")
 
     def _respond(self, code, body):
