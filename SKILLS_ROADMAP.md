@@ -96,7 +96,7 @@ Given a player on waivers, evaluate whether to claim them and who on the current
 
 Given players available on the Tigers, find realistic trade partners and return packages.
 
-**Inputs:** One or more Tigers players being offered (e.g. "Colt Keith", or "we have a surplus of outfielders")
+**Inputs:** One or more Tigers players being offered (e.g. "Hank Greenberg", or "we have a surplus of outfielders")
 
 **Data sources:**
 - `player_ratings` — value of players on both sides
@@ -118,12 +118,12 @@ Given players available on the Tigers, find realistic trade partners and return 
 - Years of control matter: pre-arb > arb > FA-year players
 - Should identify what Tigers need in return (positional gaps, rotation depth, etc.)
 
-### [ ] 5. Contract Extension Advisor (`/contract-extension`)
+### [x] 5. Contract Extension Advisor (`/contract-extension`)
 
 Recommend years and AAV for a player extension based on projected future performance. 
 Follow the skill architecture in CLAUDE.md exactly and create the web page support just like all the other skills.
 
-**Inputs:** Player name (e.g. "Colt Keith")
+**Inputs:** Player name (e.g. "Hank Aaron")
 
 **Data sources:**
 - `player_ratings` — current composite rating, sub-scores, development/potential scores

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from report_write import write_report_html
 from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
@@ -271,7 +272,7 @@ def generate_trade_targets_report(
 ):
     """Generate a trade targets HTML report.
 
-    offer_label:   Human-readable label, e.g. "Colt Keith".
+    offer_label:   Human-readable label, e.g. "Johnny Bench".
     offered_where: SQL WHERE fragment for the player(s) on the offer side.
     target_where:  SQL WHERE fragment for the return side.
     my_team_id:    The managed team's team_id (read from saves.json).
@@ -445,6 +446,6 @@ def generate_trade_targets_report(
 </body></html>"""
 
     report_path = get_reports_dir(save_name, "trade_targets") / f"{slug}.html"
-    report_path.write_text(html_doc)
+    write_report_html(report_path, html_doc)
 
     return str(report_path), dict(offered=offered, targets=targets)

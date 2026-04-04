@@ -184,6 +184,7 @@
       <select id="gen-skill" onchange="updateGenFields()">
         <option value="player-stats">Player Stats</option>
         <option value="player-rating">Player Rating</option>
+        <option value="contract-extension">Contract Extension</option>
         <option value="free-agents">Free Agents</option>
         <option value="draft-targets">Draft Targets</option>
         <option value="trade-targets">Trade Targets</option>
@@ -193,6 +194,20 @@
       <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
     </div>
     <div id="job-logs"></div>
+  </div>
+  <div class="section" id="search-section">
+    <div class="section-title">Search Reports</div>
+    <div class="generate-bar">
+      <input type="search" id="report-search-q" placeholder="Search report text (all words must match)"
+        style="flex:1;min-width:200px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;color:#222"
+        onkeydown="if(event.key==='Enter')runReportSearch()">
+      <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
+        <input type="checkbox" id="report-search-all-saves"> All saves
+      </label>
+      <button type="button" class="btn-action" onclick="runReportSearch()">Search</button>
+      <button type="button" class="btn-action secondary" onclick="clearReportSearch()">Clear</button>
+    </div>
+    <div id="report-search-results" style="margin-top:12px"></div>
   </div>
   <div id="content"></div>
 </div>
@@ -855,6 +870,9 @@ const GEN_SKILLS = {
     { id: 'gen-name', placeholder: 'First Last  (e.g. Colt Keith)', required: true },
     { id: 'gen-focus', placeholder: 'Focus: power, defense  (optional)', required: false },
   ]},
+  'contract-extension': { label: 'Contract Extension', fields: [
+    { id: 'gen-name', placeholder: 'First Last  (e.g. Colt Keith)', required: true },
+  ]},
   'free-agents':   { label: 'Free Agents',   fields: [
     { id: 'gen-criteria', placeholder: 'e.g. lefty SP under 28, low injury risk', required: true },
   ]},
@@ -1046,6 +1064,60 @@ async function clearJob(id, jobId) {
   });
   const panel = document.getElementById('logpanel-' + id);
   if (panel) panel.remove();
+}
+
+function clearReportSearch() {
+  const input = document.getElementById('report-search-q');
+  const out = document.getElementById('report-search-results');
+  if (input) input.value = '';
+  if (out) out.innerHTML = '';
+}
+
+async function runReportSearch() {
+  const input = document.getElementById('report-search-q');
+  const out = document.getElementById('report-search-results');
+  const q = (input && input.value || '').trim();
+  if (!q) {
+    out.innerHTML = '<span class="empty">Enter a search query.</span>';
+    return;
+  }
+  out.innerHTML = '<span class="ts">Searching…</span>';
+  const params = new URLSearchParams({ q });
+  if (_lastActiveKey) params.set('save', _lastActiveKey);
+  const allSaves = document.getElementById('report-search-all-saves');
+  if (allSaves && allSaves.checked) params.set('all_saves', '1');
+  let r;
+  try {
+    r = await fetch('/reports/search?' + params.toString());
+  } catch (e) {
+    out.innerHTML = '<span class="stale">Search failed (network).</span>';
+    return;
+  }
+  let data;
+  try {
+    data = await r.json();
+  } catch (e) {
+    out.innerHTML = '<span class="stale">Invalid response.</span>';
+    return;
+  }
+  if (!r.ok) {
+    const err = data && data.error ? data.error : r.status;
+    out.innerHTML = '<span class="stale">Search failed: ' + esc(String(err)) + '</span>';
+    return;
+  }
+  const results = data.results || [];
+  if (!results.length) {
+    out.innerHTML = '<span class="empty">No matches.</span>';
+    return;
+  }
+  const rows = results.map(hit => {
+    const title = hit.title || hit.path.split('/').pop().replace(/\.html$/, '').replace(/[-_]/g, ' ');
+    const cat = hit.category ? '<span class="ts"> · ' + esc(dirLabel(hit.category)) + '</span>' : '';
+    const href = encodeURI(hit.path);
+    return '<tr><td class="left"><a href="' + href + '" target="_blank">' + esc(title) + '</a>' + cat + '</td></tr>';
+  }).join('');
+  out.innerHTML =
+    '<table style="margin-top:8px;width:100%"><tr><th class="left">Match</th></tr>' + rows + '</table>';
 }
 
 async function reloadReports() {

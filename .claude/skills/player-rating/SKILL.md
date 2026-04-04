@@ -16,9 +16,9 @@ name, any focus modifiers, and all instructions below to the agent. Do NOT do th
 inline.
 
 ## Usage
-- `/player-rating Colt Keith` — default weights
-- `/player-rating Colt Keith defense` — boost defense weight
-- `/player-rating Colt Keith power, discipline` — boost multiple areas
+- `/player-rating Roger Clemens` — default weights
+- `/player-rating Ozzie Smith defense` — boost defense weight
+- `/player-rating Barry Bonds power, discipline` — boost multiple areas
 
 ## Agent prompt template
 

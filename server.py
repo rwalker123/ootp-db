@@ -325,6 +325,112 @@ def _json_response(handler, data, code=200):
     handler.wfile.write(payload)
 
 
+REPORTS_ROOT = ROOT / "reports"
+
+
+def _reports_search_save_roots(save_param, all_saves):
+    if all_saves:
+        if not REPORTS_ROOT.is_dir():
+            return []
+        return sorted(p for p in REPORTS_ROOT.iterdir() if p.is_dir())
+    registry = _load_saves_registry()
+    name = (save_param or "").strip() or (registry.get("active") or "")
+    if not name:
+        return []
+    root = REPORTS_ROOT / name
+    try:
+        root.resolve().relative_to(REPORTS_ROOT.resolve())
+    except ValueError:
+        return []
+    return [root] if root.is_dir() else []
+
+
+def _is_under_reports(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(REPORTS_ROOT.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _handle_reports_search(handler):
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    parsed = urlparse(handler.path)
+    qs = parse_qs(parsed.query)
+    q = (qs.get("q") or [""])[0].strip()
+    if not q:
+        _json_response(handler, {"results": [], "error": "missing q"}, 400)
+        return
+    save_param = unquote((qs.get("save") or [""])[0].strip())
+    all_saves = (qs.get("all_saves") or [""])[0].strip().lower() in ("1", "true", "yes")
+
+    tokens = [t.lower() for t in q.split() if t]
+    if not tokens:
+        _json_response(handler, {"results": [], "error": "empty query"}, 400)
+        return
+
+    roots = _reports_search_save_roots(save_param, all_saves)
+    results = []
+    max_results = 50
+    reports_resolved = REPORTS_ROOT.resolve()
+
+    for root in roots:
+        if len(results) >= max_results:
+            break
+        if not root.is_dir():
+            continue
+        for sidecar in root.rglob("*.search.json"):
+            if len(results) >= max_results:
+                break
+            try:
+                if not sidecar.is_file():
+                    continue
+                if not _is_under_reports(sidecar):
+                    continue
+                name = sidecar.name
+                if not name.endswith(".search.json"):
+                    continue
+                html_name = name[: -len(".search.json")] + ".html"
+                html_path = (sidecar.parent / html_name).resolve()
+                if not html_path.is_file():
+                    continue
+                if not _is_under_reports(html_path):
+                    continue
+                raw = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            title = raw.get("title") or ""
+            text = raw.get("text") or ""
+            if not isinstance(title, str):
+                title = str(title)
+            if not isinstance(text, str):
+                text = str(text)
+            hay = text.lower()
+            if not all(t in hay for t in tokens):
+                continue
+
+            rel = html_path.relative_to(ROOT.resolve())
+            url_path = "/".join(rel.parts)
+            cat = ""
+            try:
+                rp = html_path.relative_to(reports_resolved)
+                parts = rp.parts
+                if len(parts) >= 2:
+                    cat = parts[1]
+            except ValueError:
+                pass
+
+            results.append({
+                "path": url_path,
+                "title": title or html_path.stem.replace("_", " ").replace("-", " "),
+                "category": cat,
+            })
+
+    _json_response(handler, {"results": results})
+
 # ---------------------------------------------------------------------------
 # Request handler
 # ---------------------------------------------------------------------------
@@ -357,6 +463,8 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/reports/jobs/") and self.path.endswith("/stream"):
             job_id = self.path[len("/reports/jobs/"):-len("/stream")]
             self._handle_job_stream(job_id)
+        elif self.path.startswith("/reports/search"):
+            _handle_reports_search(self)
         else:
             super().do_GET()
 
@@ -372,6 +480,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(400, "Not a file")
             return
         target.unlink()
+        if target.suffix.lower() == ".html":
+            sc = target.with_name(target.stem + ".search.json")
+            if sc.is_file():
+                try:
+                    sc.unlink()
+                except OSError:
+                    pass
         self.send_response(200)
         self.end_headers()
 
@@ -643,9 +758,12 @@ class Handler(SimpleHTTPRequestHandler):
                     log.append(f"Regenerating {skill} report…")
                     new_path = self._run_data(skill, args, save, kwargs_override)
                     if analyses and new_path:
-                        new_content = Path(new_path).read_text()
+                        new_path_p = Path(new_path)
+                        new_content = new_path_p.read_text(encoding="utf-8")
                         new_content = _reinject_analyses(new_content, analyses)
-                        Path(new_path).write_text(new_content)
+                        from report_write import write_report_html
+
+                        write_report_html(new_path_p, new_content)
                     log.append(f"Done.")
                 except Exception as e:
                     log.append(f"Error: {e}")
@@ -670,6 +788,17 @@ class Handler(SimpleHTTPRequestHandler):
             first, last = parts[0], parts[1] if len(parts) > 1 else ""
             focus = parts[2:] if len(parts) > 2 else None
             path, _ = generate_rating_report(save, first, last, focus)
+            return path
+
+        if skill == "contract-extension":
+            from contract_extension import generate_contract_extension_report
+            first, *rest = args.split()
+            last = " ".join(rest)
+            path, _ = generate_contract_extension_report(save, first, last)
+            if path is None:
+                raise ValueError(
+                    "Player not found on MLB roster for contract extension report"
+                )
             return path
 
         kw = kwargs_override or {}

@@ -29,6 +29,7 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/free-agents`](#free-agents-natural-language-criteria)
   - [`/draft-targets`](#draft-targets-natural-language-criteria)
   - [`/trade-targets`](#trade-targets-player-or-criteria)
+  - [`/contract-extension`](#contract-extension-first-last)
 - [Contributing](#contributing)
 
 ## Prerequisites
@@ -212,7 +213,7 @@ Just run the same command again. All tables are dropped and recreated, so the da
 
 ## Claude Code Skills
 
-Skills are reusable, project-specific Claude Code commands that combine a Python data layer with an LLM analysis layer to produce rich HTML reports. Each skill lives in `.claude/skills/<skill-name>/SKILL.md` — a plain Markdown prompt that defines exactly how Claude should interpret your arguments, query the database, and write its analysis.
+Skills are reusable, project-specific commands that combine a Python data layer with an LLM analysis layer to produce rich HTML reports. Each skill lives in `.claude/skills/<skill-name>/SKILL.md` — a plain Markdown prompt that defines exactly how Claude should interpret your arguments, query the database, and write its analysis.
 
 Invoke a skill by typing `/skill-name` in the Claude Code chat prompt.
 
@@ -255,9 +256,9 @@ Reports are cached by player until the next DB import.
 Composite 0–100 rating breakdown with 9 sub-scores: contact, power, plate discipline, speed, defense, durability, work ethic, intelligence, and clutch. Optionally pass focus keywords to re-weight the scores toward a particular skill set. Opens an HTML report.
 
 ```
-/player-rating Colt Keith
-/player-rating Colt Keith defense
-/player-rating Jackson Jobe command, stuff
+/player-rating Bryce Harper
+/player-rating Gunner Henderson defense
+/player-rating Paul Skenes command, stuff
 /player-rating Riley Greene power, discipline
 ```
 
@@ -320,7 +321,7 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 Given one or more players you're willing to move, finds realistic return candidates on other teams. Value-matching is based on OOTP's own OA rating (the currency the AI uses when evaluating trades), not the composite analytical score — so the results reflect what other teams would actually consider giving up rather than who is analytically equivalent.
 
 ```
-/trade-targets Colt Keith
+/trade-targets Kirk Gibson
 /trade-targets Riley Greene for one or more minor league prospects
 /trade-targets Framber Valdez, want a young corner infielder with upside
 /trade-targets Jackson Jobe and Kyle Finnegan
@@ -345,6 +346,44 @@ The LLM analysis at the top explains the value tier, names the top specific targ
 - ⭐ Premium target — Rating ≥ 75; may require sweetening the package
 - ⚡ Elite work ethic
 - 🧠 High IQ
+
+---
+
+### `/contract-extension <first> <last>`
+
+Recommends a contract extension offer (years + AAV + total value) for any MLB-level player. Combines market rate analysis from comparable contracts, projected WAR trajectory, aging curve, and personality traits into a concrete negotiation range with floor/target/ceiling AAV.
+
+```
+/contract-extension Colt Keith
+/contract-extension Jackson Jobe
+/contract-extension Riley Greene
+```
+
+The HTML report opens in your browser with five sections:
+
+- **Current Contract** — active deal details and year-by-year salary timeline
+- **Performance History** — last 5 MLB seasons with rate stats and WAR by year
+- **Market Comparables** — up to 10 active players at the same position with similar OA ratings, showing their current contracts and service time for market context
+- **Personality & Risk Profile** — greed, loyalty, play-for-winner, work ethic, injury proneness
+- **Extension Recommendation** — LLM-written analysis covering the recommended deal, performance projection, leverage/urgency, risk flags, and negotiation notes
+
+**Core analysis logic:**
+- **Base AAV** is derived from the median comparable salary, scaled by OA
+- **Years** cover peak years for young players; avoid buying into the decline phase (age 33+) for veterans
+- **Greed > 150**: budget 15–20% above market for the opening ask; **Greed < 80**: may accept below-market
+- **Loyalty > 150**: press a ~10% hometown discount; **low loyalty**: pay full market or risk losing them at FA
+- **Injury risk**: flag shortens the recommended commitment by 1 year and reduces AAV 10–15%
+
+Reports are cached by player until the next DB import.
+
+**Flags in reports:**
+- ⚕ Injury Risk — `flag_injury_risk` is set; factor into deal length
+- 📈 High Ceiling — large OA/POT gap; upside premium may be warranted for young players
+- 💰 High Greed — player will demand above-market terms
+- ❤ Loyal — hometown discount may be available
+- ⚡ Elite Work Ethic
+- 🧠 High IQ
+- 🔒 No-Trade Clause
 
 ---
 

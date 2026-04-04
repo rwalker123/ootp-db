@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from report_write import write_report_html
 from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
@@ -1142,7 +1143,7 @@ def generate_player_report(save_name, first_name, last_name):
     # Write report
     slug = f"{first_name}_{last_name}_{player_id}".lower()
     report_path = get_reports_dir(save_name, "players") / f"{slug}.html"
-    report_path.write_text(html)
+    write_report_html(report_path, html)
 
     return report_path, data
 
