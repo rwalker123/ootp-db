@@ -235,7 +235,8 @@ def check_database():
     imported = registry.get("saves", {})
 
     try:
-        sys.path.insert(0, str(SRC))
+        if str(SRC) not in sys.path:
+            sys.path.insert(0, str(SRC))
         from sqlalchemy import create_engine, text
         from dotenv import load_dotenv
         load_dotenv(env_path)
@@ -526,12 +527,16 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, {"error": "Save not found"}, 404)
             return
         try:
-            sys.path.insert(0, str(SRC))
+            if str(SRC) not in sys.path:
+                sys.path.insert(0, str(SRC))
             from sqlalchemy import create_engine, text
             from dotenv import load_dotenv
             load_dotenv(ROOT / ".env")
             db_name = registry["saves"][save_name]["db_name"]
             db_url = os.environ.get("POSTGRES_URL", "").rstrip("/")
+            if not db_url:
+                _json_response(self, {"error": "POSTGRES_URL is not configured"}, 500)
+                return
             engine = create_engine(f"{db_url}/{db_name}")
             with engine.connect() as conn:
                 rows = conn.execute(text("""
@@ -566,11 +571,16 @@ class Handler(SimpleHTTPRequestHandler):
         if not save_name or not team_id:
             self._respond(400, "Missing save or team_id")
             return
+        try:
+            team_id_int = int(team_id)
+        except (TypeError, ValueError):
+            self._respond(400, "Invalid team_id")
+            return
         registry = _load_saves_registry()
         if save_name not in registry.get("saves", {}):
             self._respond(404, "Save not found in registry")
             return
-        registry["saves"][save_name]["my_team_id"] = int(team_id)
+        registry["saves"][save_name]["my_team_id"] = team_id_int
         registry["saves"][save_name]["my_team_abbr"] = team_abbr
         _save_registry(registry)
         self._respond(200, "ok")
@@ -627,7 +637,8 @@ class Handler(SimpleHTTPRequestHandler):
             kwargs_override = body.get("kwargs_override")
 
             def _run_in_thread():
-                sys.path.insert(0, str(SRC))
+                if str(SRC) not in sys.path:
+                    sys.path.insert(0, str(SRC))
                 try:
                     log.append(f"Regenerating {skill} report…")
                     new_path = self._run_data(skill, args, save, kwargs_override)
