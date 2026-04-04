@@ -32,7 +32,7 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Find trade targets based on: **"$ARGUMENTS"** in `/Users/raywalker/source/ootp-db`.
+Find trade targets based on: **"$ARGUMENTS"**.
 
 ### Step 0: Detect Direction and Load My Team
 
@@ -40,15 +40,26 @@ Before looking up players, determine trade direction and load team identity:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import json
+import json, os
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+load_dotenv(".env")
 registry = json.loads(open("saves.json").read())
 save = registry["active"]
 save_info = registry.get("saves", {}).get(save, {})
 my_team_id = save_info.get("my_team_id") or 10
 my_team_abbr = save_info.get("my_team_abbr") or "???"
+db = save.lower().replace("-", "_").replace(" ", "_")
+engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+with engine.connect() as conn:
+    row = conn.execute(text(
+        "SELECT name, nickname FROM teams WHERE team_id = :tid LIMIT 1"
+    ), dict(tid=my_team_id)).mappings().fetchone()
+my_team_name = f"{row['name']} {row['nickname']}" if row else my_team_abbr
 print(f"save={save}")
 print(f"my_team_id={my_team_id}")
 print(f"my_team_abbr={my_team_abbr}")
+print(f"my_team_name={my_team_name}")
 PYEOF
 ```
 
@@ -251,21 +262,21 @@ The HTML file has a `<!-- TRADE_CALLOUT_SUMMARY -->` placeholder. Replace it wit
 `<div class="summary">` containing 2–4 sentences:
 
 **Offering mode:**
-- Lead with what `{my_team_abbr}` can realistically get back (value tier + position)
+- Lead with what `{my_team_name}` can realistically get back (value tier + position)
 - Name the top 1–2 specific targets and why they fit
 - Flag any concerns: no-trade clauses, injury risk, value mismatch, thin market
 - If filters were relaxed: note which one and what that means for the market
 
 **Acquiring mode:**
-- Lead with what it would cost `{my_team_abbr}` to acquire the target (OA tier + what you'd give up)
-- Name the top 1–2 specific players from `{my_team_abbr}`'s roster who match that cost
+- Lead with what it would cost `{my_team_name}` to acquire the target (OA tier + what you'd give up)
+- Name the top 1–2 specific players from `{my_team_name}`'s roster who match that cost
 - Flag concerns: giving up too much, whether it's the right time to buy
 - If filters were relaxed: note which one and what that means for the market
 
 Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
 
 ```bash
-open /Users/raywalker/source/ootp-db/reports/<save_name>/trade_targets/<slug>.html
+open reports/<save_name>/trade_targets/<slug>.html
 ```
 
 ### Step 7: Print Terminal Summary

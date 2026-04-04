@@ -30,6 +30,7 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/draft-targets`](#draft-targets-natural-language-criteria)
   - [`/trade-targets`](#trade-targets-player-or-criteria)
   - [`/contract-extension`](#contract-extension-first-last)
+  - [`/waiver-claim`](#waiver-claim-first-last)
 - [Contributing](#contributing)
 
 ## Prerequisites
@@ -384,6 +385,42 @@ Reports are cached by player until the next DB import.
 - ⚡ Elite Work Ethic
 - 🧠 High IQ
 - 🔒 No-Trade Clause
+
+---
+
+### `/waiver-claim <first> <last>`
+
+Evaluates any player on waivers or DFA against the Tigers' current roster at the same position. Produces a side-by-side comparison with rating deltas, contract obligation, positional flexibility, and a 40-man roster status check, then delivers a clear **CLAIM / PASS / MONITOR** verdict.
+
+```
+/waiver-claim Jordan Montgomery
+/waiver-claim Mickey Moniak
+/waiver-claim George Valera
+```
+
+Works for any player — not just those currently on waivers. You can evaluate a DFA'd player, or run it speculatively on any roster player you're considering targeting.
+
+The HTML report opens in your browser with six sections:
+
+- **Claim Recommendation** — LLM-written verdict (CLAIM / PASS / MONITOR) with value comparison, contract cost analysis, and risk flags
+- **Tigers Roster Comparison** — all Tigers players at the same position group (OF grouped together; SP and RP/CL grouped separately), ordered by rating, with the waiver candidate highlighted
+- **Current Season Stats** — batting (AVG/OBP/SLG/OPS/wRC+/WAR/Avg EV) or pitching (ERA/FIP/xFIP/WHIP/K%/BB%/WAR)
+- **Rating Breakdown** — 9-dimension composite score breakdown (offense, contact, discipline, defense, baserunning, potential, durability, development, clubhouse)
+- **Contract Obligation** — full salary timeline if claimed, years remaining, and total obligation
+- **Positional Flexibility** — fielding ratings at all playable positions (≥ 40 on 20–80 scale), useful for utility claim decisions
+- **40-Man Roster Status** — current count vs. 40-man limit; flags if a DFA is required before claiming
+
+**Verdict logic:**
+- **CLAIM** — candidate rating is ≥ 5 points above the weakest incumbent at the position, and contract cost is manageable
+- **PASS** — candidate is worse than incumbents, carries an expensive multi-year obligation, or has high injury risk at an already-healthy position
+- **MONITOR** — lateral move, or timing isn't urgent (plenty of claim window left, roster is full)
+
+**Key data in the comparison:**
+- `rating_vs_best`: candidate rating minus the Tigers' best player at the position — negative means a downgrade
+- `rating_vs_worst`: candidate rating minus the Tigers' weakest player — positive means a clear upgrade opportunity
+- Contract obligation is shown in full; the LLM flags the specific player who would need to be DFA'd if the 40-man is at capacity
+
+Reports are cached by player until the next DB import.
 
 ---
 

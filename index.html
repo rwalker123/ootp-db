@@ -185,6 +185,7 @@
         <option value="player-stats">Player Stats</option>
         <option value="player-rating">Player Rating</option>
         <option value="contract-extension">Contract Extension</option>
+        <option value="waiver-claim">Waiver Claim</option>
         <option value="free-agents">Free Agents</option>
         <option value="draft-targets">Draft Targets</option>
         <option value="trade-targets">Trade Targets</option>
@@ -872,6 +873,9 @@ const GEN_SKILLS = {
   ]},
   'contract-extension': { label: 'Contract Extension', fields: [
     { id: 'gen-name', placeholder: 'First Last  (e.g. Colt Keith)', required: true },
+  ]},
+  'waiver-claim': { label: 'Waiver Claim', fields: [
+    { id: 'gen-name', placeholder: 'First Last  (e.g. Jordan Montgomery)', required: true },
   ]},
   'free-agents':   { label: 'Free Agents',   fields: [
     { id: 'gen-criteria', placeholder: 'e.g. lefty SP under 28, low injury risk', required: true },

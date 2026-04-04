@@ -801,6 +801,17 @@ class Handler(SimpleHTTPRequestHandler):
                 )
             return path
 
+        if skill == "waiver-claim":
+            from waiver_wire import generate_waiver_claim_report
+            first, *rest = args.split()
+            last = " ".join(rest)
+            path, _ = generate_waiver_claim_report(save, first, last)
+            if path is None:
+                raise ValueError(
+                    "Player not found for waiver claim report"
+                )
+            return path
+
         kw = kwargs_override or {}
         where  = kw.get("where_clause", "1=1")
         order  = kw.get("order_by")

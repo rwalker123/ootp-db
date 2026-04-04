@@ -38,7 +38,7 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Search for prospects matching **"$ARGUMENTS"** in `/Users/raywalker/source/ootp-db`.
+Search for prospects matching **"$ARGUMENTS"**.
 
 ### Step 0: Pool Detection (do this first)
 
@@ -156,7 +156,7 @@ Default limit: 25 results.
 #### If POOL = "draft":
 
 ```bash
-cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys, json
 sys.path.insert(0, "src")
 from draft_targets import generate_draft_targets_report
@@ -175,7 +175,7 @@ PYEOF
 #### If POOL = "ifa":
 
 ```bash
-cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys, json
 sys.path.insert(0, "src")
 from ifa_targets import generate_ifa_targets_report

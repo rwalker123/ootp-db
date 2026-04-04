@@ -27,14 +27,14 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 ---
 
-Generate a contract extension advisor report for **$ARGUMENTS** in `/Users/raywalker/source/ootp-db`.
+Generate a contract extension advisor report for **$ARGUMENTS**.
 
 ### Step 1: Generate (or retrieve cached) the report
 
 Parse the first two words of $ARGUMENTS as the player's first and last name.
 
 ```bash
-cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys, json
 sys.path.insert(0, "src")
 from contract_extension import generate_contract_extension_report
@@ -54,7 +54,7 @@ PYEOF
 If the output is `PLAYER_NOT_FOUND` — the player wasn't found in the active save's MLB roster. Check spelling (hyphens, accents), then try with a partial last name match by running a direct lookup:
 
 ```bash
-cd /Users/raywalker/source/ootp-db && .venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys, json
 sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
@@ -150,7 +150,7 @@ Use this format (with actual dollar amounts):
 - `greed` < 80: "Low Greed — player may accept a below-market deal; start negotiations at or below market rate"
 - `loyalty` > 150: "Strong Loyalty — likely values staying; use this to press a ~10% hometown discount"
 - `loyalty` < 80: "Low Loyalty — won't take a discount; pay full market or he walks at FA"
-- `play_for_winner` > 150: "Wants to win — contending teams will have an edge; Detroit's win trajectory matters here"
+- `play_for_winner` > 150: "Wants to win — contending teams will have an edge; consider whether `my_team_name` can offer a realistic path to the playoffs"
 - `local_pop` ≥ 5: "Fan icon — losing this player would measurably hurt gate receipts; factor an additional ~5–10% premium into the ceiling offer to reflect retention value beyond pure baseball production"
 - `local_pop` 3–4: "Established local favorite — moderate attendance/brand impact if traded"
 - `national_pop` ≥ 5: "National star — marketing and merchandise value is significant; ownership will value retention beyond the on-field numbers"
@@ -174,7 +174,7 @@ Read the HTML file, replace `<!-- CONTRACT_EXTENSION_SUMMARY -->` with the summa
 write it back. Then open the report — use the exact path printed after `GENERATED:`:
 
 ```bash
-open /Users/raywalker/source/ootp-db/reports/<save_name>/contract_extensions/<slug>.html
+open reports/<save_name>/contract_extensions/<slug>.html
 ```
 
 ### Step 3: Print terminal summary
