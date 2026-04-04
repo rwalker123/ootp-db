@@ -92,11 +92,11 @@ Given a player on waivers, evaluate whether to claim them and who on the current
 
 ---
 
-### [ ] 4. Trade Evaluator (`/trade-targets`)
+### [x] 4. Trade Evaluator (`/trade-targets`)
 
-Given players available on the Tigers, find realistic trade partners and return packages.
+Given players available on the [Team Name] [Team Player], find realistic trade partners and return packages.
 
-**Inputs:** One or more Tiger players being offered (e.g. "Colt Keith", or "we have a surplus of outfielders")
+**Inputs:** One or more [Team Name] players being offered (e.g. "Colt Keith", or "we have a surplus of outfielders")
 
 **Data sources:**
 - `player_ratings` — value of players on both sides
@@ -120,7 +120,8 @@ Given players available on the Tigers, find realistic trade partners and return 
 
 ### [ ] 5. Contract Extension Advisor (`/contract-extension`)
 
-Recommend years and AAV for a player extension based on projected future performance.
+Recommend years and AAV for a player extension based on projected future performance. 
+Follow the skill architecture in CLAUDE.md exactly and create the web page support just like all the other skills.
 
 **Inputs:** Player name (e.g. "Colt Keith")
 

@@ -337,6 +337,11 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, run_all_checks())
         elif self.path == "/saves":
             _json_response(self, get_saves_data())
+        elif self.path.startswith("/saves/my-team-candidates"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            save_name = (qs.get("save") or [""])[0].strip()
+            self._handle_my_team_candidates(save_name)
         elif self.path == "/git-status":
             status_file = ROOT / ".update-status"
             result = {"updates_available": False}
@@ -383,6 +388,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_import(body)
         elif self.path == "/saves/set-active":
             self._handle_set_active(body)
+        elif self.path == "/saves/set-my-team":
+            self._handle_set_my_team(body)
         elif self.path == "/saves/clear-log":
             self._handle_clear_log(body)
         elif self.path == "/reports/generate":
@@ -510,6 +517,64 @@ class Handler(SimpleHTTPRequestHandler):
         _save_registry(registry)
         self._respond(200, "ok")
 
+    def _handle_my_team_candidates(self, save_name):
+        if not save_name:
+            _json_response(self, {"error": "Missing save name"}, 400)
+            return
+        registry = _load_saves_registry()
+        if save_name not in registry.get("saves", {}):
+            _json_response(self, {"error": "Save not found"}, 404)
+            return
+        try:
+            sys.path.insert(0, str(SRC))
+            from sqlalchemy import create_engine, text
+            from dotenv import load_dotenv
+            load_dotenv(ROOT / ".env")
+            db_name = registry["saves"][save_name]["db_name"]
+            db_url = os.environ.get("POSTGRES_URL", "").rstrip("/")
+            engine = create_engine(f"{db_url}/{db_name}")
+            with engine.connect() as conn:
+                rows = conn.execute(text("""
+                    SELECT hm.human_manager_id, hm.team_id,
+                           t.name, t.nickname, t.abbr
+                    FROM human_managers hm
+                    JOIN teams t ON t.team_id = hm.team_id
+                    WHERE t.league_id = 203
+                    ORDER BY t.abbr
+                """)).fetchall()
+            candidates = [
+                dict(human_manager_id=r[0], team_id=r[1],
+                     name=r[2], nickname=r[3], abbr=r[4])
+                for r in rows
+            ]
+            # Auto-set if unambiguous
+            auto_set = False
+            if len(candidates) == 1 and not registry["saves"][save_name].get("my_team_id"):
+                c = candidates[0]
+                registry["saves"][save_name]["my_team_id"] = c["team_id"]
+                registry["saves"][save_name]["my_team_abbr"] = c["abbr"]
+                _save_registry(registry)
+                auto_set = True
+            _json_response(self, {"candidates": candidates, "auto_set": auto_set})
+        except Exception as e:
+            _json_response(self, {"error": str(e)}, 500)
+
+    def _handle_set_my_team(self, body):
+        save_name = body.get("save", "").strip()
+        team_id = body.get("team_id")
+        team_abbr = body.get("team_abbr", "").strip()
+        if not save_name or not team_id:
+            self._respond(400, "Missing save or team_id")
+            return
+        registry = _load_saves_registry()
+        if save_name not in registry.get("saves", {}):
+            self._respond(404, "Save not found in registry")
+            return
+        registry["saves"][save_name]["my_team_id"] = int(team_id)
+        registry["saves"][save_name]["my_team_abbr"] = team_abbr
+        _save_registry(registry)
+        self._respond(200, "ok")
+
     def _handle_refresh(self, body):
         file_path = body.get("path", "")
         mode = body.get("mode", "data")
@@ -627,6 +692,23 @@ class Handler(SimpleHTTPRequestHandler):
                 save, args, where,
                 order_by=order or "ir.rating_overall DESC",
                 limit=limit,
+            )
+            return path
+
+        if skill == "trade-targets":
+            from trade_targets import generate_trade_targets_report
+            _reg = _load_saves_registry()
+            _my_team_id = _reg.get("saves", {}).get(save, {}).get("my_team_id") or 10
+            path, _ = generate_trade_targets_report(
+                save, args,
+                offered_where=kw.get("offered_where", "1=1"),
+                target_where=kw.get("target_where", "1=1"),
+                my_team_id=_my_team_id,
+                mode=kw.get("mode", "offering"),
+                target_join=kw.get("target_join", ""),
+                order_by=order or "pr.rating_overall DESC",
+                limit=limit,
+                highlight=kw.get("highlight"),
             )
             return path
 

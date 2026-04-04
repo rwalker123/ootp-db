@@ -28,6 +28,7 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/player-rating`](#player-rating-first-last-focus)
   - [`/free-agents`](#free-agents-natural-language-criteria)
   - [`/draft-targets`](#draft-targets-natural-language-criteria)
+  - [`/trade-targets`](#trade-targets-player-or-criteria)
 - [Contributing](#contributing)
 
 ## Prerequisites
@@ -312,6 +313,38 @@ Returns a ranked list with OA/POT ratings, tools scores, development traits, and
 - ⚡ Elite work ethic
 - 🧠 High IQ
 - 💰 Demanding / above-slot bonus risk
+
+---
+
+### `/trade-targets <player or criteria>`
+Given one or more players you're willing to move, finds realistic return candidates on other teams. Value-matching is based on OOTP's own OA rating (the currency the AI uses when evaluating trades), not the composite analytical score — so the results reflect what other teams would actually consider giving up rather than who is analytically equivalent.
+
+```
+/trade-targets Colt Keith
+/trade-targets Riley Greene for one or more minor league prospects
+/trade-targets Framber Valdez, want a young corner infielder with upside
+/trade-targets Jackson Jobe and Kyle Finnegan
+/trade-targets surplus outfielders, need starting pitching
+```
+
+Describe what you're offering in plain English, and optionally what you want back. The skill looks up the offered player(s) on the Tigers roster, assesses their OA-based trade value, checks which positions are thin on Detroit's roster, and builds a filtered candidate list from other MLB teams.
+
+You can also steer the search toward a specific return type — asking for "minor league prospects" or "controllable arms" will shift the query accordingly, as shown below.
+
+![Trade Targets prompt in the web UI](docs/screenshots/OOTP%20Analyst%20Trade%20Prompt.png)
+
+The resulting HTML report opens in your browser with two sections: **What You're Offering** (the offered player's stats, contract, and service time) and the ranked return candidates, sorted by `rating_overall` so the best analytical value within the OA band surfaces first.
+
+![Trade Targets HTML report](docs/screenshots/OOTP%20Analyst%20Trade%20Query.png)
+
+The LLM analysis at the top explains the value tier, names the top specific targets, and flags move candidates — players whose teams are likely to trade them (expensive contracts relative to OA, veterans on rebuilding clubs, or rentals a contender might flip).
+
+**Flags in reports:**
+- 🔒 No-trade clause — acquiring team must negotiate carefully
+- 📈 High ceiling — POT significantly above current OA
+- ⭐ Premium target — Rating ≥ 75; may require sweetening the package
+- ⚡ Elite work ethic
+- 🧠 High IQ
 
 ---
 
