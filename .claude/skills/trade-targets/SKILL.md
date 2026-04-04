@@ -1,7 +1,7 @@
 ---
 name: trade-targets
 description: Find realistic trade return candidates (offering your player) or cost-to-acquire candidates (targeting another team's player). Value-matched by OA with contract details.
-argument-hint: <player(s) or criteria, e.g. "Colt Keith" or "acquiring Aaron Judge" or "surplus OF, need SP">
+argument-hint: <player(s) or criteria, e.g. "Pete Rose" or "acquiring Richie Zisk" or "surplus OF, need SP">
 ---
 
 # Trade Target Finder
@@ -16,7 +16,7 @@ Do NOT do the work inline.
 ## Usage
 
 ```
-/trade-targets Colt Keith
+/trade-targets Jack Morris
 /trade-targets Jackson Jobe and Kyle Finnegan
 /trade-targets surplus outfielders, need starting pitching
 /trade-targets Framber Valdez, want a young corner infielder with upside
@@ -225,7 +225,7 @@ my_team_id = registry.get("saves", {}).get(save_name, {}).get("my_team_id") or 1
 offered_where = "<AGENT FILLS: SQL WHERE matching offered/targeted player(s)>"
 target_where = "<AGENT FILLS: SQL WHERE for return/give-up targets>"
 target_join = "<AGENT FILLS: JOIN clause for bas/pas, or empty string>"
-offer_label = "<AGENT FILLS: human label, e.g. 'Colt Keith' or 'Aaron Judge'>"
+offer_label = "<AGENT FILLS: human label, e.g. 'Babe Ruth' or 'Mickey Mantle'>"
 highlight = <AGENT FILLS: list of (col_key, label) tuples or None>
 mode = "<AGENT FILLS: 'offering' or 'acquiring'>"
 path, data = generate_trade_targets_report(
@@ -271,10 +271,10 @@ open /Users/raywalker/source/ootp-db/reports/<save_name>/trade_targets/<slug>.ht
 ### Step 7: Print Terminal Summary
 
 ```
-Trade targets: "Colt Keith" — 18 return candidates
+Trade targets: "Lou Whitaker" — 18 return candidates
 
 Offering:
-  Colt Keith     3B   26   OA:51   Rating:57.7   wRC+:108   WAR:2.1   $2.5M   5y left
+  Lou Whitaker     3B   26   OA:51   Rating:57.7   wRC+:108   WAR:2.1   $2.5M   5y left
 
 Top return targets:
  #  Name                  Pos  Team  Age  OA  Rating   wRC+  WAR   Salary  Yrs

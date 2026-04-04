@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+from report_write import write_report_html
 from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
@@ -534,7 +535,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 
     slug = _rating_slug(first_name, last_name, player_id, focus_modifiers)
     report_path = get_reports_dir(save_name, "ratings") / f"{slug}.html"
-    report_path.write_text(html)
+    write_report_html(report_path, html)
 
     return str(report_path), dict(
         player_name=f"{first} {last}",

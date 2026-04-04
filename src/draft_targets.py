@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from report_write import write_report_html
 from shared_css import db_name_from_save, get_report_css, get_reports_dir
 from sqlalchemy import create_engine, text
 
@@ -292,6 +293,6 @@ def generate_draft_targets_report(save_name, criteria_label, where_clause,
 </body></html>"""
 
     report_path = get_reports_dir(save_name, "draft") / f"{slug}.html"
-    report_path.write_text(html)
+    write_report_html(report_path, html)
 
     return str(report_path), results
