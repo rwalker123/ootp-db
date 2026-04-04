@@ -94,9 +94,9 @@ Given a player on waivers, evaluate whether to claim them and who on the current
 
 ### [x] 4. Trade Evaluator (`/trade-targets`)
 
-Given players available on the [Team Name] [Team Player], find realistic trade partners and return packages.
+Given players available on the Tigers, find realistic trade partners and return packages.
 
-**Inputs:** One or more [Team Name] players being offered (e.g. "Colt Keith", or "we have a surplus of outfielders")
+**Inputs:** One or more Tigers players being offered (e.g. "Colt Keith", or "we have a surplus of outfielders")
 
 **Data sources:**
 - `player_ratings` — value of players on both sides

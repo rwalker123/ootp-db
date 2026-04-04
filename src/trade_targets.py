@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trade target search report generator for OOTP Baseball."""
 
+import html
 import json
 import os
 import re
@@ -328,24 +329,33 @@ def generate_trade_targets_report(
     else:
         slug = re.sub(r"[^a-z0-9_]", "", offer_label.lower().replace(" ", "_"))[:50]
 
+    offer_label_esc = html.escape(offer_label, quote=True)
     if mode == "acquiring":
         offered_show_team = True   # show where the target player plays
         target_show_team = False   # targets are your own players
         offered_section_title = "Player You're Targeting"
         targets_section_title = f"What You'd Need to Give Up ({len(targets)} players)"
-        page_meta = f"Acquiring: {offer_label}"
+        page_meta = f"Acquiring: {offer_label_esc}"
     else:
         offered_show_team = False  # your players — team is implied
         target_show_team = True
         offered_section_title = "What You're Offering"
         targets_section_title = f"Return Targets ({len(targets)} players)"
-        page_meta = f"Offering: {offer_label}"
+        page_meta = f"Offering: {offer_label_esc}"
 
-    key_header_off = "FIP" if (offered and offered[0]["player_type"] == "pitcher") else "wRC+"
+    def _key_header_for_rows(rows):
+        player_types = {r.get("player_type") for r in rows if r.get("player_type")}
+        if "pitcher" in player_types and len(player_types) > 1:
+            return "wRC+/FIP"
+        if player_types == {"pitcher"}:
+            return "FIP"
+        return "wRC+"
+
+    key_header_off = _key_header_for_rows(offered)
     offered_header = build_table_header(show_team=offered_show_team, key_header=key_header_off, highlight=None)
     offered_rows_html = build_table_rows(offered, show_team=offered_show_team, highlight=None)
 
-    key_header_tgt = "FIP" if (targets and targets[0]["player_type"] == "pitcher") else "wRC+"
+    key_header_tgt = _key_header_for_rows(targets)
     targets_header = build_table_header(show_team=target_show_team, key_header=key_header_tgt, highlight=highlight)
     targets_rows_html = build_table_rows(targets, show_team=target_show_team, highlight=highlight)
 
@@ -397,7 +407,7 @@ def generate_trade_targets_report(
     )
 
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Trade Targets — {offer_label}</title>
+<html><head><meta charset="utf-8"><title>Trade Targets — {offer_label_esc}</title>
 {_ootp_meta}
 <style>{get_report_css("1200px")}</style></head><body>
 <div class="container">
