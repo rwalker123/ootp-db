@@ -31,6 +31,9 @@
   a { color: #2266cc; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .stale { color: #cc7700; font-weight: bold; font-size: 12px; }
+  .db-status { font-size: 11px; margin-right: 4px; cursor: default; }
+  .db-status-ok { color: #2a7a2a; }
+  .db-status-stale { color: #cc7700; }
   .ts { color: #888; }
   .empty { color: #aaa; font-style: italic; }
 
@@ -277,7 +280,7 @@ async function loadSaves() {
 
   const runningKey = JSON.stringify(data.running);
   const activeKey = data.active || '';
-  const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k, v.my_team_id || null])));
+  const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k, (v.csv_mtime || '') + '|' + (v.my_team_id || '')])));
   const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey || savesKey !== _lastSavesKey;
   _lastRunningKey = runningKey;
   _lastActiveKey = activeKey;
@@ -314,7 +317,7 @@ async function loadSaves() {
   if (nowRunning) {
     _savePollTimer = setTimeout(loadSaves, 1000);
   } else {
-    _savePollTimer = null;
+    _savePollTimer = setTimeout(loadSaves, 30_000);  // idle: check every 30s for new CSV exports
     if (wasRunning) reloadReports();
   }
 }
@@ -330,16 +333,23 @@ function renderSaves(data) {
     const nameCell = isActive
       ? `★ <strong>${esc(name)}</strong><span class="badge-active">Active</span>`
       : esc(name);
+    const csvNewer = info.csv_mtime && info.last_import && info.csv_mtime > info.last_import;
+    const hasCsvInfo = info.csv_mtime && info.last_import;
+    const dbStatus = hasCsvInfo
+      ? (csvNewer
+          ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
+          : `<span class="db-status db-status-ok" title="Database is up to date">✓</span>`)
+      : '';
     const actions = isRunning
       ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
-      : buildImportBtn(name, isActive);
+      : buildImportBtn(name, isActive, csvNewer);
     const cellId = `my-team-cell-${name.replace(/[^a-z0-9]/gi, '_')}`;
     const myTeamCell = info.my_team_id
       ? `<span class="badge-team">${esc(info.my_team_abbr || '')}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(name)})" title="Change team">✎</button>`
       : `<span class="ts">—</span>`;
     return `<tr>
       <td class="left">${nameCell}</td>
-      <td>${esc(info.db_name)}</td>
+      <td>${dbStatus}${esc(info.db_name)}</td>
       <td class="ts">${info.last_import || '—'}</td>
       <td id="${esc(cellId)}">${myTeamCell}</td>
       <td>${actions}</td>
@@ -430,10 +440,11 @@ function renderSaves(data) {
   el.querySelectorAll('.import-log-body').forEach(el => { el.scrollTop = el.scrollHeight; });
 }
 
-function buildImportBtn(name, isActive) {
+function buildImportBtn(name, isActive, csvNewer) {
+  const setActiveBtn = `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>`;
   const refreshBtn = `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`;
-  if (isActive) return refreshBtn;
-  return `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>${refreshBtn}`;
+  if (!csvNewer) return isActive ? '' : setActiveBtn;
+  return isActive ? refreshBtn : setActiveBtn + refreshBtn;
 }
 
 // ---------------------------------------------------------------------------
