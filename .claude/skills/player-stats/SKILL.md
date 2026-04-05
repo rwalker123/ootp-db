@@ -107,46 +107,36 @@ If the player is not found, try a fuzzy match:
 SELECT player_id, first_name, last_name FROM players WHERE last_name ILIKE '<partial>%'
 ```
 
-### Step 2: Write scouting summaries and insert them
+### Step 2: Write the scouting summary and insert it
 
-The HTML has placeholder comments where summaries go:
-- `<!-- BATTING_SUMMARY -->` — replace with a batting scouting summary (if player has batting data)
-- `<!-- PITCHING_SUMMARY -->` — replace with a pitching scouting summary (if player has pitching data)
-- `<!-- FIELDING_SUMMARY -->` — replace with a fielding scouting note (position players only, not pitchers)
+The HTML has a single placeholder: `<!-- SCOUTING_SUMMARY -->` — replace it with a unified
+scouting summary covering all of the player's relevant dimensions.
 
-For two-way players, write BOTH batting and pitching summaries. Each is independent — analyze batting and pitching separately.
+Write **4–6 bullets** total, covering whichever of these apply to this player:
 
-**Fielding summary** (2-3 bullets, position players only — skip for pitchers):
-- Primary position performance: ZR (positive = above avg, negative = below avg; >1.0 good, <-1.0 poor), FPct vs ~.980 MLB avg
-- Position-specific highlights:
-  - **Catchers**: framing value, CS% (>32% good, ~28% avg, <22% poor), PB rate
-  - **Infielders**: DP rate, ZR range tendency, error frequency
-  - **Outfielders**: arm value, ZR range assessment
-- Cross-reference fielding ratings vs actual stats — flag if ratings and real-world performance diverge
-
-Wrap in `<h2>Fielding Scouting Summary</h2><div class="summary"><ul>...</ul></div>`
-
-**Batting summary** (3-5 bullets):
+**Batting** (include if player has batting data):
 - Overall offensive production (wRC+/OPS+ vs benchmarks: 115+ good, 100 avg, <85 poor)
-- Platoon splits (vs LHP vs RHP wRC+, xwOBA, K%)
 - Contact quality (avg EV vs 88-90, hard hit% vs 39%, barrel% vs 6-7%)
-- Plate discipline (K% vs 22% avg, BB% vs 8% avg)
-- Defensive value and career trajectory
+- Plate discipline (K% vs 22% avg, BB% vs 8% avg) and platoon splits (vs LHP vs RHP)
 
-**Pitching summary** (3-5 bullets):
-- Overall pitching performance (ERA, FIP vs benchmarks: <3.50 good, ~4.00 avg, >4.50 poor)
-- Pitch arsenal and ratings
+**Pitching** (include if player has pitching data):
+- Overall performance (ERA, FIP vs benchmarks: <3.50 good, ~4.00 avg, >4.50 poor)
 - K-BB% (18%+ good, ~14% avg, <8% poor), WHIP (<1.15 good, ~1.30 avg, >1.40 poor)
-- Contact quality allowed (barrel%, hard hit%, xwOBA against)
-- Platoon splits (vs LHB vs RHB) and career trajectory
+- Contact quality allowed (barrel%, hard hit%, xwOBA against) and platoon splits (vs LHB vs RHB)
+
+**Fielding** (position players only — skip for pitchers):
+- Primary position: ZR (>1.0 good, ~0 avg, <-1.0 poor), FPct vs ~.980 MLB avg
+- Position-specific: catchers (framing, CS% >32% good), infielders (DP rate, ZR),
+  outfielders (arm value, range)
+
+For two-way players, cover both batting and pitching dimensions in the same summary.
 
 Use `<span class="good">` for strengths and `<span class="poor">` for weaknesses.
-Wrap each summary in `<h2>Batting Scouting Summary</h2><div class="summary"><ul>...</ul></div>` 
-or `<h2>Pitching Scouting Summary</h2>...`.
+Wrap in `<div class="summary"><ul>...</ul></div>` (no h2 — the page already has the section title).
 
 CRITICAL: Use ONLY this player's name in summaries. Do not reference any other player.
 
-Read the HTML file, replace the placeholder comments with the summaries, write it back.
+Read the HTML file, replace `<!-- SCOUTING_SUMMARY -->` with the summary, write it back.
 Then open the report — use the exact path that was printed after `GENERATED:` above:
 
 ```bash

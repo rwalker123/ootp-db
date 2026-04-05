@@ -461,13 +461,7 @@ All arguments are optional and combinable. The active team is read from `saves.j
 
 Adding `vs LHP` or `vs RHP` (or `vs lefty` / `vs righty`) adjusts the platoon sort:
 
-- **`platoon`**: reshuffles the full sort using matchup-weighted wOBA. The split source hierarchy:
-
-  | Career PA vs handedness | `platoon` |
-  |------------------------|-----------|
-  | 300+ | 70% split + 30% season |
-  | 100–299 | 40% split + 60% season |
-  | < 100 | ratings proxy (±.008) |
+- **`platoon`**: reshuffles the full sort using matchup-weighted wOBA. Split performance is blended with overall season wOBA using a confidence weight based on career PA vs that handedness — larger samples shift more weight onto the split, smaller samples stay closer to the season baseline.
 
 - **Other philosophies**: highlights the favorable split column in the report for reference but does not change slot assignments.
 
@@ -544,7 +538,7 @@ Forced starters are shown with a blue `[F]` badge in the report. Forced-bench an
 
 #### The HTML report
 
-- **Lineup card** — slots 1–9 with position, handedness, temperature tag, wRC+, PA, OBP, ISO, season wOBA, split wOBA vs LHP/RHP, 30-day rolling wOBA, fatigue, and speed rating
+- **Lineup card** — slots 1–9 in DH leagues (slots 1–8 in non-DH leagues, pitcher slot omitted) with position, handedness, temperature tag, wRC+, PA, OBP, ISO, season wOBA, split wOBA vs LHP/RHP, 30-day rolling wOBA, fatigue, and speed rating
 - **L/R alternation score** (0–10) and the full L/R/S pattern string
 - **Philosophy comparison panel** — when using a non-modern philosophy, shows side-by-side which slots differ from the Tango-optimal Modern ordering
 - **Full roster stats table** — all eligible batters with Starting/Bench/Fatigued/[F] Bench labels

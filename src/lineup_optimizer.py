@@ -305,8 +305,8 @@ def load_position_games(conn, player_ids):
         for r in rows2:
             result[r.player_id]["usage_pct"][r.position] = float(r.usage_pct or 0)
             result[r.player_id]["total_3yr_games"] = int(r.total_games or 0)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: load_position_games failed: {e}")
     return result
 
 
@@ -1147,7 +1147,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       </tbody>
     </table>
     <div class="split-note">
-      Split wOBA shown when career PA &ge;100 vs that handedness; ratings proxy used otherwise.
+      Split wOBA reflects career PA vs that handedness; values may be sparse at low sample sizes.
       Bench players are dimmed.
     </div>
   </div>

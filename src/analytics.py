@@ -187,7 +187,6 @@ def compute_batter_career_stats(engine, year, lg):
                SUM(war) as war, SUM(wpa) as wpa
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND year >= {year} - 3
           AND split_id IN (0, 1, 2, 3)
         GROUP BY player_id,
                  CASE WHEN split_id IN (0, 1) THEN 1 ELSE split_id END

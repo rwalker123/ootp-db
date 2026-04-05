@@ -482,6 +482,11 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 {adj_note}
 
 <div class="section">
+  <div class="section-title">Analysis</div>
+<!-- ANALYSIS:START --><!-- RATING_SUMMARY --><!-- ANALYSIS:END -->
+</div>
+
+<div class="section">
   <div class="section-title">Rating Breakdown</div>
   <table>
   <tr><th class="left">Component</th><th>Weight</th><th>Score</th><th>Bar</th></tr>
@@ -524,10 +529,6 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
   <tr><th>{key_stat_label}</th><th>WAR</th></tr>
   <tr><td>{key_stat_val}</td><td>{war_val}</td></tr>
   </table>
-</div>
-
-<div class="section">
-<!-- ANALYSIS:START --><!-- RATING_SUMMARY --><!-- ANALYSIS:END -->
 </div>
 
 </div>
