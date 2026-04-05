@@ -824,6 +824,12 @@ def generate_contract_extension_report(save_name, first_name, last_name):
   <div class="import-ts">Last DB import: {last_import or 'unknown'} &bull; Generated: {generated_at}</div>
 </div>
 
+<!-- ── Analysis ─────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Extension Recommendation</div>
+  <!-- CONTRACT_EXTENSION_SUMMARY -->
+</div>
+
 <!-- ── Contract Status ──────────────────────────────── -->
 <div class="section">
   <div class="section-title">Current Contract</div>
@@ -875,12 +881,6 @@ def generate_contract_extension_report(save_name, first_name, last_name):
     <tr><th class="left">Trait</th><th>Score</th><th>Assessment</th></tr>
     {personality_rows}
   </table>
-</div>
-
-<!-- ── Analysis ─────────────────────────────────────── -->
-<div class="section">
-  <div class="section-title">Extension Recommendation</div>
-  <!-- CONTRACT_EXTENSION_SUMMARY -->
 </div>
 
 </div>
