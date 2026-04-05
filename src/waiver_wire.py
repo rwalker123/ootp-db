@@ -1277,15 +1277,18 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 
     full_name = f"{first_name}_{last_name}".lower().replace(" ", "_")
     title = html.escape(f"Waiver Claim: {first_name} {last_name}")
+    esc_first = html.escape(first_name)
+    esc_last = html.escape(last_name)
+    esc_save = html.escape(save_name)
 
-    html = f"""<!DOCTYPE html>
+    html_doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ootp-skill" content="waiver-claim">
-  <meta name="ootp-args" content="{html.escape(first_name)} {html.escape(last_name)}">
-  <meta name="ootp-save" content="{html.escape(save_name)}">
+  <meta name="ootp-args" content="{esc_first} {esc_last}">
+  <meta name="ootp-save" content="{esc_save}">
   <title>{title}</title>
   <style>{css}</style>
 </head>
@@ -1308,7 +1311,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
     reports_dir = get_reports_dir(save_name, "waiver_claims")
     slug = f"{full_name}_{player_id}"
     report_path = reports_dir / f"{slug}.html"
-    write_report_html(report_path, html)
+    write_report_html(report_path, html_doc)
 
     # Build data dict for agent
     best_incumbent = incumbents[0] if incumbents else None
