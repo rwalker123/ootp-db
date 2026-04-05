@@ -29,7 +29,8 @@ Claude Code skills (`.claude/skills/`) are the primary UX layer on top of the DB
   # ... queries here ...
   PYEOF
   ```
-- Never use `{"key": val}` dicts in heredocs — shell flags bare braces. Use `dict(key=val)`.
+- Never use `{"key": val}` dicts in heredocs — Claude Code's tool sandbox flags bare `{...}` as
+  suspicious even in quoted heredocs (`<< 'PYEOF'`). Use `dict(key=val)` instead.
 
 ---
 
