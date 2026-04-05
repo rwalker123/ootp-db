@@ -906,7 +906,11 @@ class Handler(SimpleHTTPRequestHandler):
 
             # excluded (without/excluding)
             _lo_excl = []
-            for m in _re.finditer(r'(?:without|excluding)\s+([A-Za-z][A-Za-z\s\-\']+?)(?:,|$)', args or "", _re.I):
+            for m in _re.finditer(
+                r'(?:without|excluding)\s+([A-Za-z][A-Za-z\s\-\']+?)'
+                r'(?=\s+(?:vs\b|modern|traditional|platoon|hot-hand|primary|fatigue|favor|favour|without|excluding)|,|$)',
+                args or "", _re.I
+            ):
                 _lo_excl.append(m.group(1).strip())
 
             # Strip all override tokens to isolate team name

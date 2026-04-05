@@ -612,6 +612,13 @@ def _select_positional_nine(ranked, dh_used, primary_only=False,
             continue
         if pos_code not in FIELD_POSITIONS:
             continue
+        if pos_code in selected:
+            existing = selected[pos_code]
+            raise ValueError(
+                f"Forced-start conflict: {player['first_name']} {player['last_name']} and "
+                f"{existing['first_name']} {existing['last_name']} are both forced to "
+                f"{POS_MAP[pos_code]}. Remove one override."
+            )
         p = dict(player)
         label = POS_MAP[pos_code]
         if player.get("position") != pos_code:
