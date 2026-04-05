@@ -562,7 +562,9 @@ class Handler(SimpleHTTPRequestHandler):
     def _handle_generate(self, body):
         skill = body.get("skill", "").strip()
         args = body.get("args", "").strip()
-        if not skill or not args:
+        # lineup-optimizer has all-optional args; allow empty string through
+        args_optional = skill in ("lineup-optimizer",)
+        if not skill or (not args and not args_optional):
             self._respond(400, "Missing skill or args")
             return
         job_id = f"{skill}-{int(time.time())}"
@@ -576,7 +578,7 @@ class Handler(SimpleHTTPRequestHandler):
             )
             cmd_arg = args + cost_footer
         else:
-            cmd_arg = f"/{skill} {args}"
+            cmd_arg = f"/{skill} {args}".strip()
         proc = subprocess.Popen(
             ["claude", "-p", cmd_arg],
             cwd=str(ROOT),
@@ -863,6 +865,72 @@ class Handler(SimpleHTTPRequestHandler):
                 order_by=order or "ir.rating_overall DESC",
                 limit=limit,
             )
+            return path
+
+        if skill == "lineup-optimizer":
+            import re as _re
+            from lineup_optimizer import POS_STR_MAP, generate_lineup_report
+            _lo_raw = (args or "").lower()
+            _lo_hand = (
+                "L" if any(w in _lo_raw for w in ("lhp", "lefty")) else
+                "R" if any(w in _lo_raw for w in ("rhp", "righty")) else
+                None
+            )
+            _lo_phil = next(
+                (p for p in ("modern", "traditional", "platoon", "hot-hand") if p in _lo_raw),
+                "platoon" if _lo_hand else "modern",
+            )
+            _lo_primary = any(w in _lo_raw for w in ("primary", "primary-only"))
+            _lo_favor_offense = any(w in _lo_raw for w in ("favor-offense", "favor offense", "favour offense", "favour-offense"))
+
+            # fatigue threshold: "fatigue 70" or "fatigue: 70"
+            _fat_m = _re.search(r'fatigue\s*:?\s*(\d+)', _lo_raw)
+            _lo_fatigue = int(_fat_m.group(1)) if _fat_m else None
+
+            # forced bench: "<name> bench"
+            _lo_forced_bench = [
+                m.group(1).strip()
+                for m in _re.finditer(r'([A-Za-z][A-Za-z\s\-\']+?)\s+bench(?:\b|$)', args or "", _re.I)
+            ]
+
+            # forced starts: "<name> starts [at <pos>]" or "<name> at <pos> starts"
+            _lo_forced_starts = []
+            for m in _re.finditer(
+                r'([A-Za-z][A-Za-z\s\-\']+?)\s+(?:starts?\s+at\s+(\w+)|at\s+(\w+)\s+starts?|starts?)(?:\b|$)',
+                args or "", _re.I
+            ):
+                _fs_name = m.group(1).strip()
+                _fs_pos_str = (m.group(2) or m.group(3) or "").lower()
+                _fs_pos = POS_STR_MAP.get(_fs_pos_str)
+                _lo_forced_starts.append(dict(name=_fs_name, pos=_fs_pos))
+
+            # excluded (without/excluding)
+            _lo_excl = []
+            for m in _re.finditer(r'(?:without|excluding)\s+([A-Za-z][A-Za-z\s\-\']+?)(?:,|$)', args or "", _re.I):
+                _lo_excl.append(m.group(1).strip())
+
+            # Strip all override tokens to isolate team name
+            _lo_stop_re = (r'(?:modern|traditional|platoon|hot-hand|favor-offense|favour-offense|vs\s+(?:lhp|rhp|lefty|righty)|'
+                           r'lhp|rhp|lefty|righty|primary(?:-only)?|favor\s+offense|favour\s+offense|fatigue\s*:?\s*\d+|'
+                           r'without\s+[A-Za-z][A-Za-z\s\-\']+|excluding\s+[A-Za-z][A-Za-z\s\-\']+|'
+                           r'[A-Za-z][A-Za-z\s\-\']+?\s+bench|'
+                           r'[A-Za-z][A-Za-z\s\-\']+?\s+(?:starts?\s+at\s+\w+|at\s+\w+\s+starts?|starts?))')
+            _lo_team = _re.sub(_lo_stop_re, '', args or '', flags=_re.I).strip(" ,") or None
+
+            path, _ = generate_lineup_report(
+                save,
+                team_query=_lo_team,
+                philosophy=_lo_phil,
+                opponent_hand=_lo_hand,
+                primary_only=_lo_primary,
+                forced_starts=_lo_forced_starts,
+                forced_bench=_lo_forced_bench,
+                fatigue_threshold=_lo_fatigue,
+                excluded_names=_lo_excl,
+                favor_offense=_lo_favor_offense,
+            )
+            if path is None:
+                raise ValueError("Team not found or no batters available for lineup report")
             return path
 
         if skill == "trade-targets":

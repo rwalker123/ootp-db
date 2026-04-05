@@ -555,7 +555,7 @@ def generate_contract_extension_report(save_name, first_name, last_name):
                 text("""
                 SELECT year, g, gs, ip, ha, bb, k, er, hra, war
                 FROM players_career_pitching_stats
-                WHERE player_id = :pid AND split_id = 1
+                WHERE player_id = :pid AND split_id IN (0, 1)
                   AND league_id = 203 AND level_id = 1
                 ORDER BY year DESC LIMIT 5
                 """),
@@ -566,7 +566,7 @@ def generate_contract_extension_report(save_name, first_name, last_name):
                 text("""
                 SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war
                 FROM players_career_batting_stats
-                WHERE player_id = :pid AND split_id = 1
+                WHERE player_id = :pid AND split_id IN (0, 1)
                   AND league_id = 203 AND level_id = 1
                 ORDER BY year DESC LIMIT 5
                 """),
