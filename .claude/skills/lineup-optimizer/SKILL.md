@@ -182,21 +182,32 @@ a team name.
 
 - Who bats leadoff and why (OBP? Speed rating? Matchup advantage?)
 - Who bats #2 and why (best wOBA? Switch hitter neutralizing platoon concern?)
-- Any notable placement: cold star held at #4, hot bench bat elevated, big platoon split
-  exploited, a switch hitter at #2 neutralizing a handedness disadvantage.
+- Any notable placement: big platoon split exploited, a switch hitter at #2 neutralizing
+  a handedness disadvantage, a high-OBP bat at leadoff.
 - For platoon: name the biggest matchup exploit (e.g. "LHB [name] vs RHP gets .XXX vs .XXX
   matchup-weighted wOBA vs his season .XXX").
-- For hot-hand: name which player's temperature flag drove the most significant rank shift.
+- For hot-hand ONLY: name which player's temperature flag drove the most significant rank
+  shift. Do NOT mention hot/cold as a cause of placement for any other philosophy.
+
+CRITICAL: For modern, traditional, and platoon, slot assignments are determined purely by
+wOBA (or split wOBA). A hot player in a high slot is there because of their wOBA, not
+their streak. Never attribute a slot assignment to hot/cold status unless philosophy is
+hot-hand.
 
 Quote actual wOBA, wRC+, OBP numbers from the lineup card. Never invent stats.
 
 **3. Hot/Cold Report** — summarize temperature flags from `hot_players` and `cold_stars`:
 
-- If `hot_players` is not "None": name each, note their elevated role warrants attention
-  but remember: "Research supports riding a hot player for 30+ days (~15-20% real signal)
-  but don't overweight a 7-day streak."
+- For hot-hand: hot/cold directly influenced slot assignments — explain the rank shifts.
+- For modern, traditional, and platoon: hot/cold data was NOT used in construction —
+  slots reflect wOBA only. Frame temperature flags as context only, not as causes.
+  Wording to use: "Note: [name] is running hot but their slot reflects their season wOBA,
+  not their streak — this philosophy doesn't adjust for temperature."
+- If `hot_players` is not "None": name each and note their 30-day trend, but only credit
+  hot-hand with acting on it. For other philosophies, add: "Research supports ~15–20%
+  real signal in a 30-day streak, but this lineup ignores it by design."
 - If `cold_stars` is not "None": "Cold streak noted for [name]. At [N] PA in the window,
-  this is likely [X]% noise — their career wOBA of [N] remains the primary signal. Star
+  this is likely mostly noise — their career wOBA remains the primary signal. Star
   protection rule holds: they stay in a premium slot."
 - If both are "None": "All regulars tracking near season-average pace. Lineup reflects
   true-talent order with minimal temperature noise."
