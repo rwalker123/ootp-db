@@ -875,7 +875,7 @@ def wrc_td(val):
 def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
                alt_lineup, alternation_score, dh_used, save_name, excluded_names,
                primary_only=False, forced_bench=None, fatigue_threshold=None,
-               fatigue_benched=None, favor_offense=False):
+               fatigue_benched=None, favor_offense=False, args_str=""):
     now = datetime.now()
     now_str = now.strftime("%B %d, %Y %I:%M %p")
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1060,6 +1060,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
   <meta charset="utf-8">
   <title>{html_mod.escape(report_title)}</title>
   <meta name="ootp-skill" content="lineup-optimizer">
+  <meta name="ootp-args" content="{html_mod.escape(args_str)}">
   <meta name="ootp-save" content="{html_mod.escape(save_name)}">
   <meta name="ootp-generated" content="{now_iso}">
   <style>{css}
@@ -1330,6 +1331,32 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
 
     alt_score = score_alternation(lineup)
 
+    # Reconstruct args string for refresh metadata
+    _pos_names = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF", 0: "DH"}
+    _args_parts = []
+    if team_query:
+        _args_parts.append(team_query)
+    _args_parts.append(philosophy)
+    if hand:
+        _args_parts.append("vs LHP" if hand == "L" else "vs RHP")
+    if primary_only:
+        _args_parts.append("primary")
+    if favor_offense:
+        _args_parts.append("favor-offense")
+    for fs in forced_starts:
+        pos_code = fs.get("pos")
+        if pos_code is not None:
+            _args_parts.append(f"{fs['name']} starts at {_pos_names.get(pos_code, str(pos_code))}")
+        else:
+            _args_parts.append(f"{fs['name']} starts")
+    for fb in forced_bench:
+        _args_parts.append(f"{fb} bench")
+    for ex in excluded_names:
+        _args_parts.append(f"without {ex}")
+    if fatigue_threshold is not None:
+        _args_parts.append(f"fatigue {fatigue_threshold}")
+    args_str = " ".join(_args_parts)
+
     html_content = build_html(
         team_name, team_abbr, philosophy, hand,
         lineup, batters, alt_lineup, alt_score,
@@ -1339,6 +1366,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         fatigue_threshold=fatigue_threshold,
         fatigue_benched=fatigue_benched,
         favor_offense=favor_offense,
+        args_str=args_str,
     )
     write_report_html(report_path, html_content)
 
