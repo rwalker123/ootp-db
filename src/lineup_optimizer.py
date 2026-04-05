@@ -148,13 +148,24 @@ def compute_woba(ab, h, d, t, hr, bb, hp, sf):
 # ── Database queries ─────────────────────────────────────────────────────────
 
 def resolve_team(conn, team_query):
-    """Return (team_id, full_name, abbr) or (None, None, None)."""
+    """Return (team_id, full_name, abbr) or (None, None, None).
+
+    Raises ValueError if team_query matches multiple teams (ambiguous input).
+    """
     if team_query:
-        row = conn.execute(text(
+        rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
             "WHERE (nickname ILIKE :q OR name ILIKE :q) "
-            "AND league_id = 203 LIMIT 1"
-        ), dict(q=f"%{team_query}%")).fetchone()
+            "AND league_id = 203 ORDER BY name, team_id"
+        ), dict(q=f"%{team_query}%")).fetchall()
+        if not rows:
+            return None, None, None
+        if len(rows) > 1:
+            options = ", ".join(f"{r.name} {r.nickname} ({r.abbr})" for r in rows)
+            raise ValueError(
+                f"Ambiguous team query '{team_query}' — be more specific. Matches: {options}"
+            )
+        row = rows[0]
     else:
         row = conn.execute(text(
             "SELECT hm.team_id, t.name, t.nickname, t.abbr "
@@ -183,7 +194,11 @@ def get_dh_used(conn, team_id):
 
 
 def load_roster_batters(conn, team_id):
-    """Load all MLB-level batters on the team via player_ratings."""
+    """Load active-roster batters on the team via player_ratings.
+
+    Joins team_roster (list_id=1) to restrict to the active roster only,
+    excluding minor leaguers, 40-man non-actives, and IL players.
+    """
     rows = conn.execute(text("""
         SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,
                pr.age, pr.oa, pr.pot, pr.rating_overall, pr.rating_offense,
@@ -192,7 +207,9 @@ def load_roster_batters(conn, team_id):
                p.bats, p.fatigue_points
         FROM player_ratings pr
         JOIN players p ON p.player_id = pr.player_id
-        WHERE p.team_id = :tid AND pr.player_type = 'batter'
+        JOIN team_roster tr ON tr.player_id = pr.player_id
+            AND tr.team_id = :tid AND tr.list_id = 1
+        WHERE pr.player_type = 'batter'
         ORDER BY pr.rating_overall DESC
     """), dict(tid=team_id)).fetchall()
     return [dict(r._mapping) for r in rows]
@@ -873,7 +890,7 @@ def wrc_td(val):
 
 
 def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
-               alt_lineup, alternation_score, dh_used, save_name, excluded_names,
+               alternation_score, dh_used, save_name, excluded_names,
                primary_only=False, forced_bench=None, fatigue_threshold=None,
                fatigue_benched=None, favor_offense=False, args_str=""):
     now = datetime.now()
@@ -954,6 +971,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
     _fatb_lower = {n.lower() for n in (fatigue_benched or [])}
     roster_rows = []
     for p in sorted(all_players, key=lambda x: (x["player_id"] not in lineup_pids,
+                                                  ((x.get("adv") or {}).get("pa") or 0) == 0,
                                                   -(x.get("blended_woba") or 0))):
         adv = p.get("adv") or {}
         in_lineup = p["player_id"] in lineup_pids
@@ -1000,42 +1018,6 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
             {role_cell}
           </tr>""")
     roster_rows_html = "\n".join(roster_rows)
-
-    # ── Philosophy comparison section ─────────────────────────────────────
-    comp_section = ""
-    if alt_lineup:
-        alt_rows = []
-        for slot in range(1, 10):
-            mp = lineup.get(slot)
-            ap = alt_lineup.get(slot)
-            if not mp or not ap:
-                continue
-            m_name = html_mod.escape(f"{mp['first_name']} {mp['last_name']}")
-            a_name = html_mod.escape(f"{ap['first_name']} {ap['last_name']}")
-            changed = mp["player_id"] != ap["player_id"]
-            diff_badge = ' <span class="tag tag-warn">Δ</span>' if changed else ""
-            alt_rows.append(f"""
-              <tr>
-                <td style="font-weight:bold">{slot}</td>
-                <td class="left">{m_name}</td>
-                <td class="left">{a_name}{diff_badge}</td>
-              </tr>""")
-        alt_rows_html = "\n".join(alt_rows)
-        comp_section = f"""
-  <div class="section">
-    <div class="section-title">vs. Modern (Tango) Ordering</div>
-    <table>
-      <thead>
-        <tr>
-          <th style="width:36px">#</th>
-          <th class="left">{html_mod.escape(phil_label)}</th>
-          <th class="left">Modern / Sabermetric</th>
-        </tr>
-      </thead>
-      <tbody>{alt_rows_html}</tbody>
-    </table>
-    <div class="split-note">Δ = slot differs from Modern ordering. Modern puts best wOBA at #2 to maximize high-leverage PA.</div>
-  </div>"""
 
     # ── Override / exclusion banners ──────────────────────────────────────
     excl_html = ""
@@ -1132,7 +1114,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       (min 30 PA required). Highlighted column = today&rsquo;s favored handedness matchup.<br>
       * = playing out of primary position.
       C, 2B, SS, CF selection applies a small defense tiebreaker (&le;0.012 wOBA).<br>
-      <b>PA (amber = &lt;80):</b> Ranking uses a PA-regressed wOBA (50/50 at 150 PA) —
+      <b>PA (amber = &lt;80):</b> Ranking uses a PA-regressed wOBA (50/50 at 300 PA) —
       low-PA call-ups rank by talent rating until they have meaningful MLB samples.<br>
       <b>[F]</b> = manager override (force-start or force-position). Bypasses eligibility floors.
       <b>Fat.</b> = fatigue 0&ndash;100 (green &lt;40, amber &ge;40, red &ge;70).
@@ -1140,7 +1122,11 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
     </div>
   </div>
 
-{comp_section}
+  <!-- Analysis Placeholder -->
+  <div class="section">
+    <div class="section-title">Lineup Analysis</div>
+    <!-- LINEUP_ANALYSIS -->
+  </div>
 
   <!-- Full Roster -->
   <div class="section">
@@ -1164,12 +1150,6 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       Split wOBA shown when career PA &ge;100 vs that handedness; ratings proxy used otherwise.
       Bench players are dimmed.
     </div>
-  </div>
-
-  <!-- Analysis Placeholder -->
-  <div class="section">
-    <div class="section-title">Lineup Analysis</div>
-    <!-- LINEUP_ANALYSIS -->
   </div>
 
 </div>
@@ -1317,18 +1297,6 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
                           forced_pos=forced_pos, forced_start_ids=forced_start_ids,
                           favor_offense=favor_offense, hand=hand)
 
-    # Comparison lineup (modern) shown when a different philosophy is active.
-    # The comparison is always handedness-blind (modern uses blended_woba).
-    alt_lineup = None
-    if philosophy != "modern":
-        ranked_modern = rank_players(batters, "modern", None)
-        alt_lineup = build_lineup(ranked_modern, "modern", max_slots,
-                                  primary_only=primary_only,
-                                  forced_pos=forced_pos,
-                                  forced_start_ids=forced_start_ids,
-                                  favor_offense=favor_offense,
-                                  hand=None)
-
     alt_score = score_alternation(lineup)
 
     # Reconstruct args string for refresh metadata
@@ -1359,7 +1327,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
 
     html_content = build_html(
         team_name, team_abbr, philosophy, hand,
-        lineup, batters, alt_lineup, alt_score,
+        lineup, batters, alt_score,
         dh_used, save_name, excluded_names,
         primary_only=primary_only,
         forced_bench=forced_bench,
@@ -1380,7 +1348,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         lineup_summary.append(dict(
             slot=slot,
             name=f"{p['first_name']} {p['last_name']}",
-            pos=POS_MAP.get(p.get("position"), "?"),
+            pos=p.get("assigned_pos") or POS_MAP.get(p.get("position"), "?"),
             bats=BATS_MAP.get(p.get("bats") or 1, "R"),
             woba=adv.get("woba"),
             wrc_plus=adv.get("wrc_plus"),

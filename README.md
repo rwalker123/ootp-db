@@ -427,14 +427,13 @@ Reports are cached by player until the next DB import.
 
 ### `/lineup-optimizer [options]`
 
-Generates an optimal batting order for your active team (or any named team) using one of five lineup philosophies grounded in sabermetric research. Accounts for career platoon splits, 30-day rolling performance trends, star player protection rules, and positional eligibility floors. Opens an HTML report in your browser.
+Generates an optimal batting order for your active team (or any named team) using one of four lineup philosophies grounded in sabermetric research. Accounts for career platoon splits, 30-day rolling performance trends, star player protection rules, and positional eligibility floors. Opens an HTML report in your browser.
 
 ```
 /lineup-optimizer
 /lineup-optimizer traditional
 /lineup-optimizer vs lefty
 /lineup-optimizer platoon vs RHP
-/lineup-optimizer aggressive-platoon vs LHP
 /lineup-optimizer hot-hand
 /lineup-optimizer favor-offense
 /lineup-optimizer Cleveland modern vs LHP
@@ -454,7 +453,6 @@ All arguments are optional and combinable. The active team is read from `saves.j
 | `modern` *(default)* | **#2** — maximizes PA + optimal base-out states (Tango/*The Book*) | Season wOBA | Low |
 | `traditional` | **#3** — conventional "franchise player" slot | Season wOBA | High |
 | `platoon` | **#2** | Blended split wOBA (100+ PA threshold) | Moderate |
-| `aggressive-platoon` | **#2** | Blended split wOBA (30+ PA threshold) | Moderate |
 | `hot-hand` | **#2** | Season wOBA ± 30-day rolling modifier | High |
 
 **Why #2 in the modern philosophy?** Tango's simulation research (*The Book*, 2007) shows the #2 slot gets ~70 more plate appearances per season than cleanup (#4) and encounters more runners on base than leadoff (#1). The combined PA and base-out advantage makes it the highest-leverage offensive slot in the lineup. Lineup "protection" (inserting a weak bat behind a star) is treated as a myth — the stat is not supported in the research.
@@ -463,14 +461,13 @@ All arguments are optional and combinable. The active team is read from `saves.j
 
 Adding `vs LHP` or `vs RHP` (or `vs lefty` / `vs righty`) adjusts the platoon sort:
 
-- **`platoon` / `aggressive-platoon`**: reshuffles the full sort using matchup-weighted wOBA. The split source hierarchy:
+- **`platoon`**: reshuffles the full sort using matchup-weighted wOBA. The split source hierarchy:
 
-  | Career PA vs handedness | `platoon` | `aggressive-platoon` |
-  |------------------------|-----------|----------------------|
-  | 300+ | 70% split + 30% season | 70% split + 30% season |
-  | 100–299 | 40% split + 60% season | 40% split + 60% season |
-  | 30–99 | ratings proxy (±.008) | **40% split + 60% season** |
-  | < 30 | ratings proxy (±.008) | ratings proxy (±.008) |
+  | Career PA vs handedness | `platoon` |
+  |------------------------|-----------|
+  | 300+ | 70% split + 30% season |
+  | 100–299 | 40% split + 60% season |
+  | < 100 | ratings proxy (±.008) |
 
 - **Other philosophies**: highlights the favorable split column in the report for reference but does not change slot assignments.
 
@@ -519,7 +516,7 @@ By default, the optimizer gives **significant weight to fielding ratings** at pr
 
 #### Sample-size regression
 
-Rankings use a PA-regressed wOBA rather than raw observed wOBA. At 150 career MLB plate appearances the blend is 50/50 observed vs. a ratings-derived expectation; at 0 PA it is 100% ratings-based. This prevents a 9-game call-up on a hot streak from displacing an established starter, while still allowing a highly-rated prospect (0 PA, first start) to earn a spot on talent. The PA column is shown in amber when a player has fewer than 80 PA.
+Rankings use a PA-regressed wOBA rather than raw observed wOBA. At 300 career MLB plate appearances the blend is 50/50 observed vs. a ratings-derived expectation; at 0 PA it is 100% ratings-based. This prevents a 9-game call-up on a hot streak from displacing an established starter, while still allowing a highly-rated prospect (0 PA, first start) to earn a spot on talent. The PA column is shown in amber when a player has fewer than 80 PA.
 
 #### Excluding players
 
