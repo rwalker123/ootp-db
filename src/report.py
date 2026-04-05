@@ -2,17 +2,15 @@
 """Generate HTML player reports from OOTP database."""
 
 import json
-import os
 import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
@@ -23,13 +21,6 @@ POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF",
 BATS_MAP = {1: "R", 2: "L", 3: "S"}
 THROWS_MAP = {1: "R", 2: "L"}
 
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():

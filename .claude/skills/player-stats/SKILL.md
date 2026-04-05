@@ -26,10 +26,11 @@ Generate an OOTP player report for **$ARGUMENTS** using `src/report.py`.
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from report import generate_player_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 path, data = generate_player_report(save_name, "<FIRST>", "<LAST>")
 
 if data is None:

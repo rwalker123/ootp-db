@@ -86,10 +86,11 @@ From $ARGUMENTS, identify:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from lineup_optimizer import generate_lineup_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 path, data = generate_lineup_report(
     save_name,
     team_query=None,          # replace None with "<TEAM>" if team was specified
@@ -117,12 +118,13 @@ If `NOT_FOUND` — team not found or no batters in database. Try to find the tea
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json, os
+import sys, os
 sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from shared_css import load_saves_registry
 load_dotenv(".env")
-save_name = json.loads(open("saves.json").read())["active"]
+save_name = load_saves_registry()["active"]
 db = save_name.lower().replace("-", "_").replace(" ", "_")
 engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
 with engine.connect() as conn:

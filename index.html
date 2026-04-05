@@ -414,6 +414,7 @@ function renderSaves(data) {
         <span class="log-title">${esc(name)}</span>
         <span class="log-status">${status}</span>
         <span class="log-controls">
+          <button onclick="logCopy('${id}')" title="Copy log" id="copy-${id}">⎘</button>
           <button onclick="logMinimize('${id}')" title="Minimize">−</button>
           <button onclick="logMaximize('${id}')" title="Maximize">⤢</button>
           <button onclick="logClose('${id}', ${jsStr(name)})" title="Close"${running.includes(name) ? ' disabled' : ''}>✕</button>

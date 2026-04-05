@@ -38,7 +38,8 @@ Parse the first two words of $ARGUMENTS as the player's first and last name.
 import sys, json
 sys.path.insert(0, "src")
 from contract_extension import generate_contract_extension_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>")
 if path is None:
     print("PLAYER_NOT_FOUND")
@@ -55,13 +56,14 @@ If the output is `PLAYER_NOT_FOUND` — the player wasn't found in the active sa
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from shared_css import load_saves_registry
 import os
 load_dotenv(".env")
-save_name = json.loads(open("saves.json").read())["active"]
+save_name = load_saves_registry()["active"]
 db = save_name.lower().replace("-", "_").replace(" ", "_")
 engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
 with engine.connect() as conn:

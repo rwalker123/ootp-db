@@ -67,10 +67,10 @@ def _discover_save_names():
 
 
 def _load_saves_registry():
-    saves_json = ROOT / "saves.json"
-    if saves_json.exists():
-        return json.loads(saves_json.read_text())
-    return {"saves": {}}
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    from shared_css import load_saves_registry
+    return load_saves_registry()
 
 
 def _job_is_running(entry):
@@ -96,7 +96,10 @@ def get_jobs_data():
 
 
 def _save_registry(registry):
-    (ROOT / "saves.json").write_text(json.dumps(registry, indent=2))
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    from shared_css import get_saves_path
+    get_saves_path().write_text(json.dumps(registry, indent=2))
 
 
 def _get_csv_mtime(csv_path):
@@ -163,9 +166,22 @@ def check_venv():
     return _check("Virtual env", True, str(venv))
 
 
+def _is_sqlite():
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return True  # SQLite is the default when no .env exists
+    for line in env_path.read_text().splitlines():
+        if line.startswith("DATABASE_URL="):
+            return line.split("=", 1)[1].strip().lower().startswith("sqlite")
+    return True  # no DATABASE_URL line → default to SQLite
+
+
 def check_packages():
+    pkgs = ["pandas", "sqlalchemy", "dotenv"]
+    if not _is_sqlite():
+        pkgs.append("psycopg2")
     missing = []
-    for pkg in ("pandas", "sqlalchemy", "psycopg2", "dotenv"):
+    for pkg in pkgs:
         try:
             importlib.import_module(pkg)
         except ImportError:
@@ -174,7 +190,10 @@ def check_packages():
         return _check("Python packages", False,
                       f"Missing: {', '.join(missing)}",
                       ".venv/bin/pip install -r requirements.txt")
-    return _check("Python packages", True, "pandas, sqlalchemy, psycopg2-binary, python-dotenv")
+    installed = "pandas, sqlalchemy, python-dotenv"
+    if not _is_sqlite():
+        installed += ", psycopg2-binary"
+    return _check("Python packages", True, installed)
 
 
 def check_postgres():
@@ -219,8 +238,8 @@ def check_claude():
 def check_env_file():
     env_path = ROOT / ".env"
     if not env_path.exists():
-        return _check(".env config", False, ".env not found",
-                      "cp .env.example .env  # then edit with your paths")
+        return _check(".env config", True,
+                      "Not present — using SQLite default (optional)")
     return _check(".env config", True, str(env_path))
 
 
@@ -239,19 +258,37 @@ def check_saves():
 
 
 def check_database():
-    env_path = ROOT / ".env"
-    if not env_path.exists():
-        return _check("OOTP database", False, ".env missing", None)
-    postgres_url = None
-    for line in env_path.read_text().splitlines():
-        if line.startswith("POSTGRES_URL="):
-            postgres_url = line.split("=", 1)[1].strip()
-            break
-    if not postgres_url:
-        return _check("OOTP database", False, "POSTGRES_URL not set in .env", None)
-
     registry = _load_saves_registry()
     imported = registry.get("saves", {})
+    active = registry.get("active")
+
+    if _is_sqlite():
+        db_dir = ROOT / "db"
+        if not db_dir.exists():
+            return _check("OOTP database", False, "No SQLite databases found",
+                          "./import.sh <SaveName>")
+        db_files = sorted(db_dir.glob("*.db"))
+        if not db_files:
+            return _check("OOTP database", False, "No SQLite databases found",
+                          "./import.sh <SaveName>")
+        detail = ", ".join(f.stem for f in db_files)
+        if active and active in imported:
+            last = imported[active].get("last_import")
+            if last:
+                detail += f"  •  Last import: {last}"
+        return _check("OOTP database", True, detail)
+
+    # PostgreSQL path — only reached when _is_sqlite() is False, meaning .env exists
+    # with a non-sqlite DATABASE_URL
+    env_path = ROOT / ".env"
+    database_url = None
+    for line in env_path.read_text().splitlines():
+        key = line.split("=", 1)[0] if "=" in line else ""
+        if key in ("DATABASE_URL", "POSTGRES_URL"):
+            database_url = line.split("=", 1)[1].strip()
+            break
+    if not database_url:
+        return _check("OOTP database", False, "DATABASE_URL not set in .env", None)
 
     try:
         if str(SRC) not in sys.path:
@@ -259,8 +296,7 @@ def check_database():
         from sqlalchemy import create_engine, text
         from dotenv import load_dotenv
         load_dotenv(env_path)
-        db_url = os.environ.get("POSTGRES_URL", postgres_url)
-        engine = create_engine(db_url + "/postgres")
+        engine = create_engine(database_url.rstrip("/") + "/postgres")
         with engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT datname FROM pg_database "
@@ -272,7 +308,6 @@ def check_database():
             return _check("OOTP database", False, "No OOTP database found",
                           "./import.sh <SaveName>")
         detail = ", ".join(db_names)
-        active = registry.get("active")
         if active and active in imported:
             last = imported[active].get("last_import")
             if last:
@@ -284,16 +319,20 @@ def check_database():
 
 
 def run_all_checks():
-    return [
+    checks = [
         check_python(),
         check_venv(),
         check_packages(),
-        check_postgres(),
+    ]
+    if not _is_sqlite():
+        checks.append(check_postgres())
+    checks += [
         check_claude(),
         check_env_file(),
         check_saves(),
         check_database(),
     ]
+    return checks
 
 
 # ---------------------------------------------------------------------------
@@ -667,13 +706,15 @@ class Handler(SimpleHTTPRequestHandler):
                 sys.path.insert(0, str(SRC))
             from sqlalchemy import create_engine, text
             from dotenv import load_dotenv
-            load_dotenv(ROOT / ".env")
+            env_path = ROOT / ".env"
+            if env_path.exists():
+                load_dotenv(env_path)
             db_name = registry["saves"][save_name]["db_name"]
-            db_url = os.environ.get("POSTGRES_URL", "").rstrip("/")
-            if not db_url:
-                _json_response(self, {"error": "POSTGRES_URL is not configured"}, 500)
-                return
-            engine = create_engine(f"{db_url}/{db_name}")
+            db_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "sqlite"
+            if db_url.lower().startswith("sqlite"):
+                engine = create_engine(f"sqlite:///{ROOT / 'db' / db_name}.db")
+            else:
+                engine = create_engine(f"{db_url.rstrip('/')}/{db_name}")
             with engine.connect() as conn:
                 rows = conn.execute(text("""
                     SELECT hm.human_manager_id, hm.team_id,

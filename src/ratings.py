@@ -1480,9 +1480,9 @@ def compute_pitcher_ratings(engine):
     # Get league FIP constant
     with engine.connect() as conn:
         r = conn.execute(text(f"""
-            SELECT SUM(er)::float*9/SUM(ip) as era,
-                   (SUM(er)::float*9/SUM(ip)) -
-                   ((13*SUM(hra)::float + 3*(SUM(bb)::float+SUM(hp)::float) - 2*SUM(k)::float) / SUM(ip)::float) as cfip
+            SELECT SUM(er)*9.0/SUM(ip) as era,
+                   (SUM(er)*9.0/SUM(ip)) -
+                   ((13.0*SUM(hra) + 3.0*(SUM(bb)+SUM(hp)) - 2.0*SUM(k)) / SUM(ip)) as cfip
             FROM team_pitching_stats
             WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id IN (0, 1)
         """)).fetchone()
@@ -1655,7 +1655,10 @@ def main():
     print("Writing player_ratings table...")
     all_ratings.to_sql("player_ratings", engine, if_exists="replace", index=False)
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE player_ratings ADD PRIMARY KEY (player_id)"))
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_player_ratings_player_id ON player_ratings (player_id)"))
+        else:
+            conn.execute(text("ALTER TABLE player_ratings ADD PRIMARY KEY (player_id)"))
         conn.commit()
 
     elapsed = time.time() - start

@@ -287,7 +287,7 @@ def load_position_games(conn, player_ids):
                 FROM recent GROUP BY player_id
             )
             SELECT r.player_id, r.position,
-                   r.pos_games::float / NULLIF(t.total_games, 0) AS usage_pct,
+                   r.pos_games * 1.0 / NULLIF(t.total_games, 0) AS usage_pct,
                    t.total_games
             FROM recent r JOIN totals t USING (player_id)
         """)).fetchall()

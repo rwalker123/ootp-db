@@ -344,7 +344,7 @@ def _format_contract_extension(data: dict) -> str:
         f"{'⚠ Injury Risk  ' if data.get('flag_injury_risk') else ''}"
         f"{'★ High Ceiling  ' if data.get('flag_high_ceiling') else ''}",
         f"Market comp (median AAV): {data.get('median_comp_salary', '—')}",
-        f"Comps: {', '.join(data.get('top_comps', [])) or 'None'}",
+        f"Comps: {data.get('top_comps') or 'None'}",
     ]
     return "\n".join(lines)
 
@@ -557,7 +557,7 @@ def draft_prospects(
         if pos_code:
             filters.append(f"{alias}.position = {pos_code}")
     if max_age < 99:
-        filters.append(f"p.age <= {int(max_age)}")
+        filters.append(f"{alias}.age <= {int(max_age)}")
     if min_ceiling > 0:
         filters.append(f"{alias}.rating_ceiling >= {float(min_ceiling)}")
     if extra_where:

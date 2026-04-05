@@ -12,31 +12,15 @@ Run after import.py:
     python src/ifa_ratings.py My-Save-2026
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
 import pandas as pd
-from dotenv import load_dotenv
-from shared_css import db_name_from_save
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def setup_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    if not env_path.exists():
-        print("Error: .env file not found.")
-        sys.exit(1)
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def clamp(val, lo=0.0, hi=100.0):
@@ -337,7 +321,7 @@ def main():
     start = time.time()
 
     print(f"Loading IFA prospect data for {save_name}...")
-    engine = setup_engine(save_name)
+    engine = get_engine(save_name)
     df = load_ifa_data(engine)
     print(f"  {len(df)} IFA-eligible prospects loaded")
 

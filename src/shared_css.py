@@ -6,8 +6,8 @@ Visual design based on the polished rating report style:
 - Consistent table headers, tag colors, flag pills, bar charts
 """
 
+import json
 import os
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -16,15 +16,55 @@ from sqlalchemy import create_engine
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def get_engine(save_name: str):
-    """Create and return a SQLAlchemy engine for the given save's database."""
+def _db_engine_name() -> str:
+    """Return the short engine name ('sqlite' or 'postgresql') from .env."""
     load_dotenv(_PROJECT_ROOT / ".env")
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
+    db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL", "sqlite")
+    return "sqlite" if db_url.lower().startswith("sqlite") else "postgresql"
+
+
+def get_saves_path() -> Path:
+    """Return the saves registry path for the configured database engine.
+
+    e.g. saves.sqlite.json or saves.postgresql.json
+    Migrates legacy saves.json on first call if the new file doesn't exist yet.
+    """
+    engine = _db_engine_name()
+    new_path = _PROJECT_ROOT / f"saves.{engine}.json"
+    legacy = _PROJECT_ROOT / "saves.json"
+    if not new_path.exists() and legacy.exists():
+        legacy.rename(new_path)
+    return new_path
+
+
+def load_saves_registry() -> dict:
+    """Load and return the saves registry for the configured engine."""
+    p = get_saves_path()
+    if p.exists():
+        return json.loads(p.read_text())
+    return {"saves": {}}
+
+
+def get_engine(save_name: str):
+    """Create and return a SQLAlchemy engine for the given save's database.
+
+    Reads DATABASE_URL from .env. Set to 'sqlite' for a local file-based DB,
+    or a full PostgreSQL URL (e.g. postgresql://postgres@localhost:5432).
+    Falls back to POSTGRES_URL for backward compatibility.
+    """
+    load_dotenv(_PROJECT_ROOT / ".env")
+    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL not set in .env — cannot connect to database")
+    if not os.getenv("DATABASE_URL") and os.getenv("POSTGRES_URL"):
+        print("Warning: POSTGRES_URL is deprecated, rename to DATABASE_URL in .env")
     db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
+    if database_url.lower().startswith("sqlite"):
+        db_dir = _PROJECT_ROOT / "db"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return create_engine(f"sqlite:///{db_dir / db_name}.db")
+    else:
+        return create_engine(f"{database_url.rstrip('/')}/{db_name}")
 
 
 def db_name_from_save(save_name: str) -> str:

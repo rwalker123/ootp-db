@@ -6,12 +6,11 @@ This module re-exports them alongside standalone queries for standings, player l
 and draft prospects.
 """
 
-import json
 from pathlib import Path
 
 from sqlalchemy import text
 
-from shared_css import get_engine, db_name_from_save  # noqa: F401 (db_name_from_save re-exported for callers)
+from shared_css import get_engine, db_name_from_save, load_saves_registry  # noqa: F401 (re-exported for callers)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,7 +43,7 @@ def _pct(v, fallback="—"):
 
 
 def _load_saves():
-    return json.loads((PROJECT_ROOT / "saves.json").read_text())
+    return load_saves_registry()
 
 
 def _active_save():
@@ -147,6 +146,16 @@ def query_player(save_name, first_name, last_name) -> dict | None:
     )
 
 
+_DRAFT_ORDER_ALLOWLIST = {
+    "dr.rating_overall DESC",
+    "ir.rating_overall DESC",
+    "dr.rating_ceiling DESC",
+    "ir.rating_ceiling DESC",
+    "dr.age ASC",
+    "ir.age ASC",
+}
+
+
 def query_draft_prospects(save_name, criteria_label, where_clause,
                           order_by="dr.rating_overall DESC", limit=25,
                           pool="draft") -> list:
@@ -154,7 +163,17 @@ def query_draft_prospects(save_name, criteria_label, where_clause,
 
     pool: "draft" uses draft_ratings table, "ifa" uses ifa_ratings table.
     where_clause: raw SQL fragment (uses dr/ir alias depending on pool).
+
+    Security note: where_clause is caller-supplied SQL. This is an internal MCP
+    tool not exposed to untrusted user input, but callers must sanitise values
+    they interpolate into where_clause. limit is always int-coerced here.
     """
+    # Coerce limit defensively regardless of what the caller passes
+    limit = int(limit)
+    # Validate order_by against allowlist to prevent injection via that parameter
+    if order_by not in _DRAFT_ORDER_ALLOWLIST:
+        default_alias = "ir" if pool == "ifa" else "dr"
+        order_by = f"{default_alias}.rating_overall DESC"
     engine = get_engine(save_name)
     if pool == "ifa":
         sql = f"""

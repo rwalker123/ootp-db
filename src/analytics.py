@@ -715,8 +715,12 @@ def main():
     batter_df.to_sql("batter_advanced_stats", engine, if_exists="replace", index=False)
     pitcher_df.to_sql("pitcher_advanced_stats", engine, if_exists="replace", index=False)
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE batter_advanced_stats ADD PRIMARY KEY (player_id)"))
-        conn.execute(text("ALTER TABLE pitcher_advanced_stats ADD PRIMARY KEY (player_id)"))
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_batter_advanced_stats_player_id ON batter_advanced_stats (player_id)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_pitcher_advanced_stats_player_id ON pitcher_advanced_stats (player_id)"))
+        else:
+            conn.execute(text("ALTER TABLE batter_advanced_stats ADD PRIMARY KEY (player_id)"))
+            conn.execute(text("ALTER TABLE pitcher_advanced_stats ADD PRIMARY KEY (player_id)"))
         conn.commit()
 
     # Also drop the old batter_xba table if it exists

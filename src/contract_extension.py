@@ -2,12 +2,11 @@
 """Contract extension advisor report generator for OOTP Baseball."""
 
 import html as html_mod
-import json
 from datetime import datetime
 from pathlib import Path
 
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -528,7 +527,7 @@ def query_contract_extension(save_name, first_name, last_name):
     Returns the complete data dict (with private _* keys for HTML generation),
     or None if the player is not found. Does NOT perform a cache check.
     """
-    saves = json.loads((PROJECT_ROOT / "saves.json").read_text())
+    saves = load_saves_registry()
     save_data = saves.get("saves", {}).get(save_name, {})
     my_team_abbr = save_data.get("my_team_abbr") or "your team"
     my_team_id = int(save_data.get("my_team_id") or 0)
