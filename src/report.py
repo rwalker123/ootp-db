@@ -293,7 +293,7 @@ def fetch_batter_data(conn, player_id, common=None):
     data["career_overall"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
+        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHP
@@ -388,7 +388,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
+        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHB
@@ -1066,11 +1066,11 @@ def generate_player_report(save_name, first_name, last_name):
             "SELECT p.player_id, p.position FROM players p "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(pa) AS total_pa FROM players_career_batting_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
             ") bs ON bs.player_id = p.player_id "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(ip) AS total_ip FROM players_career_pitching_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
             ") ps ON ps.player_id = p.player_id "
             "WHERE p.first_name = :first AND p.last_name = :last "
             "ORDER BY COALESCE(bs.total_pa, 0) + COALESCE(ps.total_ip, 0) DESC"),
@@ -1091,12 +1091,12 @@ def generate_player_report(save_name, first_name, last_name):
         # otherwise incidental plate appearances pollute the report with empty batting tables.
         has_pitching = conn.execute(text(
             "SELECT 1 FROM players_career_pitching_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1 LIMIT 1"),
+            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1) LIMIT 1"),
             dict(pid=player_id)).fetchone() is not None
 
         batting_pa_row = conn.execute(text(
             "SELECT SUM(pa) FROM players_career_batting_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1"),
+            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1)"),
             dict(pid=player_id)).fetchone()
         career_pa = int(batting_pa_row[0] or 0)
         pa_threshold = 100 if position == 1 else 1
