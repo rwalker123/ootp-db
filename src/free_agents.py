@@ -2,30 +2,16 @@
 """Free agent search report generator for OOTP Baseball."""
 
 import json
-import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -131,21 +117,14 @@ def row_bg(rating):
     return "white"
 
 
-def generate_free_agents_report(save_name, criteria_label, where_clause,
-                                 join_clause="", order_by="pr.rating_overall DESC",
-                                 limit=25, highlight=None):
-    """Generate a free agent search results HTML report.
+def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
+                       order_by="pr.rating_overall DESC", limit=25, highlight=None):
+    """Query free agents matching the given criteria.
 
-    Always regenerates — no caching, criteria vary per search.
-
-    highlight: list of (col_key, display_label) tuples for extra stat columns,
-               e.g. [("rating_defense", "Defense"), ("rating_potential", "Potential")]
-
-    Returns (path_str, results_list) where results_list is list of dicts.
+    criteria_label is accepted for API consistency but not used in the query itself.
+    Returns a list of result dicts.
     """
     engine = get_engine(save_name)
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     sql = f"""
         SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,
@@ -182,6 +161,26 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
             prone_overall=r[22], work_ethic=r[23], intelligence=r[24],
             greed=r[25], loyalty=r[26], bats=r[27], throws=r[28],
         ))
+    return results
+
+
+def generate_free_agents_report(save_name, criteria_label, where_clause,
+                                 join_clause="", order_by="pr.rating_overall DESC",
+                                 limit=25, highlight=None):
+    """Generate a free agent search results HTML report.
+
+    Always regenerates — no caching, criteria vary per search.
+
+    highlight: list of (col_key, display_label) tuples for extra stat columns,
+               e.g. [("rating_defense", "Defense"), ("rating_potential", "Potential")]
+
+    Returns (path_str, results_list) where results_list is list of dicts.
+    """
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    results = query_free_agents(save_name, criteria_label, where_clause, join_clause,
+                                 order_by, limit, highlight)
 
     # Build slug from criteria
     slug = re.sub(r"[^a-z0-9_]", "", criteria_label.lower().replace(" ", "_"))[:50]

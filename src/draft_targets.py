@@ -2,30 +2,16 @@
 """Draft prospect search report generator for OOTP Baseball."""
 
 import json
-import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():

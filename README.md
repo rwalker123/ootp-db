@@ -32,6 +32,11 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/contract-extension`](#contract-extension-first-last)
   - [`/waiver-claim`](#waiver-claim-first-last)
   - [`/lineup-optimizer`](#lineup-optimizer-options)
+- [Claude Desktop (MCP)](#claude-desktop-mcp)
+  - [Prerequisites](#prerequisites-1)
+  - [Configuration](#configuration)
+  - [Available Tools](#available-tools)
+  - [Example Conversations](#example-conversations)
 - [Contributing](#contributing)
 
 ## Prerequisites
@@ -545,6 +550,117 @@ Forced starters are shown with a blue `[F]` badge in the report. Forced-bench an
 - **LLM analysis** — four-bullet breakdown covering the philosophy rationale, key slot decisions, hot/cold interpretation, and handedness balance assessment
 
 Reports are cached per team + philosophy + handedness until the next DB import. Runs with any overrides (forced starts/bench, fatigue threshold, favor-offense) always regenerate.
+
+---
+
+---
+
+## Claude Desktop (MCP)
+
+In addition to Claude Code skills, OOTP Analyst can connect to the **Claude Desktop app** via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). This lets you ask natural language questions and run analyses directly in a conversation — no slash commands, no terminal, no browser reports.
+
+**Claude Code vs. Claude Desktop — when to use which:**
+
+| | Claude Code | Claude Desktop |
+|--|-------------|----------------|
+| Interface | Terminal slash commands | Conversational chat |
+| Output | Rich HTML reports in browser | Inline text in conversation |
+| Best for | Deep-dive reports, side-by-side comparisons | Quick lookups, ad-hoc questions |
+
+### Prerequisites
+
+- [Claude Desktop](https://claude.ai/download) installed (macOS or Windows)
+- OOTP Analyst set up and at least one save imported (see [Setup](#setup))
+
+### Configuration
+
+Add the MCP server to Claude Desktop's config file. On macOS, the file is at:
+```
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+On Windows it is at:
+```
+%APPDATA%\Claude\claude_desktop_config.json
+```
+
+Add an `mcpServers` block (preserve any existing keys like `preferences`):
+
+```json
+{
+  "mcpServers": {
+    "ootp": {
+      "command": "/path/to/ootp-db/.venv/bin/python3",
+      "args": ["/path/to/ootp-db/src/mcp_server.py"]
+    }
+  }
+}
+```
+
+Replace `/path/to/ootp-db` with the actual path to your project directory. On macOS with the default install location this looks like:
+
+```json
+{
+  "mcpServers": {
+    "ootp": {
+      "command": "/Users/yourname/source/ootp-db/.venv/bin/python3",
+      "args": ["/Users/yourname/source/ootp-db/src/mcp_server.py"]
+    }
+  }
+}
+```
+
+**Quit and relaunch Claude Desktop** after saving the file. The OOTP tools will appear under the tools icon (⚙) in any conversation.
+
+### Available Tools
+
+The MCP server exposes nine tools. Claude Desktop selects and calls them automatically based on your question — you never invoke them directly.
+
+| Tool | What it does |
+|------|-------------|
+| `get_save_info` | Active save name, your team, and last import timestamp |
+| `standings` | Current MLB division standings |
+| `player_lookup` | Bio, composite ratings, and advanced stats for any MLB player |
+| `search_free_agents` | Filter free agents by position, age, rating, handedness, or custom SQL |
+| `search_draft_prospects` | Search the draft pool or IFA pool by position, age, and ceiling |
+| `waiver_claim` | Compare a waiver/DFA candidate against your roster; surfaces rating deltas, contract, and injury info |
+| `contract_extension` | Extension recommendation with WAR projection, market comps, and personality factors |
+| `lineup_optimizer` | Optimal batting order using one of four sabermetric philosophies |
+| `trade_targets` | Find realistic return candidates for a player you're willing to move |
+
+### Example Conversations
+
+```
+Who should I be targeting on waivers right now?
+
+Show me the AL Central standings.
+
+How is Jackson Jobe pitching this season?
+
+Find me a lefty reliever, ideally under 28 with a low injury risk.
+
+What would a fair extension look like for Riley Greene?
+
+Give me the modern lineup vs a right-handed starter.
+
+I want to trade Tarik Skubal — what kind of return could I get?
+
+Who are the best IFA prospects this year?
+```
+
+Because Claude Desktop is a full conversation, you can follow up naturally:
+
+```
+You: Show me the top free agent shortstops.
+Claude: [calls search_free_agents, returns list]
+
+You: Tell me more about the second one.
+Claude: [calls player_lookup for that player]
+
+You: Would he be worth claiming if he clears waivers?
+Claude: [calls waiver_claim]
+```
+
+> **Note:** The active save and team are read from `saves.json` automatically. If you want to switch the active save before a session, use the web UI or run `./import.sh` for that save.
 
 ---
 

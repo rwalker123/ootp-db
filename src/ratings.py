@@ -13,7 +13,6 @@ Run after analytics.py:
 """
 
 import json
-import os
 import sys
 import time
 from datetime import datetime
@@ -21,10 +20,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
@@ -79,21 +77,14 @@ def get_last_import_time():
     return None
 
 
-def generate_rating_report(save_name, first_name, last_name, focus_modifiers=None):
-    """Generate (or return cached) a player rating HTML report.
+def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
+    """Query and compute all data needed for a player rating report.
 
-    focus_modifiers: list of strings like ["defense", "power"] or None.
-
-    Returns (path_str, data_dict) where data_dict is None on a cache hit.
+    Returns a complete dict with all values needed by generate_rating_report
+    and MCP tools, or None if the player is not found.
+    Does NOT perform a cache check.
     """
-    engine = setup_engine(save_name)
-
-    existing = find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers)
-    if existing:
-        return existing, None
-
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    engine = get_engine(save_name)
 
     with engine.connect() as conn:
         from sqlalchemy import text as sa_text
@@ -116,8 +107,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         ), dict(first=first_name, last=last_name)).fetchone()
 
         if not row:
-            print(f"Player not found: {first_name} {last_name}")
-            sys.exit(1)
+            return None
 
         (player_id, first, last, team_abbr, position, age, oa, pot, player_type,
          rating_overall, r_offense, r_contact, r_discipline, r_defense, r_potential,
@@ -389,6 +379,179 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     key_stat_val = f"{wrc_plus_or_fip:.2f}" if is_pitcher else str(int(wrc_plus_or_fip)) if wrc_plus_or_fip is not None else "—"
     war_val = f"{float(war):.1f}" if war is not None else "—"
 
+    return dict(
+        player_id=player_id,
+        first_name=first,
+        last_name=last,
+        team_abbr=team_abbr,
+        position=position,
+        pos_name=pos_name,
+        age=age_disp,
+        oa=oa_disp,
+        pot=pot_disp,
+        player_type=player_type,
+        is_pitcher=is_pitcher,
+        rating_overall=rating_overall,
+        scores=scores,
+        weights=weights,
+        component_labels=component_labels,
+        adjusted=adjusted,
+        adj_rating=adj_rating,
+        final_rating=final_rating,
+        rank=rank,
+        rank_total=rank_total,
+        bats_str=bats_str,
+        throws_str=throws_str,
+        oa_disp=oa_disp,
+        pot_disp=pot_disp,
+        age_disp=age_disp,
+        prone_overall_v=prone_overall_v,
+        prone_leg_v=prone_leg_v,
+        prone_back_v=prone_back_v,
+        prone_arm_v=prone_arm_v,
+        we_v=we_v,
+        iq_v=iq_v,
+        leader_v=leader_v,
+        greed_v=greed_v,
+        loyalty_v=loyalty_v,
+        pfw_v=pfw_v,
+        flag_injury_risk=bool(flag_injury),
+        flag_leader=bool(flag_leader_val),
+        flag_high_ceiling=bool(flag_ceiling),
+        key_stat_label=key_stat_label,
+        key_stat_val=key_stat_val,
+        war_val=war_val,
+        wrc_plus=None if is_pitcher else wrc_plus_or_fip,
+        fip=wrc_plus_or_fip if is_pitcher else None,
+        war=war,
+        focus_modifiers=focus_modifiers,
+    )
+
+
+def generate_rating_report(save_name, first_name, last_name, focus_modifiers=None):
+    """Generate (or return cached) a player rating HTML report.
+
+    focus_modifiers: list of strings like ["defense", "power"] or None.
+
+    Returns (path_str, data_dict) where data_dict is None on a cache hit.
+    """
+    engine = get_engine(save_name)
+
+    existing = find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers)
+    if existing:
+        return existing, None
+
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    data = query_player_rating(save_name, first_name, last_name, focus_modifiers)
+    if data is None:
+        print(f"Player not found: {first_name} {last_name}")
+        sys.exit(1)
+
+    # Extract all values from data dict for HTML generation
+    player_id = data["player_id"]
+    first = data["first_name"]
+    last = data["last_name"]
+    team_abbr = data["team_abbr"]
+    pos_name = data["pos_name"]
+    age_disp = data["age_disp"]
+    oa_disp = data["oa_disp"]
+    pot_disp = data["pot_disp"]
+    player_type = data["player_type"]
+    is_pitcher = data["is_pitcher"]
+    rating_overall = data["rating_overall"]
+    scores = data["scores"]
+    weights = data["weights"]
+    component_labels = data["component_labels"]
+    adjusted = data["adjusted"]
+    adj_rating = data["adj_rating"]
+    final_rating = data["final_rating"]
+    rank = data["rank"]
+    rank_total = data["rank_total"]
+    bats_str = data["bats_str"]
+    throws_str = data["throws_str"]
+    prone_overall_v = data["prone_overall_v"]
+    prone_leg_v = data["prone_leg_v"]
+    prone_back_v = data["prone_back_v"]
+    prone_arm_v = data["prone_arm_v"]
+    we_v = data["we_v"]
+    iq_v = data["iq_v"]
+    leader_v = data["leader_v"]
+    greed_v = data["greed_v"]
+    loyalty_v = data["loyalty_v"]
+    pfw_v = data["pfw_v"]
+    flag_injury = data["flag_injury_risk"]
+    flag_leader_val = data["flag_leader"]
+    flag_ceiling = data["flag_high_ceiling"]
+    key_stat_label = data["key_stat_label"]
+    key_stat_val = data["key_stat_val"]
+    war_val = data["war_val"]
+
+    def lg(score):
+        return letter_grade(score)
+
+    def bar_html(score):
+        w = int(max(0, min(100, score)))
+        cls = "bar-green" if score >= 70 else "bar-yellow" if score >= 40 else "bar-red"
+        return f'<div class="bar-bg"><div class="bar-fill {cls}" style="width:{w}%"></div></div>'
+
+    def injury_label(val):
+        if val is None:
+            return "Unknown"
+        v = int(val)
+        if v <= 25:
+            return "Iron Man"
+        if v <= 75:
+            return "Durable"
+        if v <= 125:
+            return "Normal"
+        if v <= 174:
+            return "Fragile"
+        return "Wrecked"
+
+    def injury_color(val):
+        if val is None:
+            return "#888"
+        v = int(val)
+        if v <= 75:
+            return "#1a7a1a"
+        if v <= 125:
+            return "#cc7700"
+        return "#cc2222"
+
+    def trait_label(val):
+        if val is None:
+            return "Unknown"
+        v = int(val)
+        if v <= 50:
+            return "Poor"
+        if v <= 100:
+            return "Below Avg"
+        if v <= 130:
+            return "Average"
+        if v <= 160:
+            return "Good"
+        return "Elite"
+
+    def trait_color(val, invert=False):
+        if val is None:
+            return "#888"
+        v = int(val)
+        if invert:
+            if v >= 161:
+                return "#cc2222"
+            if v >= 131:
+                return "#cc7700"
+            return "#1a7a1a"
+        if v >= 161:
+            return "#1a7a1a"
+        if v >= 131:
+            return "#4a9a2a"
+        if v >= 101:
+            return "#888"
+        return "#cc7700"
+
     adj_note = ""
     if adjusted:
         adj_note = (f'<div class="section"><div class="callout">'
@@ -550,9 +713,9 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         grade=lg(final_rating),
         rank=rank,
         rank_total=rank_total,
-        wrc_plus=None if is_pitcher else wrc_plus_or_fip,
-        fip=wrc_plus_or_fip if is_pitcher else None,
-        war=war,
+        wrc_plus=data["wrc_plus"],
+        fip=data["fip"],
+        war=data["war"],
         flag_injury_risk=bool(flag_injury),
         flag_leader=bool(flag_leader_val),
         flag_high_ceiling=bool(flag_ceiling),
@@ -650,21 +813,6 @@ def clamp(val, lo=0, hi=100):
 def percentile_rank(series):
     """Compute percentile rank (0-100) for each value in a series."""
     return series.rank(pct=True, na_option="keep") * 100
-
-
-def setup_engine(save_name):
-    """Load .env, build engine."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        print("Error: .env file not found.")
-        sys.exit(1)
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -1488,7 +1636,7 @@ def main():
         sys.exit(1)
 
     save_name = sys.argv[1]
-    engine = setup_engine(save_name)
+    engine = get_engine(save_name)
     start = time.time()
 
     print("Computing batter ratings...")

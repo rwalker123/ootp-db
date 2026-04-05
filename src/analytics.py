@@ -12,16 +12,14 @@ Run after import.py:
     python src/analytics.py My-Save-2026
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
-from shared_css import db_name_from_save
-from sqlalchemy import create_engine, inspect, text
+from shared_css import db_name_from_save, get_engine
+from sqlalchemy import inspect, text
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -82,23 +80,6 @@ SWEET_SPOT_LA_MAX = 32
 # ---------------------------------------------------------------------------
 # Database setup
 # ---------------------------------------------------------------------------
-def setup_engine(save_name):
-    """Load .env, build engine for the OOTP database."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        print("Error: .env file not found.")
-        sys.exit(1)
-    load_dotenv(env_path)
-
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
-
-
 def get_current_year(engine):
     """Get the current (max) season year for MLB career stats."""
     with engine.connect() as conn:
@@ -677,7 +658,7 @@ def main():
         sys.exit(1)
 
     save_name = sys.argv[1]
-    engine = setup_engine(save_name)
+    engine = get_engine(save_name)
     start = time.time()
 
     year = get_current_year(engine)

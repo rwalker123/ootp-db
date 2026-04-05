@@ -146,11 +146,14 @@ def _load_registry():
 
 def _update_registry(save_name, db_name, csv_dir):
     registry = _load_registry()
-    registry.setdefault("saves", {})[save_name] = {
+    saves = registry.setdefault("saves", {})
+    existing = saves.get(save_name, {})
+    existing.update({
         "db_name": db_name,
         "last_import": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "csv_path": str(csv_dir),
-    }
+    })
+    saves[save_name] = existing
     # Set active only if not already set
     if not registry.get("active"):
         registry["active"] = save_name

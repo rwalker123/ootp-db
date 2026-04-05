@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 reports/
+cache/
 saves.json
 .last_import
 .update-status

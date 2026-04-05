@@ -3,15 +3,12 @@
 
 import html
 import json
-import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
 from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
@@ -29,17 +26,6 @@ OF_POS = {7, 8, 9}
 CORNER_IF_POS = {3, 5}
 # Middle IF that share comparison
 MIDDLE_IF_POS = {4, 6}
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -1210,13 +1196,11 @@ def _build_recommendation_placeholder():
 
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
-def generate_waiver_claim_report(save_name, first_name, last_name):
-    """Generate a waiver claim evaluation report.
+def query_waiver_claim(save_name, first_name, last_name):
+    """Query all data needed for a waiver claim evaluation.
 
-    Returns:
-        (None, None)   — player not found
-        (path, None)   — cache hit, path is existing report
-        (path, dict)   — newly generated report + data dict for agent summary
+    Returns the complete data dict, or None if the player is not found.
+    Does NOT perform a cache check.
     """
     saves = json.loads((PROJECT_ROOT / "saves.json").read_text())
     save_data = saves.get("saves", {}).get(save_name, {})
@@ -1233,15 +1217,9 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 
         candidate = _lookup_player(conn, first_name, last_name)
         if not candidate:
-            return None, None
+            return None
 
         player_id = candidate["player_id"]
-
-        # Cache check
-        existing = find_existing_waiver_report(player_id, save_name)
-        if existing:
-            return existing, None
-
         player_type = candidate.get("player_type", "batter")
         position = int(candidate.get("position") or 0)
         player_role = int(candidate.get("role") or 0)
@@ -1257,6 +1235,139 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         field_positions = _get_fielding_positions(conn, player_id)
         fielding_details = _get_fielding_details(conn, player_id)
         roster_count = _get_40man_count(conn, my_team_id)
+
+    # Build data dict for agent
+    best_incumbent = incumbents[0] if incumbents else None
+    worst_incumbent = incumbents[-1] if incumbents else None
+    cand_rating = float(candidate.get("rating_overall") or 0)
+
+    def _pct_fmt(v):
+        return round(float(v) * 100, 1) if v is not None else None
+
+    data = dict(
+        player_name=f"{first_name} {last_name}",
+        first_name=first_name,
+        last_name=last_name,
+        position=POS_MAP.get(position, "?"),
+        player_type=player_type,
+        role=ROLE_MAP.get(player_role, "—"),
+        team_abbr=candidate.get("team_abbr") or "FA",
+        age=candidate.get("age"),
+        oa=candidate.get("oa"),
+        pot=candidate.get("pot"),
+        rating_overall=cand_rating,
+        war=candidate.get("war"),
+        wrc_plus=int(candidate.get("wrc_plus")) if candidate.get("wrc_plus") else None,
+        current_salary=fmt_salary(get_current_salary(candidate)),
+        years_remaining=get_years_remaining(candidate),
+        arb_status=arb_status_label(candidate.get("mlb_service_years")),
+        is_on_waivers=int(candidate.get("is_on_waivers") or 0),
+        days_waivers_left=candidate.get("days_on_waivers_left") or 0,
+        is_dfa=int(candidate.get("designated_for_assignment") or 0),
+        dfa_days_left=candidate.get("days_on_dfa_left") or 0,
+        flag_injury_risk=bool(candidate.get("flag_injury_risk")),
+        prone_label=injury_label(candidate.get("prone_overall") or candidate.get("pr_prone")),
+        roster_count=roster_count,
+        needs_dfa_to_claim=(roster_count >= 40),
+        best_incumbent_name=f"{best_incumbent.get('first_name', '')} {best_incumbent.get('last_name', '')}" if best_incumbent else "None",
+        best_incumbent_rating=float(best_incumbent.get("rating_overall") or 0) if best_incumbent else None,
+        worst_incumbent_name=f"{worst_incumbent.get('first_name', '')} {worst_incumbent.get('last_name', '')}" if worst_incumbent else "None",
+        worst_incumbent_rating=float(worst_incumbent.get("rating_overall") or 0) if worst_incumbent else None,
+        rating_vs_best=round(cand_rating - float(best_incumbent.get("rating_overall") or 0), 1) if best_incumbent else None,
+        rating_vs_worst=round(cand_rating - float(worst_incumbent.get("rating_overall") or 0), 1) if worst_incumbent else None,
+        num_incumbents=len(incumbents),
+        positional_flexibility=[POS_MAP.get(k, "?") for k in field_positions if field_positions[k] >= 40 and k != 1],
+        no_trade=bool(candidate.get("no_trade")),
+        greed=candidate.get("greed"),
+        loyalty=candidate.get("loyalty"),
+        greed_label=trait_label(candidate.get("greed")),
+        loyalty_label=trait_label(candidate.get("loyalty")),
+        my_team_abbr=my_team_abbr,
+        my_team_name=my_team_name,
+        # Advanced stats — batters
+        adv_avg_ev=round(float(adv["avg_ev"]), 1) if adv and adv.get("avg_ev") is not None else None,
+        adv_hard_hit_pct=_pct_fmt(adv.get("hard_hit_pct")) if adv and adv.get("hard_hit_pct") is not None else None,
+        adv_barrel_pct=_pct_fmt(adv.get("barrel_pct")) if adv and adv.get("barrel_pct") is not None else None,
+        adv_xwoba=round(float(adv["xwoba"]), 3) if adv and adv.get("xwoba") is not None else None,
+        adv_k_pct=_pct_fmt(adv.get("k_pct")) if adv and adv.get("k_pct") is not None else None,
+        adv_bb_pct=_pct_fmt(adv.get("bb_pct")) if adv and adv.get("bb_pct") is not None else None,
+        adv_wrc_plus_vs_lhp=int(adv["wrc_plus_vs_lhp"]) if adv and adv.get("wrc_plus_vs_lhp") is not None else None,
+        adv_wrc_plus_vs_rhp=int(adv["wrc_plus_vs_rhp"]) if adv and adv.get("wrc_plus_vs_rhp") is not None else None,
+        adv_pa_vs_lhp=adv.get("pa_vs_lhp") if adv else None,
+        adv_pa_vs_rhp=adv.get("pa_vs_rhp") if adv else None,
+        # Advanced stats — pitchers
+        adv_era=round(float(adv["era"]), 2) if adv and adv.get("era") is not None else None,
+        adv_fip=round(float(adv["fip"]), 2) if adv and adv.get("fip") is not None else None,
+        adv_xfip=round(float(adv["xfip"]), 2) if adv and adv.get("xfip") is not None else None,
+        adv_k_bb_pct=_pct_fmt(adv.get("k_bb_pct")) if adv and adv.get("k_bb_pct") is not None else None,
+        adv_gb_pct=_pct_fmt(adv.get("gb_pct")) if adv and adv.get("gb_pct") is not None else None,
+        adv_hard_hit_pct_against=_pct_fmt(adv.get("hard_hit_pct_against")) if adv and adv.get("hard_hit_pct_against") is not None else None,
+        adv_barrel_pct_against=_pct_fmt(adv.get("barrel_pct_against")) if adv and adv.get("barrel_pct_against") is not None else None,
+        adv_xwoba_against=round(float(adv["xwoba_against"]), 3) if adv and adv.get("xwoba_against") is not None else None,
+        adv_era_vs_lhb=round(float(adv["era_vs_lhb"]), 2) if adv and adv.get("era_vs_lhb") is not None else None,
+        adv_era_vs_rhb=round(float(adv["era_vs_rhb"]), 2) if adv and adv.get("era_vs_rhb") is not None else None,
+        adv_fip_vs_lhb=round(float(adv["fip_vs_lhb"]), 2) if adv and adv.get("fip_vs_lhb") is not None else None,
+        adv_fip_vs_rhb=round(float(adv["fip_vs_rhb"]), 2) if adv and adv.get("fip_vs_rhb") is not None else None,
+        adv_bf_vs_lhb=adv.get("bf_vs_lhb") if adv else None,
+        adv_bf_vs_rhb=adv.get("bf_vs_rhb") if adv else None,
+        # Private keys for HTML generation in generate_waiver_claim_report
+        _candidate=candidate,
+        _adv=adv,
+        _incumbents=incumbents,
+        _field_positions=field_positions,
+        _fielding_details=fielding_details,
+        _roster_count=roster_count,
+        _player_id=player_id,
+        _player_type=player_type,
+        _position=position,
+        _player_role=player_role,
+        _comparison_positions=comparison_positions,
+        _my_team_name=my_team_name,
+    )
+
+    return data
+
+
+def generate_waiver_claim_report(save_name, first_name, last_name):
+    """Generate a waiver claim evaluation report.
+
+    Returns:
+        (None, None)   — player not found
+        (path, None)   — cache hit, path is existing report
+        (path, dict)   — newly generated report + data dict for agent summary
+    """
+    engine = get_engine(save_name)
+
+    with engine.connect() as conn:
+        candidate = _lookup_player(conn, first_name, last_name)
+        if not candidate:
+            return None, None
+
+        player_id = candidate["player_id"]
+
+        # Cache check
+        existing = find_existing_waiver_report(player_id, save_name)
+        if existing:
+            return existing, None
+
+    # Cache miss — query all data
+    data = query_waiver_claim(save_name, first_name, last_name)
+    if data is None:
+        return None, None
+
+    # Extract private keys for HTML construction
+    candidate = data.pop("_candidate")
+    adv = data.pop("_adv")
+    incumbents = data.pop("_incumbents")
+    field_positions = data.pop("_field_positions")
+    fielding_details = data.pop("_fielding_details")
+    roster_count = data.pop("_roster_count")
+    player_id = data.pop("_player_id")
+    player_type = data.pop("_player_type")
+    position = data.pop("_position")
+    player_role = data.pop("_player_role")
+    comparison_positions = data.pop("_comparison_positions")
+    my_team_name = data.pop("_my_team_name")
 
     # Build HTML
     css = get_report_css("1200px")
@@ -1313,83 +1424,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
     report_path = reports_dir / f"{slug}.html"
     write_report_html(report_path, html_doc)
 
-    # Build data dict for agent
-    best_incumbent = incumbents[0] if incumbents else None
-    worst_incumbent = incumbents[-1] if incumbents else None
-    cand_rating = float(candidate.get("rating_overall") or 0)
-
-    def _pct_fmt(v):
-        return round(float(v) * 100, 1) if v is not None else None
-
-    data = dict(
-        player_name=f"{first_name} {last_name}",
-        first_name=first_name,
-        last_name=last_name,
-        position=POS_MAP.get(position, "?"),
-        player_type=player_type,
-        role=ROLE_MAP.get(player_role, "—"),
-        team_abbr=candidate.get("team_abbr") or "FA",
-        age=candidate.get("age"),
-        oa=candidate.get("oa"),
-        pot=candidate.get("pot"),
-        rating_overall=cand_rating,
-        war=candidate.get("war"),
-        wrc_plus=int(candidate.get("wrc_plus")) if candidate.get("wrc_plus") else None,
-        current_salary=fmt_salary(get_current_salary(candidate)),
-        years_remaining=get_years_remaining(candidate),
-        arb_status=arb_status_label(candidate.get("mlb_service_years")),
-        is_on_waivers=int(candidate.get("is_on_waivers") or 0),
-        days_waivers_left=candidate.get("days_on_waivers_left") or 0,
-        is_dfa=int(candidate.get("designated_for_assignment") or 0),
-        dfa_days_left=candidate.get("days_on_dfa_left") or 0,
-        flag_injury_risk=bool(candidate.get("flag_injury_risk")),
-        prone_label=injury_label(candidate.get("prone_overall") or candidate.get("pr_prone")),
-        roster_count=roster_count,
-        needs_dfa_to_claim=(roster_count >= 40),
-        best_incumbent_name=f"{best_incumbent.get('first_name', '')} {best_incumbent.get('last_name', '')}" if best_incumbent else "None",
-        best_incumbent_rating=float(best_incumbent.get("rating_overall") or 0) if best_incumbent else None,
-        worst_incumbent_name=f"{worst_incumbent.get('first_name', '')} {worst_incumbent.get('last_name', '')}" if worst_incumbent else "None",
-        worst_incumbent_rating=float(worst_incumbent.get("rating_overall") or 0) if worst_incumbent else None,
-        rating_vs_best=round(cand_rating - float(best_incumbent.get("rating_overall") or 0), 1) if best_incumbent else None,
-        rating_vs_worst=round(cand_rating - float(worst_incumbent.get("rating_overall") or 0), 1) if worst_incumbent else None,
-        num_incumbents=len(incumbents),
-        positional_flexibility=[POS_MAP.get(k, "?") for k in field_positions if field_positions[k] >= 40 and k != 1],
-        no_trade=bool(candidate.get("no_trade")),
-        greed=candidate.get("greed"),
-        loyalty=candidate.get("loyalty"),
-        greed_label=trait_label(candidate.get("greed")),
-        loyalty_label=trait_label(candidate.get("loyalty")),
-        my_team_abbr=my_team_abbr,
-        my_team_name=my_team_name,
-        report_path=str(report_path),
-        # Advanced stats — batters
-        adv_avg_ev=round(float(adv["avg_ev"]), 1) if adv and adv.get("avg_ev") is not None else None,
-        adv_hard_hit_pct=_pct_fmt(adv.get("hard_hit_pct")) if adv and adv.get("hard_hit_pct") is not None else None,
-        adv_barrel_pct=_pct_fmt(adv.get("barrel_pct")) if adv and adv.get("barrel_pct") is not None else None,
-        adv_xwoba=round(float(adv["xwoba"]), 3) if adv and adv.get("xwoba") is not None else None,
-        adv_k_pct=_pct_fmt(adv.get("k_pct")) if adv and adv.get("k_pct") is not None else None,
-        adv_bb_pct=_pct_fmt(adv.get("bb_pct")) if adv and adv.get("bb_pct") is not None else None,
-        adv_wrc_plus_vs_lhp=int(adv["wrc_plus_vs_lhp"]) if adv and adv.get("wrc_plus_vs_lhp") is not None else None,
-        adv_wrc_plus_vs_rhp=int(adv["wrc_plus_vs_rhp"]) if adv and adv.get("wrc_plus_vs_rhp") is not None else None,
-        adv_pa_vs_lhp=adv.get("pa_vs_lhp") if adv else None,
-        adv_pa_vs_rhp=adv.get("pa_vs_rhp") if adv else None,
-        # Advanced stats — pitchers
-        adv_era=round(float(adv["era"]), 2) if adv and adv.get("era") is not None else None,
-        adv_fip=round(float(adv["fip"]), 2) if adv and adv.get("fip") is not None else None,
-        adv_xfip=round(float(adv["xfip"]), 2) if adv and adv.get("xfip") is not None else None,
-        adv_k_bb_pct=_pct_fmt(adv.get("k_bb_pct")) if adv and adv.get("k_bb_pct") is not None else None,
-        adv_gb_pct=_pct_fmt(adv.get("gb_pct")) if adv and adv.get("gb_pct") is not None else None,
-        adv_hard_hit_pct_against=_pct_fmt(adv.get("hard_hit_pct_against")) if adv and adv.get("hard_hit_pct_against") is not None else None,
-        adv_barrel_pct_against=_pct_fmt(adv.get("barrel_pct_against")) if adv and adv.get("barrel_pct_against") is not None else None,
-        adv_xwoba_against=round(float(adv["xwoba_against"]), 3) if adv and adv.get("xwoba_against") is not None else None,
-        adv_era_vs_lhb=round(float(adv["era_vs_lhb"]), 2) if adv and adv.get("era_vs_lhb") is not None else None,
-        adv_era_vs_rhb=round(float(adv["era_vs_rhb"]), 2) if adv and adv.get("era_vs_rhb") is not None else None,
-        adv_fip_vs_lhb=round(float(adv["fip_vs_lhb"]), 2) if adv and adv.get("fip_vs_lhb") is not None else None,
-        adv_fip_vs_rhb=round(float(adv["fip_vs_rhb"]), 2) if adv and adv.get("fip_vs_rhb") is not None else None,
-        adv_bf_vs_lhb=adv.get("bf_vs_lhb") if adv else None,
-        adv_bf_vs_rhb=adv.get("bf_vs_rhb") if adv else None,
-    )
-
+    data["report_path"] = str(report_path)
     return str(report_path), data
 
 
