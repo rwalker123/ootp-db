@@ -482,6 +482,11 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 {adj_note}
 
 <div class="section">
+  <div class="section-title">Analysis</div>
+<!-- ANALYSIS:START --><!-- RATING_SUMMARY --><!-- ANALYSIS:END -->
+</div>
+
+<div class="section">
   <div class="section-title">Rating Breakdown</div>
   <table>
   <tr><th class="left">Component</th><th>Weight</th><th>Score</th><th>Bar</th></tr>
@@ -524,10 +529,6 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
   <tr><th>{key_stat_label}</th><th>WAR</th></tr>
   <tr><td>{key_stat_val}</td><td>{war_val}</td></tr>
   </table>
-</div>
-
-<div class="section">
-<!-- ANALYSIS:START --><!-- RATING_SUMMARY --><!-- ANALYSIS:END -->
 </div>
 
 </div>
@@ -748,7 +749,7 @@ def load_batter_data(engine):
                SUM(war) as war
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id = 1
+          AND split_id IN (0, 1)
           AND player_id IN (SELECT player_id FROM batter_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -800,7 +801,7 @@ def load_pitcher_data(engine):
                SUM(gb) as gb, SUM(fb) as fb, SUM(war) as war
         FROM players_career_pitching_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id = 1
+          AND split_id IN (0, 1)
           AND player_id IN (SELECT player_id FROM pitcher_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -831,19 +832,34 @@ def load_pitcher_data(engine):
 def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0):
     """Offensive production score from wRC+ and xwOBA.
 
-    Blends in OOTP's ground-truth current batting rating for players with thin
-    MLB career stats (< 500 PA): up to 60% OOTP weight at 0 PA, tapering to 0%
-    at 500+ PA. This improves accuracy for prospects and recent callups where
-    small-sample outcome stats are noisy.
+    Blends in an OOTP-based talent anchor for players with thin MLB career
+    stats using a linear ramp: anchor=100% at 0 PA, stats=100% at 300+ PA.
+    Linear gives very little weight to tiny samples (13 PA → 4.3% obs).
+
+    Anchor priority:
+      1. players_scouted_ratings (scouting_team_id=0) — ground-truth current ratings.
+         Only available when "Additional complete scouted ratings" is enabled in OOTP.
+      2. players_value.oa — OOTP's overall rating (20-80 scale), converted to 0-100.
+         Always available; used as fallback when scouted ratings are absent.
+
+    Without this anchor, a player with 13 PA and an inflated wOBA would get a
+    near-perfect rating_offense, corrupting the blended_woba talent anchor.
     """
     wrc = row.get("wrc_plus", 100)
     wrc_score = clamp((wrc - 50) * (100 / 120))
     xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else 50
     stats_score = wrc_score * 0.7 + xwoba_score * 0.3
 
-    if ootp_bat_score is not None and career_pa < 500:
-        ootp_weight = max(0.0, min(0.6, (500 - career_pa) / 500 * 0.6))
-        return stats_score * (1 - ootp_weight) + ootp_bat_score * ootp_weight
+    if career_pa < 300:
+        if ootp_bat_score is not None:
+            anchor = ootp_bat_score
+        else:
+            oa = row.get("oa")
+            anchor = clamp((oa - 20) / 60 * 100) if oa and not pd.isna(oa) else None
+
+        if anchor is not None:
+            stats_weight = min(career_pa / 300, 1.0)
+            return stats_score * stats_weight + anchor * (1.0 - stats_weight)
 
     return stats_score
 
@@ -1320,7 +1336,7 @@ def compute_pitcher_ratings(engine):
                    (SUM(er)::float*9/SUM(ip)) -
                    ((13*SUM(hra)::float + 3*(SUM(bb)::float+SUM(hp)::float) - 2*SUM(k)::float) / SUM(ip)::float) as cfip
             FROM team_pitching_stats
-            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = 1
+            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id IN (0, 1)
         """)).fetchone()
         cfip = float(r[1])
 

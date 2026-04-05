@@ -359,7 +359,21 @@ view but may differ by 5 points on individual ratings.
 ### Notable Column Conventions
 
 #### Enum Values
-- `split_id`: 1 = overall, 2 = vs LHP, 3 = vs RHP, 21 = postseason
+- `split_id` **in player career tables** (`players_career_batting_stats`, `players_career_pitching_stats`,
+  `players_career_fielding_stats`):
+  - **0 = simulated seasons** (years the sim generated, e.g. 2026+)
+  - **1 = real historical seasons** (pre-sim MLB history, e.g. ≤2025)
+  - 2 = vs LHP (batting) / vs LHB (pitching), 3 = vs RHP / vs RHB, 21 = postseason
+  - **CRITICAL — always use `split_id IN (0, 1)` for overall stats.** Using only `split_id = 1`
+    silently drops every simulated season. This bug is easy to introduce and hard to notice.
+    ```sql
+    AND split_id IN (0, 1)   -- overall (real history + sim seasons)
+    AND split_id = 2         -- vs LHP/LHB splits only
+    AND split_id = 3         -- vs RHP/RHB splits only
+    ```
+- `split_id` **in team stats tables** (`team_batting_stats`, `team_pitching_stats`, etc.):
+  - 0 = overall/current season
+  - 2 = vs LHP, 3 = vs RHP
 - `level_id` / `league_level`: 1 = MLB, 2 = AAA, 3 = AA, 4 = High-A/A, 6 = Rookie
 - `position`: 1=P, 2=C, 3=1B, 4=2B, 5=3B, 6=SS, 7=LF, 8=CF, 9=RF
 - `role`: 11=Starting Pitcher, 12=Relief Pitcher, 13=Closer

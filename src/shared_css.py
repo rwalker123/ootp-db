@@ -97,6 +97,7 @@ def get_report_css(max_width="920px"):
   .tag-warn    {{ background: #fff3cd; color: #856404; }}
   .tag-bad     {{ background: #f8d7da; color: #721c24; }}
   .tag-neutral {{ background: #e2e3e5; color: #383d41; }}
+  .tag-force   {{ background: #cce5ff; color: #004085; }}
 
   /* ── Pill flags ─────────────────────────────────────────────────────── */
   .flags {{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }}

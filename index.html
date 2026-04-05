@@ -192,6 +192,7 @@
         <option value="free-agents">Free Agents</option>
         <option value="draft-targets">Draft Targets</option>
         <option value="trade-targets">Trade Targets</option>
+        <option value="lineup-optimizer">Lineup Optimizer</option>
         <option value="adhoc">Ad-hoc Query</option>
       </select>
       <div id="gen-fields" class="gen-fields"></div>
@@ -246,7 +247,7 @@ function unescHtml(s) {
 
 function extractMeta(html) {
   const title  = (html.match(/<title>(.*?)<\/title>/) || [])[1] || null;
-  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || [])[1] || null;
+  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated" content="([\d\-T:]+)"/) || [])[1] || null;
   const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
   const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
   const skill  = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
@@ -897,6 +898,9 @@ const GEN_SKILLS = {
   'trade-targets': { label: 'Trade Targets', fields: [
     { id: 'gen-criteria', placeholder: 'e.g. Colt Keith  •  surplus OF, need SP  •  acquiring Aaron Judge', required: true },
   ]},
+  'lineup-optimizer': { label: 'Lineup Optimizer', fields: [
+    { id: 'gen-criteria', placeholder: 'All optional — e.g.: traditional vs RHP · platoon · hot-hand · primary · without Colt Keith · Torkelson starts at 1B · Montilla bench · fatigue 70 · Team Name', required: false },
+  ]},
   'adhoc': { label: 'Ad-hoc Query', fields: [
     { id: 'gen-prompt', placeholder: 'Ask anything about the OOTP data…', required: true },
   ]},
@@ -1039,7 +1043,7 @@ function listenToJob(jobId, onDone) {
 async function generateReport() {
   const skill = document.getElementById('gen-skill').value;
   const args = buildArgs(skill);
-  if (!args) { alert('Please fill in the required fields.'); return; }
+  if (args === null) { alert('Please fill in the required fields.'); return; }
 
   const btn = document.getElementById('gen-btn');
   btn.disabled = true;

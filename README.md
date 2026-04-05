@@ -31,6 +31,7 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/trade-targets`](#trade-targets-player-or-criteria)
   - [`/contract-extension`](#contract-extension-first-last)
   - [`/waiver-claim`](#waiver-claim-first-last)
+  - [`/lineup-optimizer`](#lineup-optimizer-options)
 - [Contributing](#contributing)
 
 ## Prerequisites
@@ -421,6 +422,129 @@ The HTML report opens in your browser with six sections:
 - Contract obligation is shown in full; the LLM flags the specific player who would need to be DFA'd if the 40-man is at capacity
 
 Reports are cached by player until the next DB import.
+
+---
+
+### `/lineup-optimizer [options]`
+
+Generates an optimal batting order for your active team (or any named team) using one of four lineup philosophies grounded in sabermetric research. Accounts for career platoon splits, 30-day rolling performance trends, star player protection rules, and positional eligibility floors. Opens an HTML report in your browser.
+
+```
+/lineup-optimizer
+/lineup-optimizer traditional
+/lineup-optimizer vs lefty
+/lineup-optimizer platoon vs RHP
+/lineup-optimizer hot-hand
+/lineup-optimizer favor-offense
+/lineup-optimizer Cleveland modern vs LHP
+/lineup-optimizer without Colt Keith
+/lineup-optimizer hot-hand vs RHP without Jordan Montgomery
+/lineup-optimizer primary
+/lineup-optimizer Torkelson starts at 1B, Montilla bench
+/lineup-optimizer traditional vs RHP Dingler starts, Anderson bench, fatigue 70
+```
+
+All arguments are optional and combinable. The active team is read from `saves.json` automatically; pass a city name or nickname to target a different team.
+
+#### Philosophies
+
+| Flag | Slot for best hitter | Sort metric | Hot/cold weight |
+|------|---------------------|-------------|-----------------|
+| `modern` *(default)* | **#2** — maximizes PA + optimal base-out states (Tango/*The Book*) | Season wOBA | Low |
+| `traditional` | **#3** — conventional "franchise player" slot | Season wOBA | High |
+| `platoon` | **#2** | Blended split wOBA (100+ PA threshold) | Moderate |
+| `hot-hand` | **#2** | Season wOBA ± 30-day rolling modifier | High |
+
+**Why #2 in the modern philosophy?** Tango's simulation research (*The Book*, 2007) shows the #2 slot gets ~70 more plate appearances per season than cleanup (#4) and encounters more runners on base than leadoff (#1). The combined PA and base-out advantage makes it the highest-leverage offensive slot in the lineup. Lineup "protection" (inserting a weak bat behind a star) is treated as a myth — the stat is not supported in the research.
+
+#### Opponent handedness
+
+Adding `vs LHP` or `vs RHP` (or `vs lefty` / `vs righty`) adjusts the platoon sort:
+
+- **`platoon`**: reshuffles the full sort using matchup-weighted wOBA. Split performance is blended with overall season wOBA using a confidence weight based on career PA vs that handedness — larger samples shift more weight onto the split, smaller samples stay closer to the season baseline.
+
+- **Other philosophies**: highlights the favorable split column in the report for reference but does not change slot assignments.
+
+#### Hot/cold trend detection
+
+The skill queries the last 30 game entries per player from the current-season game log and computes a rolling 30-day wOBA. Players are labeled:
+
+| Label | Signal |
+|-------|--------|
+| **HOT** | 30-day wOBA exceeds season wOBA by ≥ .060 |
+| Warm | Exceeds by .030–.059 |
+| Cool | Below by .030–.059 |
+| **COLD** | Below by ≥ .060 |
+
+Under `hot-hand`, hot players move up one rank position; cold players move down (with a reduced penalty for stars). Under `traditional`, hot/cold trends directly influence slot assignments. Under `modern` and `platoon`, temperature flags are shown in the report for context but do not change the order.
+
+**Star player protection:** A player with career wOBA ≥ .370 or `rating_overall` ≥ 70 is classified as a star (marked ★ in the report). Stars receive half the cold-streak rank penalty of non-stars — a 30-day slump is ~70–80% statistical noise at that sample size, and the opportunity cost of benching a star is 4–7× higher per PA than benching a role player.
+
+#### Position eligibility
+
+Players are eligible at any position where OOTP has assigned them a fielding rating above the floor, with sufficient career experience. Two separate floors apply:
+
+| Position type | Rating floor | Experience floor |
+|--------------|-------------|-----------------|
+| **Premium defensive positions** (C, 2B, SS, CF) | **≥ 50** | ≥ 5 career games |
+| **Corner positions** (1B, 3B, LF, RF) | ≥ 40 | ≥ 5 career games |
+
+The higher floor for premium positions prevents a first baseman with a 45 2B rating from displacing a natural middle infielder — the defensive gap at these positions is too consequential to ignore.
+
+**Batter relief rule:** At premium positions, players whose OOTP-designated primary is a corner/batter spot (1B/3B/LF/RF) are deprioritized in favor of natural defenders. They can still fill a premium spot if no natural defender is available.
+
+**Primary position bonus:** Players competing at their OOTP-designated primary position receive a small scoring bonus, keeping designated 1B players at 1B rather than losing the spot to a 3B filling in.
+
+**Emergency fallback:** If no player meets both floors for a position, the optimizer falls back to anyone with a non-zero fielding rating. Emergency assignments are flagged with a `[!]` badge in the report.
+
+Pass `primary` to restrict every player to their declared primary position only.
+
+#### Defense vs. offense at premium positions
+
+By default, the optimizer gives **significant weight to fielding ratings** at premium defensive positions (C/2B/SS/CF) — a 25-point fielding gap meaningfully influences who gets assigned there. Pass `favor-offense` to reduce that weight if you'd rather let batting quality dominate the decision:
+
+```
+/lineup-optimizer favor-offense
+/lineup-optimizer platoon vs LHP favor-offense
+```
+
+#### Sample-size regression
+
+Rankings use a PA-regressed wOBA rather than raw observed wOBA. At 300 career MLB plate appearances the blend is 50/50 observed vs. a ratings-derived expectation; at 0 PA it is 100% ratings-based. This prevents a 9-game call-up on a hot streak from displacing an established starter, while still allowing a highly-rated prospect (0 PA, first start) to earn a spot on talent. The PA column is shown in amber when a player has fewer than 80 PA.
+
+#### Excluding players
+
+Pass `without <player name>` to remove a player from the eligible pool — useful for rest days, injuries, or "what if" scenarios.
+
+#### Manager overrides (force-start / force-bench)
+
+OOTP's in-game "Force Start" and "Force Bench" settings are not exported to CSV, so they cannot be read directly. Instead, pass them as skill arguments. Because you have to retype them each run, save your preferred combination as a prompt snippet and paste it in.
+
+| Syntax | Effect |
+|--------|--------|
+| `<name> starts` | Guarantees the player a lineup spot at their primary position |
+| `<name> starts at <pos>` | Locks the player to that specific position, bypassing eligibility floors |
+| `<name> at <pos> starts` | Same as above, alternate word order |
+| `<name> bench` | Sits the player regardless of their stats |
+| `fatigue <N>` | Auto-benches any player whose `fatigue_points` ≥ N (0–100 scale) |
+
+Multiple overrides can be chained with commas:
+
+```
+/lineup-optimizer traditional vs RHP Torkelson starts at 1B, Dingler starts, Montilla bench, fatigue 70
+```
+
+Forced starters are shown with a blue `[F]` badge in the report. Forced-bench and fatigued players appear with labeled badges in the roster section. Any run with overrides bypasses the report cache.
+
+#### The HTML report
+
+- **Lineup card** — slots 1–9 in DH leagues (slots 1–8 in non-DH leagues, pitcher slot omitted) with position, handedness, temperature tag, wRC+, PA, OBP, ISO, season wOBA, split wOBA vs LHP/RHP, 30-day rolling wOBA, fatigue, and speed rating
+- **L/R alternation score** (0–10) and the full L/R/S pattern string
+- **Philosophy comparison panel** — when using a non-modern philosophy, shows side-by-side which slots differ from the Tango-optimal Modern ordering
+- **Full roster stats table** — all eligible batters with Starting/Bench/Fatigued/[F] Bench labels
+- **LLM analysis** — four-bullet breakdown covering the philosophy rationale, key slot decisions, hot/cold interpretation, and handedness balance assessment
+
+Reports are cached per team + philosophy + handedness until the next DB import. Runs with any overrides (forced starts/bench, fatigue threshold, favor-offense) always regenerate.
 
 ---
 
