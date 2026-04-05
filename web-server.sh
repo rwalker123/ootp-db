@@ -51,5 +51,16 @@ else
 fi
 mv "$TMPFILE" .update-status
 
+.venv/bin/python3 server.py &
+SERVER_PID=$!
+
+# Wait for server to be ready (up to 10s)
+for i in $(seq 1 20); do
+  if curl -s --max-time 1 http://localhost:8000/status >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+
 open http://localhost:8000
-.venv/bin/python3 server.py
+wait $SERVER_PID
