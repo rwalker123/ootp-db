@@ -186,6 +186,12 @@ def get_report_css(max_width="920px"):
   .stale-banner {{ background: #fff3cd; border: 1px solid #ffc107;
                   padding: 8px 12px; border-radius: 4px; margin: 8px 0;
                   font-size: 13px; color: #856404; }}
+  .stale-banner-blue {{ background: #cce5ff; border: 1px solid #b8daff;
+                        padding: 8px 12px; border-radius: 4px; margin: 8px 0;
+                        font-size: 13px; color: #004085; }}
+  .stale-banner-red  {{ background: #f8d7da; border: 1px solid #f5c6cb;
+                        padding: 8px 12px; border-radius: 4px; margin: 8px 0;
+                        font-size: 13px; color: #721c24; }}
 
   /* ── Player-stats multi-column layout ──────────────────────────────── */
   .ratings-grid {{ display: flex; gap: 20px; flex-wrap: wrap; }}

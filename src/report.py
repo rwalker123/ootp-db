@@ -536,8 +536,7 @@ def generate_batter_html(data, generated_at, last_import):
 
     stale = ""
     if last_import and generated_at:
-        stale_banner = ('<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
-                        'border-radius:4px;margin:8px 0;font-size:13px">'
+        stale_banner = ('<div class="stale-banner">'
                         'This report may be outdated &mdash; database was updated after this report was generated. '
                         'Regenerate with <code>/player-stats</code>.</div>')
         # We'll inject JS to compare timestamps
@@ -1166,8 +1165,7 @@ def generate_pitcher_only_html(data, generated_at, last_import):
 
     stale = ""
     if last_import and generated_at:
-        stale_banner = ('<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
-                        'border-radius:4px;margin:8px 0;font-size:13px">'
+        stale_banner = ('<div class="stale-banner">'
                         'This report may be outdated &mdash; database was updated after this report was generated. '
                         'Regenerate with <code>/player-stats</code>.</div>')
         stale = f"""<div id="stale-banner" style="display:none">{stale_banner}</div>

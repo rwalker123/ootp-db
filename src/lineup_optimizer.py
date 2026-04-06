@@ -1027,13 +1027,13 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         excl_html += f'<div class="stale-banner" style="margin-top:8px">Excluded (without): <b>{excl_list}</b></div>'
     if forced_bench:
         fb_list = ", ".join(html_mod.escape(n) for n in forced_bench)
-        excl_html += f'<div class="stale-banner" style="margin-top:4px;background:#cce5ff;color:#004085;border-color:#b8daff"><b>[F] Manager bench:</b> {fb_list}</div>'
+        excl_html += f'<div class="stale-banner-blue" style="margin-top:4px"><b>[F] Manager bench:</b> {fb_list}</div>'
     if fatigue_benched:
         fat_list = ", ".join(html_mod.escape(n) for n in fatigue_benched)
         thr_label = f" (threshold: {fatigue_threshold}%)" if fatigue_threshold is not None else ""
-        excl_html += f'<div class="stale-banner" style="margin-top:4px;background:#f8d7da;color:#721c24;border-color:#f5c6cb"><b>Fatigued — auto-benched{thr_label}:</b> {fat_list}</div>'
+        excl_html += f'<div class="stale-banner-red" style="margin-top:4px"><b>Fatigued — auto-benched{thr_label}:</b> {fat_list}</div>'
     if favor_offense:
-        excl_html += '<div class="stale-banner" style="margin-top:4px;background:#fff3cd;color:#856404;border-color:#ffc107"><b>Favor Offense:</b> defense weight reduced at C / 2B / SS / CF — batting quality has more influence over positional assignments.</div>'
+        excl_html += '<div class="stale-banner" style="margin-top:4px"><b>Favor Offense:</b> defense weight reduced at C / 2B / SS / CF — batting quality has more influence over positional assignments.</div>'
 
     css = get_report_css("1120px")
 
