@@ -5,14 +5,22 @@ import html as html_mod
 from datetime import datetime
 from pathlib import Path
 
+from config import (
+    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    TRAIT_POOR_MAX, TRAIT_BELOW_AVG_MAX, TRAIT_AVERAGE_MAX, TRAIT_GOOD_MAX,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    POS_MAP, BATS_MAP, THROWS_MAP,
+    SPLIT_CAREER_OVERALL, SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
 
 _PLAYER_KEYS = [
     "player_id", "first_name", "last_name", "position",
@@ -41,19 +49,19 @@ def get_last_import_time():
 
 
 def letter_grade(score):
-    if score >= 90:
+    if score >= GRADE_A_PLUS:
         return "A+"
-    if score >= 80:
+    if score >= GRADE_A:
         return "A"
-    if score >= 70:
+    if score >= GRADE_B_PLUS:
         return "B+"
-    if score >= 60:
+    if score >= GRADE_B:
         return "B"
-    if score >= 50:
+    if score >= GRADE_C_PLUS:
         return "C+"
-    if score >= 40:
+    if score >= GRADE_C:
         return "C"
-    if score >= 30:
+    if score >= GRADE_D:
         return "D"
     return "F"
 
@@ -89,13 +97,13 @@ def injury_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -104,9 +112,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -115,13 +123,13 @@ def trait_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= TRAIT_POOR_MAX:
         return "Very Low"
-    if v <= 75:
+    if v <= TRAIT_BELOW_AVG_MAX:
         return "Low"
-    if v <= 125:
+    if v <= TRAIT_AVERAGE_MAX:
         return "Average"
-    if v <= 175:
+    if v <= TRAIT_GOOD_MAX:
         return "High"
     return "Elite"
 
@@ -132,15 +140,15 @@ def trait_color(val, invert=False):
         return "#888"
     v = int(val)
     if invert:
-        if v <= 75:
+        if v <= INJURY_DURABLE_MAX:
             return "#1a7a1a"
-        if v <= 125:
+        if v <= INJURY_NORMAL_MAX:
             return "#cc7700"
         return "#cc2222"
     else:
-        if v >= 150:
+        if v >= TRAIT_GOOD_MAX:
             return "#1a7a1a"
-        if v >= 75:
+        if v >= TRAIT_BELOW_AVG_MAX:
             return "#cc7700"
         return "#cc2222"
 
@@ -600,22 +608,22 @@ def query_contract_extension(save_name, first_name, last_name):
     with engine.connect() as conn:
         if player_type == "pitcher":
             war_rows = conn.execute(
-                text("""
+                text(f"""
                 SELECT year, g, gs, ip, ha, bb, k, er, hra, war
                 FROM players_career_pitching_stats
-                WHERE player_id = :pid AND split_id = 1
-                  AND league_id = 203 AND level_id = 1
+                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
+                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
                 ORDER BY year DESC LIMIT 5
                 """),
                 dict(pid=player_id),
             ).fetchall()
         else:
             war_rows = conn.execute(
-                text("""
+                text(f"""
                 SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war
                 FROM players_career_batting_stats
-                WHERE player_id = :pid AND split_id = 1
-                  AND league_id = 203 AND level_id = 1
+                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
+                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
                 ORDER BY year DESC LIMIT 5
                 """),
                 dict(pid=player_id),

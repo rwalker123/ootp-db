@@ -15,7 +15,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from config import CAREER_STATS_LOOKBACK_YEARS, REGRESSION_EXPONENT, PA_REGRESSION_THRESHOLD, WRC_CAP_HEADROOM
+from config import (
+    CAREER_STATS_LOOKBACK_YEARS, REGRESSION_EXPONENT, PA_REGRESSION_THRESHOLD,
+    WRC_CAP_HEADROOM, WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID,
+    POS_MAP, BATS_MAP, POS_STR_MAP,
+)
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
@@ -23,10 +30,8 @@ from sqlalchemy import text
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-# Reverse map for parsing position strings in override arguments
-POS_STR_MAP = {"c": 2, "1b": 3, "2b": 4, "3b": 5, "ss": 6, "lf": 7, "cf": 8, "rf": 9, "dh": 0}
+# lineup_optimizer uses WOBA_HP as local alias (other modules use WOBA_HBP)
+WOBA_HP = WOBA_HBP
 
 PHILOSOPHIES = ("modern", "traditional", "platoon", "hot-hand")
 PHIL_LABELS = {
@@ -35,14 +40,6 @@ PHIL_LABELS = {
     "platoon": "Platoon",
     "hot-hand": "Hot Hand",
 }
-
-# Approximate 2024 MLB wOBA linear weights
-WOBA_BB = 0.690
-WOBA_HP = 0.722
-WOBA_1B = 0.884
-WOBA_2B = 1.261
-WOBA_3B = 1.601
-WOBA_HR = 2.072
 
 # Slot mapping: slot_number -> rank_index (rank 0 = best sort score)
 # Modern / Platoon / Hot-Hand: best hitter at #2 (Tango-optimal)
@@ -146,7 +143,7 @@ def resolve_team(conn, team_query):
         rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
             "WHERE (nickname ILIKE :q OR name ILIKE :q) "
-            "AND league_id = 203 ORDER BY name, team_id"
+            f"AND league_id = {MLB_LEAGUE_ID} ORDER BY name, team_id"
         ), dict(q=f"%{team_query}%")).fetchall()
         if not rows:
             return None, None, None
@@ -1200,10 +1197,10 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
         pos_games = load_position_games(conn, player_ids)
 
         # Full-league anchors — use MLB-wide averages, not roster averages
-        league_avg_woba = conn.execute(text("""
+        league_avg_woba = conn.execute(text(f"""
             SELECT AVG(b.woba) FROM batter_advanced_stats b
             JOIN players p ON p.player_id = b.player_id
-            WHERE p.league_id = 203 AND b.pa >= 100
+            WHERE p.league_id = {MLB_LEAGUE_ID} AND b.pa >= 100
         """)).scalar() or 0.320
         avg_rating_offense = conn.execute(text("""
             SELECT AVG(pr.rating_offense) FROM player_ratings pr

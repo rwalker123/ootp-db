@@ -8,6 +8,11 @@ and draft prospects.
 
 from pathlib import Path
 
+from ootp_db_constants import (  # noqa: F401 (re-exported for callers)
+    MLB_LEAGUE_ID,
+    POS_MAP, BATS_MAP, THROWS_MAP,
+    SPLIT_CAREER_OVERALL, SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
 from sqlalchemy import text
 
 from shared_css import get_engine, db_name_from_save, load_saves_registry  # noqa: F401 (re-exported for callers)
@@ -16,9 +21,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
 POS_CODE = {v: k for k, v in POS_MAP.items()}
 
 
@@ -72,9 +74,9 @@ def query_standings(save_name) -> list:
             JOIN divisions d ON d.league_id = rel.league_id
                 AND d.sub_league_id = rel.sub_league_id
                 AND d.division_id = rel.division_id
-            WHERE rel.league_id = 203
+            WHERE rel.league_id = :lid
             ORDER BY rel.sub_league_id, rel.division_id, tr.pos
-        """)).mappings().fetchall()
+        """), dict(lid=MLB_LEAGUE_ID)).mappings().fetchall()
     return [dict(r) for r in rows]
 
 

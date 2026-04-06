@@ -8,18 +8,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from config import WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    POS_MAP, BATS_MAP, THROWS_MAP,
+    SPLIT_CAREER_OVERALL, SPLIT_CAREER_VS_LHP, SPLIT_CAREER_VS_RHP,
+    SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-WOBA_WEIGHTS = dict(bb=0.69, hbp=0.72, s=0.87, d=1.27, t=1.62, hr=2.10)
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
 
 
 
@@ -43,9 +44,9 @@ def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
     babip_denom = ab - k - hr + sf
     babip = (h - hr) / babip_denom if babip_denom > 0 else 0.0
 
-    woba_num = (WOBA_WEIGHTS["bb"] * bb + WOBA_WEIGHTS["hbp"] * hp +
-                WOBA_WEIGHTS["s"] * singles + WOBA_WEIGHTS["d"] * d +
-                WOBA_WEIGHTS["t"] * t + WOBA_WEIGHTS["hr"] * hr)
+    woba_num = (WOBA_BB * bb + WOBA_HBP * hp +
+                WOBA_1B * singles + WOBA_2B * d +
+                WOBA_3B * t + WOBA_HR * hr)
     woba_den = ab + bb + hp + sf
     woba = woba_num / woba_den if woba_den > 0 else 0.0
 
@@ -56,9 +57,9 @@ def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
         lg_singles = lg_h - lg_d - lg_t - lg_hr
         lg_obp = (lg_h + lg_bb + lg_hp) / (lg_ab + lg_bb + lg_hp + lg_sf)
         lg_slg = (lg_singles + 2 * lg_d + 3 * lg_t + 4 * lg_hr) / lg_ab
-        lg_woba_num = (WOBA_WEIGHTS["bb"] * lg_bb + WOBA_WEIGHTS["hbp"] * lg_hp +
-                       WOBA_WEIGHTS["s"] * lg_singles + WOBA_WEIGHTS["d"] * lg_d +
-                       WOBA_WEIGHTS["t"] * lg_t + WOBA_WEIGHTS["hr"] * lg_hr)
+        lg_woba_num = (WOBA_BB * lg_bb + WOBA_HBP * lg_hp +
+                       WOBA_1B * lg_singles + WOBA_2B * lg_d +
+                       WOBA_3B * lg_t + WOBA_HR * lg_hr)
         lg_woba = lg_woba_num / (lg_ab + lg_bb + lg_hp + lg_sf)
         lg_rpa = lg_r / lg_pa
         wrc_plus = ((woba - lg_woba) / 1.15 + lg_rpa) / lg_rpa * 100
@@ -195,7 +196,7 @@ def fetch_common_data(conn, player_id):
         "SELECT thbs.year, SUM(thbs.ab), SUM(thbs.h), SUM(thbs.d), SUM(thbs.t), "
         "SUM(thbs.hr), SUM(thbs.bb), SUM(thbs.hp), SUM(thbs.sf), SUM(thbs.pa), SUM(thbs.r) "
         "FROM team_history_batting_stats thbs "
-        "JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = 203 "
+        f"JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = {MLB_LEAGUE_ID} "
         "GROUP BY thbs.year")).fetchall()
     for r in rows:
         lg[int(r[0])] = tuple(int(x) for x in r[1:])
@@ -204,12 +205,12 @@ def fetch_common_data(conn, player_id):
         "SELECT SUM(tbs.ab), SUM(tbs.h), SUM(tbs.d), SUM(tbs.t), SUM(tbs.hr), "
         "SUM(tbs.bb), SUM(tbs.hp), SUM(tbs.sf), SUM(tbs.pa), SUM(tbs.r) "
         "FROM team_batting_stats tbs "
-        "JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = 203 "
-        "WHERE tbs.level_id = 1 AND tbs.split_id = 0")).fetchone()
+        f"JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
+        f"WHERE tbs.level_id = {MLB_LEVEL_ID} AND tbs.split_id = {SPLIT_TEAM_BATTING_OVERALL}")).fetchone()
     if cur and cur[0]:
         # Use current year from league_history or pitching history
         yr_row = conn.execute(text(
-            "SELECT MAX(year) FROM team_history WHERE league_id = 203")).fetchone()
+            f"SELECT MAX(year) FROM team_history WHERE league_id = {MLB_LEAGUE_ID}")).fetchone()
         # Current season is one after the latest history year, or derive from career data
         cur_year_candidates = []
         if yr_row and yr_row[0]:
@@ -225,7 +226,7 @@ def fetch_common_data(conn, player_id):
         "SELECT thps.year, SUM(thps.ip), SUM(thps.hra), SUM(thps.bb), SUM(thps.hp), "
         "SUM(thps.k), SUM(thps.er) "
         "FROM team_history_pitching_stats thps "
-        "JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = 203 "
+        f"JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = {MLB_LEAGUE_ID} "
         "GROUP BY thps.year")).fetchall()
     for r in rows:
         lg_pitch[int(r[0])] = tuple(float(x) for x in r[1:])
@@ -233,8 +234,8 @@ def fetch_common_data(conn, player_id):
     cur_p = conn.execute(text(
         "SELECT SUM(tps.ip), SUM(tps.hra), SUM(tps.bb), SUM(tps.hp), SUM(tps.k), SUM(tps.er) "
         "FROM team_pitching_stats tps "
-        "JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = 203 "
-        "WHERE tps.level_id = 1 AND tps.split_id = 1")).fetchone()
+        f"JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
+        f"WHERE tps.level_id = {MLB_LEVEL_ID} AND tps.split_id = {SPLIT_TEAM_PITCHING_OVERALL}")).fetchone()
     if cur_p and cur_p[0]:
         lg_pitch[lg_cur_year] = tuple(float(x) for x in cur_p)
 
@@ -282,21 +283,21 @@ def fetch_batter_data(conn, player_id, common=None):
     data["career_overall"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHP
     data["career_lhp"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 2 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs RHP
     data["career_rhp"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 3 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Advanced stats history (graceful fallback if table doesn't exist yet)
@@ -320,7 +321,7 @@ def fetch_fielding_stats(conn, player_id, primary_position):
     """
     max_year_row = conn.execute(text(
         "SELECT MAX(year) FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND level_id = 1 AND league_id = 203"
+        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID}"
     ), dict(pid=player_id)).fetchone()
     max_year = int(max_year_row[0]) if max_year_row and max_year_row[0] else None
 
@@ -331,7 +332,7 @@ def fetch_fielding_stats(conn, player_id, primary_position):
         "SELECT position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
         "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
         "FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND year = :yr AND level_id = 1 AND league_id = 203 "
+        f"WHERE player_id = :pid AND year = :yr AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
         "GROUP BY position ORDER BY SUM(g) DESC"
     ), dict(pid=player_id, yr=max_year)).fetchall()
 
@@ -341,7 +342,7 @@ def fetch_fielding_stats(conn, player_id, primary_position):
         "SELECT year, position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
         "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
         "FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND level_id = 1 AND league_id = 203 "
+        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
         "GROUP BY year, position ORDER BY year, SUM(g) DESC"
     ), dict(pid=player_id)).fetchall()
     career = career_all
@@ -380,7 +381,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHB
@@ -388,7 +389,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 2 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs RHB
@@ -396,7 +397,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 3 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Pitching advanced stats history (graceful fallback if table doesn't exist yet)
@@ -1086,11 +1087,11 @@ def generate_player_report(save_name, first_name, last_name, raw_args=""):
             "SELECT p.player_id, p.position FROM players p "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(pa) AS total_pa FROM players_career_batting_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            f"  WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} GROUP BY player_id"
             ") bs ON bs.player_id = p.player_id "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(ip) AS total_ip FROM players_career_pitching_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
+            f"  WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} GROUP BY player_id"
             ") ps ON ps.player_id = p.player_id "
             "WHERE p.first_name = :first AND p.last_name = :last "
             "ORDER BY COALESCE(bs.total_pa, 0) + COALESCE(ps.total_ip, 0) DESC"),
@@ -1111,12 +1112,12 @@ def generate_player_report(save_name, first_name, last_name, raw_args=""):
         # otherwise incidental plate appearances pollute the report with empty batting tables.
         has_pitching = conn.execute(text(
             "SELECT 1 FROM players_career_pitching_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1 LIMIT 1"),
+            f"WHERE player_id = :pid AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} LIMIT 1"),
             dict(pid=player_id)).fetchone() is not None
 
         batting_pa_row = conn.execute(text(
             "SELECT SUM(pa) FROM players_career_batting_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1"),
+            f"WHERE player_id = :pid AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL}"),
             dict(pid=player_id)).fetchone()
         career_pa = int(batting_pa_row[0] or 0)
         pa_threshold = 100 if position == 1 else 1

@@ -5,17 +5,20 @@ import html
 from datetime import datetime
 from pathlib import Path
 
+from config import (
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    TRAIT_POOR_MAX, TRAIT_BELOW_AVG_MAX, TRAIT_AVERAGE_MAX, TRAIT_GOOD_MAX,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP, ROLE_MAP,
+    SPLIT_CAREER_OVERALL,
+)
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
-ROLE_MAP = {11: "SP", 12: "RP", 13: "CL", 0: "—"}
 
 # Positions considered "pitcher" for group comparison
 PITCHER_POS = {1}
@@ -103,13 +106,13 @@ def injury_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -118,9 +121,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -129,13 +132,13 @@ def trait_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= TRAIT_POOR_MAX:
         return "Very Low"
-    if v <= 75:
+    if v <= TRAIT_BELOW_AVG_MAX:
         return "Low"
-    if v <= 125:
+    if v <= TRAIT_AVERAGE_MAX:
         return "Average"
-    if v <= 175:
+    if v <= TRAIT_GOOD_MAX:
         return "High"
     return "Elite"
 
@@ -361,10 +364,10 @@ def _get_fielding_details(conn, player_id):
 
 
 def _get_40man_count(conn, my_team_id):
-    result = conn.execute(text("""
+    result = conn.execute(text(f"""
         SELECT COUNT(*) FROM players p
         JOIN players_roster_status prs ON prs.player_id = p.player_id
-        WHERE p.team_id = :tid AND prs.league_id = 203
+        WHERE p.team_id = :tid AND prs.league_id = {MLB_LEAGUE_ID}
           AND p.retired = 0
     """), dict(tid=my_team_id)).fetchone()
     return int(result[0]) if result else 0

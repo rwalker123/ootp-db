@@ -10,6 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from mcp.server.fastmcp import FastMCP
 from mcp_cache import cache_get, cache_put
+from ootp_db_constants import SUB_LEAGUE_AL
 from queries import (
     POS_MAP, BATS_MAP, THROWS_MAP, POS_CODE,
     _fmt, _pct,
@@ -49,7 +50,7 @@ def _format_standings(rows: list) -> str:
         )
     lines = []
     for (sl, _, div_name), teams in sorted(divs.items()):
-        label = "American League" if sl == 0 else "National League"
+        label = "American League" if sl == SUB_LEAGUE_AL else "National League"
         lines.append(f"\n{label} — {div_name}")
         lines.extend(teams)
     return "\n".join(lines)

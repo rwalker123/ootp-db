@@ -41,6 +41,18 @@ from config import (
     STARTER_MIN_GS,
     WRC_CAP_HEADROOM,
 )
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    POS_PITCHER, POS_CATCHER,
+    POS_FIRST_BASE as POS_1B,
+    POS_SECOND_BASE as POS_2B,
+    POS_THIRD_BASE as POS_3B,
+    POS_SHORTSTOP as POS_SS,
+    POS_LEFT_FIELD as POS_LF,
+    POS_CENTER_FIELD as POS_CF,
+    POS_RIGHT_FIELD as POS_RF,
+    SPLIT_CAREER_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
@@ -749,19 +761,6 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MLB_LEAGUE_ID = 203
-MLB_LEVEL_ID = 1
-
-# Position codes
-POS_PITCHER = 1
-POS_CATCHER = 2
-POS_1B = 3
-POS_2B = 4
-POS_3B = 5
-POS_SS = 6
-POS_LF = 7
-POS_CF = 8
-POS_RF = 9
 
 # Positions where defense matters most (get 1.3x defense weight)
 PREMIUM_DEFENSE_POS = {POS_CATCHER, POS_SS, POS_2B, POS_CF}
@@ -924,7 +923,7 @@ def load_batter_data(engine):
                SUM(war) as war
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id = 1
+          AND split_id = {SPLIT_CAREER_OVERALL}
           AND player_id IN (SELECT player_id FROM batter_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -976,7 +975,7 @@ def load_pitcher_data(engine):
                SUM(gb) as gb, SUM(fb) as fb, SUM(war) as war
         FROM players_career_pitching_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id = 1
+          AND split_id = {SPLIT_CAREER_OVERALL}
           AND player_id IN (SELECT player_id FROM pitcher_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -1548,7 +1547,7 @@ def compute_pitcher_ratings(engine):
                    (SUM(er)*9.0/SUM(ip)) -
                    ((13.0*SUM(hra) + 3.0*(SUM(bb)+SUM(hp)) - 2.0*SUM(k)) / SUM(ip)) as cfip
             FROM team_pitching_stats
-            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = 1
+            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
         """)).fetchone()
         cfip = float(r[1])
 

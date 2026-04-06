@@ -6,6 +6,12 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from config import (
+    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
+    TRAIT_POOR_MAX, TRAIT_BELOW_AVG_MAX, TRAIT_AVERAGE_MAX, TRAIT_GOOD_MAX,
+    GREED_LOW_MAX, GREED_AVERAGE_MAX, GREED_HIGH_MAX,
+)
+from ootp_db_constants import POS_MAP, BATS_MAP, THROWS_MAP, NATION_USA
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
@@ -21,37 +27,32 @@ def get_last_import_time():
 
 
 def letter_grade(score):
-    if score >= 90:
+    if score >= GRADE_A_PLUS:
         return "A+"
-    if score >= 80:
+    if score >= GRADE_A:
         return "A"
-    if score >= 70:
+    if score >= GRADE_B_PLUS:
         return "B+"
-    if score >= 60:
+    if score >= GRADE_B:
         return "B"
-    if score >= 50:
+    if score >= GRADE_C_PLUS:
         return "C+"
-    if score >= 40:
+    if score >= GRADE_C:
         return "C"
-    if score >= 30:
+    if score >= GRADE_D:
         return "D"
     return "F"
-
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
 
 
 def greed_label(val):
     if val is None:
         return "Unknown"
     v = int(val)
-    if v < 80:
+    if v < GREED_LOW_MAX:
         return "Low"
-    if v <= 130:
+    if v <= GREED_AVERAGE_MAX:
         return "Average"
-    if v <= 160:
+    if v <= GREED_HIGH_MAX:
         return "High"
     return "Demanding"
 
@@ -60,11 +61,11 @@ def greed_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v < 80:
+    if v < GREED_LOW_MAX:
         return "#1a7a1a"
-    if v <= 130:
+    if v <= GREED_AVERAGE_MAX:
         return "#cc7700"
-    if v <= 160:
+    if v <= GREED_HIGH_MAX:
         return "#cc5500"
     return "#cc2222"
 
@@ -192,9 +193,9 @@ def generate_ifa_targets_report(save_name, criteria_label, where_clause,
 
     # Personality spotlight section
     spotlight = ""
-    elite_we = [r for r in results if (r["work_ethic"] or 0) > 160]
-    elite_iq = [r for r in results if (r["intelligence"] or 0) > 160]
-    high_greed = [r for r in results if (r["greed"] or 0) > 160]
+    elite_we = [r for r in results if (r["work_ethic"] or 0) > TRAIT_GOOD_MAX]
+    elite_iq = [r for r in results if (r["intelligence"] or 0) > TRAIT_GOOD_MAX]
+    high_greed = [r for r in results if (r["greed"] or 0) > GREED_HIGH_MAX]
     prime_age = [r for r in results if r["flag_prime_age"]]
 
     if prime_age:

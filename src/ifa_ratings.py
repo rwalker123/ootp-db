@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from ootp_db_constants import NATION_USA
 from shared_css import db_name_from_save, get_engine
 from sqlalchemy import text
 
@@ -82,7 +83,7 @@ def load_ifa_data(engine):
         WHERE p.draft_eligible = 0
           AND p.team_id = 0
           AND p.age <= 20
-          AND p.nation_id != 206
+          AND p.nation_id != {NATION_USA}
           AND p.retired = 0
     """
     with engine.connect() as conn:
