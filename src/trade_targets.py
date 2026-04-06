@@ -332,7 +332,16 @@ def generate_trade_targets_report(
         _trade_base = f"trade_{p['player_id']}"
     else:
         _trade_base = "trade_offer"
-    args_key = {"label": offer_label, "mode": mode}
+    args_key = {
+        "label": offer_label,
+        "mode": mode,
+        "offered_where": offered_where,
+        "target_where": target_where,
+        "target_join": target_join,
+        "order_by": order_by,
+        "limit": limit,
+        "highlight": highlight,
+    }
 
     offer_label_esc = html.escape(offer_label, quote=True)
     if mode == "acquiring":

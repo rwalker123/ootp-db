@@ -55,7 +55,13 @@ def write_report_html(html_path: Path, html: str) -> None:
     html_path.write_text(html, encoding="utf-8")
     title = _extract_title(html) or ""
     text = html_to_search_text(html)
-    stem_words = html_path.stem.replace("_", " ").replace("-", " ")
+    stem = html_path.stem
+    # Strip the trailing .hash8 suffix added by report_filename() (e.g. "foo.abc12345" → "foo")
+    if "." in stem:
+        base, maybe_hash = stem.rsplit(".", 1)
+        if len(maybe_hash) == 8 and all(c in "0123456789abcdef" for c in maybe_hash):
+            stem = base
+    stem_words = stem.replace("_", " ").replace("-", " ")
     if stem_words and stem_words.lower() not in text.lower():
         text = f"{text} {stem_words}".strip()
     m = _ARGS_DISPLAY_RE.search(html)
