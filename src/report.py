@@ -196,7 +196,7 @@ def fetch_common_data(conn, player_id):
         "SUM(thbs.hr), SUM(thbs.bb), SUM(thbs.hp), SUM(thbs.sf), SUM(thbs.pa), SUM(thbs.r) "
         "FROM team_history_batting_stats thbs "
         "JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = 203 "
-        "WHERE thbs.level_id = 1 AND thbs.split_id IN (0, 1) "
+        "WHERE thbs.level_id = 1 AND thbs.split_id = 1 "
         "GROUP BY thbs.year")).fetchall()
     for r in rows:
         lg[int(r[0])] = tuple(int(x) for x in r[1:])
@@ -227,7 +227,7 @@ def fetch_common_data(conn, player_id):
         "SUM(thps.k), SUM(thps.er) "
         "FROM team_history_pitching_stats thps "
         "JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = 203 "
-        "WHERE thps.level_id = 1 AND thps.split_id IN (0, 1) "
+        "WHERE thps.level_id = 1 AND thps.split_id = 1 "
         "GROUP BY thps.year")).fetchall()
     for r in rows:
         lg_pitch[int(r[0])] = tuple(float(x) for x in r[1:])
@@ -236,7 +236,7 @@ def fetch_common_data(conn, player_id):
         "SELECT SUM(tps.ip), SUM(tps.hra), SUM(tps.bb), SUM(tps.hp), SUM(tps.k), SUM(tps.er) "
         "FROM team_pitching_stats tps "
         "JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = 203 "
-        "WHERE tps.level_id = 1 AND tps.split_id IN (0, 1)")).fetchone()
+        "WHERE tps.level_id = 1 AND tps.split_id = 1")).fetchone()
     if cur_p and cur_p[0]:
         lg_pitch[lg_cur_year] = tuple(float(x) for x in cur_p)
 
@@ -284,7 +284,7 @@ def fetch_batter_data(conn, player_id, common=None):
     data["career_overall"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
+        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHP
@@ -379,7 +379,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
+        "WHERE player_id = :pid AND split_id = 1 AND league_id = 203 AND level_id = 1 "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHB
@@ -661,12 +661,14 @@ def generate_batter_section_html(data):
         for c in cq_cols:
             html += f'<th>{c}</th>'
         html += '</tr><tr>'
+        def _pct_or_dash(v):
+            return fmt_pct(v * 100) if v is not None else '—'
         cq_vals = [
             fmt_int(adv['batted_balls']), fmt_rate(adv['avg_ev'], 1), fmt_rate(adv['max_ev'], 1),
             fmt_rate(adv.get('avg_la', 0), 1),
-            fmt_pct(adv['hard_hit_pct'] * 100), fmt_pct(adv['barrel_pct'] * 100),
-            fmt_pct(adv['sweet_spot_pct'] * 100),
-            fmt_pct(adv['gb_pct'] * 100), fmt_pct(adv['ld_pct'] * 100), fmt_pct(adv['fb_pct'] * 100),
+            _pct_or_dash(adv['hard_hit_pct']), _pct_or_dash(adv['barrel_pct']),
+            _pct_or_dash(adv['sweet_spot_pct']),
+            _pct_or_dash(adv['gb_pct']), _pct_or_dash(adv['ld_pct']), _pct_or_dash(adv['fb_pct']),
             fmt_rate(adv['xba']), fmt_rate(adv['xslg']), fmt_rate(adv['xwoba']), fmt_rate(adv['xbacon']),
         ]
         for v in cq_vals:
@@ -685,13 +687,13 @@ def generate_batter_section_html(data):
                 fmt_int(adv.get(f'pa{sfx}')),
                 fmt_rate(adv.get(f'ba{sfx}')), fmt_rate(adv.get(f'obp{sfx}')),
                 fmt_rate(adv.get(f'slg{sfx}')), fmt_rate(adv.get(f'iso{sfx}')),
-                fmt_pct(adv.get(f'k_pct{sfx}', 0) * 100),
-                fmt_pct(adv.get(f'bb_pct{sfx}', 0) * 100),
+                _pct_or_dash(adv.get(f'k_pct{sfx}')),
+                _pct_or_dash(adv.get(f'bb_pct{sfx}')),
                 fmt_rate(adv.get(f'woba{sfx}')),
                 fmt_int(adv.get(f'wrc_plus{sfx}')),
                 fmt_rate(adv.get(f'avg_ev{sfx}'), 1),
-                fmt_pct(adv.get(f'hard_hit_pct{sfx}', 0) * 100),
-                fmt_pct(adv.get(f'barrel_pct{sfx}', 0) * 100),
+                _pct_or_dash(adv.get(f'hard_hit_pct{sfx}')),
+                _pct_or_dash(adv.get(f'barrel_pct{sfx}')),
                 fmt_rate(adv.get(f'xba{sfx}')), fmt_rate(adv.get(f'xslg{sfx}')),
                 fmt_rate(adv.get(f'xwoba{sfx}')),
             ]
@@ -1069,11 +1071,11 @@ def generate_player_report(save_name, first_name, last_name):
             "SELECT p.player_id, p.position FROM players p "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(pa) AS total_pa FROM players_career_batting_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
             ") bs ON bs.player_id = p.player_id "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(ip) AS total_ip FROM players_career_pitching_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
+            "  WHERE league_id = 203 AND level_id = 1 AND split_id = 1 GROUP BY player_id"
             ") ps ON ps.player_id = p.player_id "
             "WHERE p.first_name = :first AND p.last_name = :last "
             "ORDER BY COALESCE(bs.total_pa, 0) + COALESCE(ps.total_ip, 0) DESC"),
@@ -1094,12 +1096,12 @@ def generate_player_report(save_name, first_name, last_name):
         # otherwise incidental plate appearances pollute the report with empty batting tables.
         has_pitching = conn.execute(text(
             "SELECT 1 FROM players_career_pitching_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1) LIMIT 1"),
+            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1 LIMIT 1"),
             dict(pid=player_id)).fetchone() is not None
 
         batting_pa_row = conn.execute(text(
             "SELECT SUM(pa) FROM players_career_batting_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1)"),
+            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id = 1"),
             dict(pid=player_id)).fetchone()
         career_pa = int(batting_pa_row[0] or 0)
         pa_threshold = 100 if position == 1 else 1

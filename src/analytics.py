@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from config import CAREER_STATS_LOOKBACK_YEARS
 from shared_css import db_name_from_save, get_engine
 from sqlalchemy import inspect, text
 
@@ -138,7 +139,7 @@ def get_league_pitching_averages(engine, year):
                SUM(hp) as hp, SUM(hra) as hra, SUM(ha) as ha, SUM(bf) as bf,
                SUM(gb) as gb, SUM(fb) as fb, SUM(ab) as ab, SUM(sf) as sf
         FROM team_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id IN (0, 1)
+        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = 1
     """, engine)
     row = df.iloc[0]
     lg_era = row.er * 9 / row.ip if row.ip > 0 else 4.00
@@ -159,7 +160,7 @@ def compute_batter_career_stats(engine, year, lg):
     # SUM across teams for traded players
     df = pd.read_sql(f"""
         SELECT player_id,
-               CASE WHEN split_id IN (0, 1) THEN 1 ELSE split_id END AS split_id,
+               split_id,
                SUM(pa) as pa, SUM(ab) as ab, SUM(h) as h, SUM(d) as d,
                SUM(t) as t, SUM(hr) as hr, SUM(bb) as bb, SUM(k) as k,
                SUM(hp) as hp, SUM(sf) as sf, SUM(sh) as sh, SUM(rbi) as rbi,
@@ -168,9 +169,10 @@ def compute_batter_career_stats(engine, year, lg):
                SUM(war) as war, SUM(wpa) as wpa
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id IN (0, 1, 2, 3)
-        GROUP BY player_id,
-                 CASE WHEN split_id IN (0, 1) THEN 1 ELSE split_id END
+          AND split_id IN (1, 2, 3)
+          AND year >= {year} - {CAREER_STATS_LOOKBACK_YEARS}
+          AND pa > 0
+        GROUP BY player_id, split_id
     """, engine)
 
     if df.empty:
@@ -498,7 +500,8 @@ def compute_pitcher_career_stats(engine, year, lg_pitch):
                SUM(s) as s, SUM(hld) as hld, SUM(qs) as qs,
                SUM(war) as war, SUM(wpa) as wpa, SUM(outs) as outs
         FROM players_career_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND year = {year}
+        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
+          AND year >= {year} - {CAREER_STATS_LOOKBACK_YEARS}
           AND split_id IN (1, 2, 3)
         GROUP BY player_id, split_id
     """, engine)

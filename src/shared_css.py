@@ -53,10 +53,8 @@ def get_engine(save_name: str):
     Falls back to POSTGRES_URL for backward compatibility.
     """
     load_dotenv(_PROJECT_ROOT / ".env")
-    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL not set in .env — cannot connect to database")
-    if not os.getenv("DATABASE_URL") and os.getenv("POSTGRES_URL"):
+    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
+    if os.getenv("POSTGRES_URL") and not os.getenv("DATABASE_URL"):
         print("Warning: POSTGRES_URL is deprecated, rename to DATABASE_URL in .env")
     db_name = db_name_from_save(save_name)
     if database_url.lower().startswith("sqlite"):

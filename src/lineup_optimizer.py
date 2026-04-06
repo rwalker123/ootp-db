@@ -15,6 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from config import CAREER_STATS_LOOKBACK_YEARS, REGRESSION_EXPONENT, PA_REGRESSION_THRESHOLD, WRC_CAP_HEADROOM
 from report_write import write_report_html
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
@@ -253,8 +254,8 @@ def load_position_games(conn, player_ids):
     result = {pid: {"games": {}, "usage_pct": {}, "total_3yr_games": 0} for pid in player_ids}
     try:
         # All-time games for eligibility.
-        # split_id=0 = simulated seasons; split_id=1 = real historical seasons.
-        # They cover non-overlapping year ranges so summing both is safe.
+        # For players_career_fielding_stats: split_id=0 = sim seasons (2026+),
+        # split_id=1 = real historical seasons (pre-sim). Both needed for all-time totals.
         rows = conn.execute(text(f"""
             SELECT player_id, position, SUM(g) AS total_games
             FROM players_career_fielding_stats
@@ -275,7 +276,7 @@ def load_position_games(conn, player_ids):
                 WHERE player_id IN ({clause})
                   AND split_id IN (0, 1)
                   AND year >= (
-                      SELECT MAX(year) - 2
+                      SELECT MAX(year) - {CAREER_STATS_LOOKBACK_YEARS}
                       FROM players_career_fielding_stats AS sub
                       WHERE sub.player_id = players_career_fielding_stats.player_id
                         AND sub.split_id IN (0, 1)
@@ -394,8 +395,12 @@ def compute_blended_woba(observed_woba, pa, rating_offense, league_avg_woba,
     """
     expected = league_avg_woba + ((rating_offense or avg_rating_offense) - avg_rating_offense) * _RATING_TO_WOBA_SLOPE
     expected = max(0.200, min(0.450, expected))  # clamp to realistic range
-    obs = observed_woba if observed_woba is not None else expected
     pa = pa or 0
+    obs = observed_woba if observed_woba is not None else expected
+    if pa < PA_REGRESSION_THRESHOLD and obs is not None:
+        pa_trust = min((pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+        woba_cap = league_avg_woba + pa_trust * WRC_CAP_HEADROOM * _RATING_TO_WOBA_SLOPE
+        obs = min(obs, woba_cap)
     return (obs * pa + expected * reg_pa) / (pa + reg_pa)
 
 

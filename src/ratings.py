@@ -20,6 +20,27 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from config import (
+    CATCHER_MIN_CS_ATTEMPTS,
+    CEILING_GAP_THRESHOLD,
+    DEFENSE_BAT_FIRST_MULTIPLIER,
+    DEFENSE_PREMIUM_MULTIPLIER,
+    FIELDING_MIN_GAMES,
+    INJURY_OVERALL_DEDUCTION,
+    INJURY_PRONE_THRESHOLD,
+    IP_REGRESSION_THRESHOLD,
+    LEADER_OVERALL_BONUS,
+    LEADER_THRESHOLD,
+    OFFENSE_WRC_WEIGHT,
+    OFFENSE_XWOBA_WEIGHT,
+    OOTP_MAX_BLEND_WEIGHT,
+    PA_REGRESSION_THRESHOLD,
+    REGRESSION_EXPONENT,
+    RELIEVER_G_TARGET,
+    STARTER_IP_TARGET,
+    STARTER_MIN_GS,
+    WRC_CAP_HEADROOM,
+)
 from report_write import write_report_html
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
@@ -217,9 +238,9 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
                         scores["defense"] = raw_score
                         # Shift positional multiplier into the weight
                         if target_pos in PREMIUM_DEFENSE_POS:
-                            base_weights["defense"] = min(base_weights["defense"] * 1.3, 0.95)
+                            base_weights["defense"] = min(base_weights["defense"] * DEFENSE_PREMIUM_MULTIPLIER, 0.95)
                         elif target_pos in LOW_DEFENSE_POS:
-                            base_weights["defense"] *= 0.7
+                            base_weights["defense"] *= DEFENSE_BAT_FIRST_MULTIPLIER
 
     # Focus modifier keywords → (component, boost_amount)
     # Standard boost: 0.15 | Heavier bat-first positions: 0.22 | DH (pure hitter): 0.35
@@ -840,7 +861,11 @@ def load_batter_data(engine):
     batting = pd.read_sql(f"""
         SELECT player_id,
                running_ratings_speed, running_ratings_stealing,
-               running_ratings_baserunning
+               running_ratings_baserunning,
+               batting_ratings_talent_contact AS talent_contact,
+               batting_ratings_talent_power   AS talent_power,
+               batting_ratings_talent_eye     AS talent_eye,
+               batting_ratings_talent_gap     AS talent_gap
         FROM players_batting
         WHERE league_id = {MLB_LEAGUE_ID}
           AND player_id IN (SELECT player_id FROM batter_advanced_stats)
@@ -897,7 +922,7 @@ def load_batter_data(engine):
                SUM(war) as war
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id IN (0, 1)
+          AND split_id = 1
           AND player_id IN (SELECT player_id FROM batter_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -949,7 +974,7 @@ def load_pitcher_data(engine):
                SUM(gb) as gb, SUM(fb) as fb, SUM(war) as war
         FROM players_career_pitching_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id IN (0, 1)
+          AND split_id = 1
           AND player_id IN (SELECT player_id FROM pitcher_advanced_stats)
         GROUP BY player_id, year
         ORDER BY player_id, year
@@ -981,54 +1006,74 @@ def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0):
     """Offensive production score from wRC+ and xwOBA.
 
     Blends in an OOTP-based talent anchor for players with thin MLB career
-    stats using a linear ramp: anchor=100% at 0 PA, stats=100% at 300+ PA.
-    Linear gives very little weight to tiny samples (13 PA → 4.3% obs).
+    stats using a sqrt ramp: anchor=100% at 0 PA, stats=100% at 300+ PA.
+    Sqrt matches how statistical confidence actually builds (consistent with
+    the platoon score convention in this codebase).
 
     Anchor priority:
       1. players_scouted_ratings (scouting_team_id=0) — ground-truth current ratings.
          Only available when "Additional complete scouted ratings" is enabled in OOTP.
-      2. players_value.oa — OOTP's overall rating (20-80 scale), converted to 0-100.
-         Always available; used as fallback when scouted ratings are absent.
+      2. batting_ratings_talent_* — potential/ceiling ratings, always exported.
+         Batting-specific: a pitcher's talent ratings are 20s, a hitter's are meaningful.
+         This ensures pitchers with thin PA samples anchor near 0, not at their pitching oa.
 
     Without this anchor, a player with 13 PA and an inflated wOBA would get a
     near-perfect rating_offense, corrupting the blended_woba talent anchor.
     """
     wrc = row.get("wrc_plus", 100)
+    if career_pa < PA_REGRESSION_THRESHOLD:
+        pa_trust = min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+        wrc_cap = 100 + pa_trust * WRC_CAP_HEADROOM
+        wrc = min(wrc, wrc_cap) if wrc is not None else 100
     wrc_score = clamp((wrc - 50) * (100 / 120))
     xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else 50
-    stats_score = wrc_score * 0.7 + xwoba_score * 0.3
+    stats_score = wrc_score * OFFENSE_WRC_WEIGHT + xwoba_score * OFFENSE_XWOBA_WEIGHT
 
-    if career_pa < 300:
-        if ootp_bat_score is not None:
-            anchor = ootp_bat_score
-        else:
-            oa = row.get("oa")
-            anchor = clamp((oa - 20) / 60 * 100) if oa and not pd.isna(oa) else None
-
-        if anchor is not None:
-            stats_weight = min(career_pa / 300, 1.0)
-            return stats_score * stats_weight + anchor * (1.0 - stats_weight)
+    if career_pa < PA_REGRESSION_THRESHOLD:
+        anchor = ootp_bat_score if ootp_bat_score is not None else 50.0
+        return stats_score * pa_trust + anchor * (1.0 - pa_trust)
 
     return stats_score
 
 
-def score_contact_quality(row, pctiles):
-    """Contact quality score from EV/LA percentiles."""
+def score_contact_quality(row, pctiles, career_pa=0):
+    """Contact quality score from EV/LA percentiles.
+
+    Regresses toward 50 for thin samples — 2 balls in play can hit the 99th
+    percentile for avg_ev/barrel_pct, inflating OVR just like wRC+ does.
+    Uses the same sqrt ramp as score_offense (full trust at PA_REGRESSION_THRESHOLD PA).
+    """
     vals = []
     for col in ["barrel_pct", "hard_hit_pct", "avg_ev", "xslg"]:
         p = pctiles.get(col)
         if p is not None and not pd.isna(p):
             vals.append(p)
-    return np.mean(vals) if vals else 50.0
+    stats_score = np.mean(vals) if vals else 50.0
+
+    if career_pa < PA_REGRESSION_THRESHOLD:
+        stats_weight = min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+        return stats_score * stats_weight + 50.0 * (1.0 - stats_weight)
+
+    return stats_score
 
 
-def score_discipline(row):
-    """Plate discipline from K% and BB%."""
+def score_discipline(row, career_pa=0):
+    """Plate discipline from K% and BB%.
+
+    Regresses toward 50 for thin samples — K%/BB% from 4 PAs is noise.
+    Uses the same sqrt ramp as score_offense (full trust at PA_REGRESSION_THRESHOLD PA).
+    """
     k_pct = row.get("k_pct", 0.22) or 0.22
     bb_pct = row.get("bb_pct", 0.08) or 0.08
     k_score = clamp((0.30 - k_pct) / 0.20 * 100)
     bb_score = clamp(bb_pct / 0.15 * 100)
-    return k_score * 0.5 + bb_score * 0.5
+    stats_score = k_score * 0.5 + bb_score * 0.5
+
+    if career_pa < PA_REGRESSION_THRESHOLD:
+        stats_weight = min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+        return stats_score * stats_weight + 50.0 * (1.0 - stats_weight)
+
+    return stats_score
 
 
 def score_defense(row, fielding_row, position):
@@ -1061,7 +1106,7 @@ def score_defense(row, fielding_row, position):
         fld_g = 0
     fld_g = int(fld_g)
 
-    if fld_g < 10:
+    if fld_g < FIELDING_MIN_GAMES:
         # Not enough data — fall back to rating only
         score = rating_score
     else:
@@ -1085,7 +1130,7 @@ def score_defense(row, fielding_row, position):
             sba = _fval("fld_sba")
             rto = _fval("fld_rto")
             total_att = sba + rto
-            cs_score = clamp(rto / total_att / 0.35 * 100) if total_att >= 5 else 50.0
+            cs_score = clamp(rto / total_att / 0.35 * 100) if total_att >= CATCHER_MIN_CS_ATTEMPTS else 50.0
 
             framing = _fval("fld_framing")
             framing_score = clamp(50.0 + framing / 12.0 * 50.0)
@@ -1121,9 +1166,9 @@ def score_defense(row, fielding_row, position):
 
     # ── Position multiplier ──────────────────────────────────────────────────
     if position in PREMIUM_DEFENSE_POS:
-        score = min(100, score * 1.3)
+        score = min(100, score * DEFENSE_PREMIUM_MULTIPLIER)
     elif position in LOW_DEFENSE_POS:
-        score = score * 0.7
+        score = score * DEFENSE_BAT_FIRST_MULTIPLIER
 
     return score
 
@@ -1185,10 +1230,10 @@ def score_role_value(row):
     ip = row.get("ip", 0) or 0
     gs = row.get("gs", 0) or 0
     g = row.get("g", 0) or 0
-    if gs >= 5:  # starter
-        return clamp(ip / 200 * 100)
+    if gs >= STARTER_MIN_GS:  # starter
+        return clamp(ip / STARTER_IP_TARGET * 100)
     else:  # reliever
-        return clamp(g / 70 * 100)
+        return clamp(g / RELIEVER_G_TARGET * 100)
 
 
 # ---------------------------------------------------------------------------
@@ -1378,16 +1423,24 @@ def compute_batter_ratings(engine):
         # Trend
         trend_current, trend_prev = trend_data.get(pid, (None, None))
 
-        # OOTP current batting score for thin-stat blend (20-80 → 0-100)
+        # OOTP batting anchor for thin-stat blend (20-80 → 0-100).
+        # Priority: scouted current ratings (ground-truth, only when export enabled)
+        #           → talent ratings (always exported, batting-specific, reflects ceiling)
+        # Never falls back to players_value.oa, which for pitchers reflects pitching skill.
         sr_vals = [row.get(c) for c in ("sr_contact", "sr_power", "sr_eye", "sr_gap")]
         sr_vals = [v for v in sr_vals if v is not None and not pd.isna(v) and v > 0]
-        ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - 20) / 60 * 100) if sr_vals else None
+        if sr_vals:
+            ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - 20) / 60 * 100)
+        else:
+            talent_vals = [row.get(c) for c in ("talent_contact", "talent_power", "talent_eye", "talent_gap")]
+            talent_vals = [v for v in talent_vals if v is not None and not pd.isna(v) and v > 0]
+            ootp_bat_score = clamp((sum(talent_vals) / len(talent_vals) - 20) / 60 * 100) if talent_vals else None
         career_pa = int(career_pa_totals.get(pid, 0))
 
         # Sub-scores
         s_offense = score_offense(row, player_pctiles.get("xwoba", 50), ootp_bat_score, career_pa)
-        s_contact = score_contact_quality(row, player_pctiles)
-        s_discipline = score_discipline(row)
+        s_contact = score_contact_quality(row, player_pctiles, career_pa)
+        s_discipline = score_discipline(row, career_pa)
         s_defense = score_defense(row, row, pos)
         s_baserunning = score_baserunning(row)
         s_potential = score_potential(row, age, trend_current, trend_prev)
@@ -1416,16 +1469,25 @@ def compute_batter_ratings(engine):
         if pd.isna(leader):
             leader = 0
 
-        flag_injury = bool(prone >= 175)
-        flag_leader = bool(leader >= 150)
-        flag_ceiling = bool((row.get("pot", 0) or 0) - (row.get("oa", 0) or 0) >= 10)
+        flag_injury = bool(prone >= INJURY_PRONE_THRESHOLD)
+        flag_leader = bool(leader >= LEADER_THRESHOLD)
+        flag_ceiling = bool((row.get("pot", 0) or 0) - (row.get("oa", 0) or 0) >= CEILING_GAP_THRESHOLD)
 
         if flag_injury:
-            overall -= 10
+            overall -= INJURY_OVERALL_DEDUCTION
         if flag_leader:
-            overall += 3
+            overall += LEADER_OVERALL_BONUS
 
         overall = clamp(overall)
+
+        # PA-based regression on the overall: applied after flag adjustments so
+        # that leader/injury bonuses don't carry unproven bats for free.
+        # Pulls toward s_offense (itself already regressed toward 50 for low PA),
+        # ensuring personality/durability traits don't inflate players with no
+        # batting history. Same sqrt ramp as sub-scores: full trust at 500+ PA.
+        if career_pa < PA_REGRESSION_THRESHOLD:
+            pa_weight = min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+            overall = clamp(overall * pa_weight + s_offense * (1.0 - pa_weight))
 
         results.append(dict(
             player_id=pid,
@@ -1484,7 +1546,7 @@ def compute_pitcher_ratings(engine):
                    (SUM(er)*9.0/SUM(ip)) -
                    ((13.0*SUM(hra) + 3.0*(SUM(bb)+SUM(hp)) - 2.0*SUM(k)) / SUM(ip)) as cfip
             FROM team_pitching_stats
-            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id IN (0, 1)
+            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = 1
         """)).fetchone()
         cfip = float(r[1])
 
@@ -1519,15 +1581,17 @@ def compute_pitcher_ratings(engine):
         s_run_prev = score_run_prevention(row)
 
         # Blend OOTP current pitching rating into run prevention for thin-IP pitchers.
-        # Stuff/movement/control are averaged (20-80 → 0-100) and mixed in up to 60%
-        # at 0 IP, tapering to 0% at 100+ career MLB IP.
+        # Stuff/movement/control are averaged (20-80 → 0-100) and mixed in up to
+        # OOTP_MAX_BLEND_WEIGHT at 0 IP, tapering to 0 at IP_REGRESSION_THRESHOLD.
+        # Uses the same REGRESSION_EXPONENT curve as the batter PA ramp.
         sr_pit_vals = [row.get(c) for c in ("sr_stuff", "sr_movement", "sr_control")]
         sr_pit_vals = [v for v in sr_pit_vals if v is not None and not pd.isna(v) and v > 0]
         if sr_pit_vals:
             ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - 20) / 60 * 100)
             career_ip = float(career_ip_totals.get(pid, 0))
-            if career_ip < 100:
-                ootp_weight = max(0.0, min(0.6, (100 - career_ip) / 100 * 0.6))
+            if career_ip < IP_REGRESSION_THRESHOLD:
+                ip_trust = min(career_ip / IP_REGRESSION_THRESHOLD, 1.0) ** REGRESSION_EXPONENT
+                ootp_weight = (1.0 - ip_trust) * OOTP_MAX_BLEND_WEIGHT
                 s_run_prev = s_run_prev * (1 - ootp_weight) + ootp_pit_score * ootp_weight
 
         s_dominance = score_dominance(row)
@@ -1558,14 +1622,14 @@ def compute_pitcher_ratings(engine):
         if pd.isna(leader):
             leader = 0
 
-        flag_injury = bool(prone >= 175)
-        flag_leader = bool(leader >= 150)
-        flag_ceiling = bool((row.get("pot", 0) or 0) - (row.get("oa", 0) or 0) >= 10)
+        flag_injury = bool(prone >= INJURY_PRONE_THRESHOLD)
+        flag_leader = bool(leader >= LEADER_THRESHOLD)
+        flag_ceiling = bool((row.get("pot", 0) or 0) - (row.get("oa", 0) or 0) >= CEILING_GAP_THRESHOLD)
 
         if flag_injury:
-            overall -= 10
+            overall -= INJURY_OVERALL_DEDUCTION
         if flag_leader:
-            overall += 3
+            overall += LEADER_OVERALL_BONUS
 
         overall = clamp(overall)
 
