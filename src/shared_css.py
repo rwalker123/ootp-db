@@ -185,7 +185,7 @@ def get_report_css(max_width="920px"):
   /* ── Stale data warning ─────────────────────────────────────────────── */
   .stale-banner {{ background: #fff3cd; border: 1px solid #ffc107;
                   padding: 8px 12px; border-radius: 4px; margin: 8px 0;
-                  font-size: 13px; }}
+                  font-size: 13px; color: #856404; }}
 
   /* ── Player-stats multi-column layout ──────────────────────────────── */
   .ratings-grid {{ display: flex; gap: 20px; flex-wrap: wrap; }}

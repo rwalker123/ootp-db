@@ -194,9 +194,12 @@ def check_packages():
         except ImportError:
             missing.append(pkg if pkg != "dotenv" else "python-dotenv")
     if missing:
+        fix_cmd = ".venv/bin/pip install -r requirements.txt"
+        if not _is_sqlite():
+            fix_cmd += " -r requirements-postgres.txt"
         return _check("Python packages", False,
                       f"Missing: {', '.join(missing)}",
-                      ".venv/bin/pip install -r requirements.txt")
+                      fix_cmd)
     installed = "pandas, sqlalchemy, python-dotenv"
     if not _is_sqlite():
         installed += ", psycopg2-binary"

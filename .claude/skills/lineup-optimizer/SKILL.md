@@ -118,15 +118,14 @@ If `NOT_FOUND` — team not found or no batters in database. Try to find the tea
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, os
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
-from shared_css import load_saves_registry
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
 save_name = load_saves_registry()["active"]
-db = save_name.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+engine = get_engine(save_name)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT team_id, name, nickname, abbr FROM teams "

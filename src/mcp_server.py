@@ -42,9 +42,10 @@ def _format_standings(rows: list) -> str:
             divs[key] = []
         gb_raw = r.get("gb")
         gb = f"+{float(gb_raw):.1f}" if gb_raw and float(gb_raw) > 0 else "—"
-        pct = _fmt(r["pct"], ".3f")
+        pct_raw = _fmt(r["pct"], ".3f")
+        pct_display = pct_raw if pct_raw == "—" else f".{pct_raw[2:]}"
         divs[key].append(
-            f"  {int(r['pos'])}.  {r['name']} {r['nickname']:<16} {r['w']}-{r['l']}  .{pct[2:]}  {gb}"
+            f"  {int(r['pos'])}.  {r['name']} {r['nickname']:<16} {r['w']}-{r['l']}  {pct_display}  {gb}"
         )
     lines = []
     for (sl, _, div_name), teams in sorted(divs.items()):

@@ -75,14 +75,12 @@ query to get year-by-year rate stats. Use `dict()` not `{}` for params:
 .venv/bin/python3 << 'PYEOF'
 import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
-from shared_css import load_saves_registry
-import os
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
 save_name = load_saves_registry()["active"]
-db_name = save_name.lower().replace(" ", "_").replace("-", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db_name)
+engine = get_engine(save_name)
 
 def safe_div(n, d):
     return n / d if d and d > 0 else None

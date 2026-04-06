@@ -70,6 +70,11 @@ SQLite works well for most uses. If you want PostgreSQL (better performance for 
 DATABASE_URL=postgresql://postgres@localhost:5432
 ```
 
+Then install the PostgreSQL driver:
+```bash
+.venv/bin/pip install -r requirements-postgres.txt
+```
+
 **macOS:** The simplest option is [Postgres.app](https://postgresapp.com) — download, drag to Applications, and launch. It runs in your menu bar. Then add the CLI tools to your PATH (instructions on the Postgres.app site).
 
 Alternatively via Homebrew:
@@ -655,16 +660,16 @@ Because Claude Desktop is a full conversation, you can follow up naturally:
 
 ```
 You: Show me the top free agent shortstops.
-Claude: [calls search_free_agents, returns list]
+Claude: [calls free_agents, returns list]
 
 You: Tell me more about the second one.
-Claude: [calls player_lookup for that player]
+Claude: [calls player_stats for that player]
 
 You: Would he be worth claiming if he clears waivers?
 Claude: [calls waiver_claim]
 ```
 
-> **Note:** The active save and team are read from `saves.json` automatically. If you want to switch the active save before a session, use the web UI or run `./import.sh` for that save.
+> **Note:** The active save and team are determined automatically from the saves registry (`saves.sqlite.json` or `saves.postgresql.json`). If you want to switch the active save before a session, use the web UI or run `./import.sh` for that save.
 
 ---
 

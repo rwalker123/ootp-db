@@ -58,14 +58,12 @@ If the output is `PLAYER_NOT_FOUND` — the player wasn't found in the active sa
 .venv/bin/python3 << 'PYEOF'
 import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
-from shared_css import load_saves_registry
-import os
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
 save_name = load_saves_registry()["active"]
-db = save_name.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+engine = get_engine(save_name)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT first_name, last_name, team_id, position, age FROM players "

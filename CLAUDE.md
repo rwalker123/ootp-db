@@ -9,11 +9,11 @@ When answering questions about OOTP data, always use `.venv/bin/python3` with sq
 and a heredoc to avoid shell quoting issues:
 ```bash
 .venv/bin/python3 << 'PYEOF'
-from sqlalchemy import create_engine, text
-from shared_css import get_engine
-import sys, json
+from sqlalchemy import text
+from shared_css import get_engine, load_saves_registry
+import sys
 sys.path.insert(0, "src")
-save = json.loads(open("saves.postgresql.json").read())["active"]
+save = load_saves_registry()["active"]
 engine = get_engine(save)
 with engine.connect() as conn:
     result = conn.execute(text("SELECT ...")).fetchall()

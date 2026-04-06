@@ -8,6 +8,8 @@ Hit:        entry exists AND entry["import_time"] == current last_import
 
 import hashlib
 import json
+import tempfile
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -46,4 +48,11 @@ def cache_put(tool_name: str, args: dict, save_name: str, result: str, import_ti
     cache = _load_cache()
     key = _cache_key(tool_name, args, save_name)
     cache[key] = {"result": result, "import_time": import_time}
-    CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    fd, tmp_path = tempfile.mkstemp(dir=CACHE_FILE.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(cache, indent=2))
+        os.replace(tmp_path, CACHE_FILE)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
