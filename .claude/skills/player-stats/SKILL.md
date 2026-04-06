@@ -31,7 +31,7 @@ sys.path.insert(0, "src")
 from report import generate_player_report
 from shared_css import load_saves_registry
 save_name = load_saves_registry()["active"]
-path, data = generate_player_report(save_name, "<FIRST>", "<LAST>")
+path, data = generate_player_report(save_name, "<FIRST>", "<LAST>", raw_args="$ARGUMENTS")
 
 if data is None:
     print(f"CACHED:{path}")

@@ -495,6 +495,7 @@ def _handle_reports_search(handler):
                 "path": url_path,
                 "title": title or html_path.stem.replace("_", " ").replace("-", " "),
                 "category": cat,
+                "args_display": raw.get("args_display") or "",
             })
 
     _json_response(handler, {"results": results})

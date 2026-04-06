@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
@@ -327,10 +327,10 @@ def generate_trade_targets_report(
 
     if offered:
         p = offered[0]
-        base = re.sub(r"[^a-z0-9_]", "", f"{p['first_name']}_{p['last_name']}".lower())[:40]
-        slug = f"{base}_{p['player_id']}"
+        _trade_base = f"trade_{p['player_id']}"
     else:
-        slug = re.sub(r"[^a-z0-9_]", "", offer_label.lower().replace(" ", "_"))[:50]
+        _trade_base = "trade_offer"
+    args_key = {"label": offer_label, "mode": mode}
 
     offer_label_esc = html.escape(offer_label, quote=True)
     if mode == "acquiring":
@@ -405,6 +405,7 @@ def generate_trade_targets_report(
     _ootp_meta = (
         '<meta name="ootp-skill" content="trade-targets">'
         f'<meta name="ootp-args" content="{_args_esc}">'
+        f'<meta name="ootp-args-display" content="{_args_esc}">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
@@ -447,7 +448,7 @@ def generate_trade_targets_report(
 </div>
 </body></html>"""
 
-    report_path = get_reports_dir(save_name, "trade_targets") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "trade_targets") / report_filename(_trade_base, args_key)
     write_report_html(report_path, html_doc)
 
     return str(report_path), dict(offered=offered, targets=targets)

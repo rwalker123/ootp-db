@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
@@ -136,8 +136,7 @@ def generate_ifa_targets_report(save_name, criteria_label, where_clause,
             work_ethic=r[24], intelligence=r[25], greed=r[26],
         ))
 
-    # Build slug from criteria
-    slug = re.sub(r"[^a-z0-9_]", "", criteria_label.lower().replace(" ", "_"))[:50]
+    args_key = {"criteria": criteria_label}
 
     # Build results table rows
     table_rows = ""
@@ -230,6 +229,7 @@ def generate_ifa_targets_report(save_name, criteria_label, where_clause,
     _ootp_meta = (
         '<meta name="ootp-skill" content="ifa-targets">'
         f'<meta name="ootp-args" content="{_args_esc}">'
+        f'<meta name="ootp-args-display" content="{_args_esc}">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
@@ -274,7 +274,7 @@ def generate_ifa_targets_report(save_name, criteria_label, where_clause,
 </div>
 </body></html>"""
 
-    report_path = get_reports_dir(save_name, "ifa") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "ifa") / report_filename("ifa", args_key)
     write_report_html(report_path, html)
 
     return str(report_path), results

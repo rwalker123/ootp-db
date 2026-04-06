@@ -250,10 +250,11 @@ function extractMeta(html) {
   const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated" content="([\d\-T:]+)"/) || [])[1] || null;
   const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
   const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
-  const skill  = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
-  const args   = unescHtml((html.match(/<meta name="ootp-args" content="([^"]+)"/) || [])[1] || null);
-  const kwargs = unescHtml((html.match(/<meta name="ootp-kwargs" content="([^"]+)"/) || [])[1] || null);
-  return { title, ts, oa, pot, skill, args, kwargs };
+  const skill       = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
+  const args        = unescHtml((html.match(/<meta name="ootp-args" content="([^"]+)"/) || [])[1] || null);
+  const argsDisplay = unescHtml((html.match(/<meta name="ootp-args-display" content="([^"]*)"/) || [])[1] || null);
+  const kwargs      = unescHtml((html.match(/<meta name="ootp-kwargs" content="([^"]+)"/) || [])[1] || null);
+  return { title, ts, oa, pot, skill, args, argsDisplay, kwargs };
 }
 
 function dirLabel(key) {
@@ -792,9 +793,10 @@ async function buildSection(basePath, dirKey, lastImport) {
       + `<td>${rpt.pot ? `<span class="badge-pot">${rpt.pot}</span>` : '—'}</td>`
       : '';
     const displayTitle = rpt.title || rpt.filename.replace('.html', '').replace(/[-_]/g, ' ');
+    const argsLine = rpt.argsDisplay ? `<br><span class="ts">${esc(rpt.argsDisplay)}</span>` : '';
     const filePath = `${basePath}${dirKey}${rpt.filename}`;
     return `<tr id="row-${CSS.escape(filePath)}">
-      <td class="left"><a href="${filePath}" target="_blank">${displayTitle}</a></td>
+      <td class="left"><a href="${filePath}" target="_blank">${displayTitle}</a>${argsLine}</td>
       ${extraTd}
       <td class="ts">${rpt.ts || '—'}</td>
       <td class="stale-cell">${staleCell}</td>
@@ -1133,8 +1135,9 @@ async function runReportSearch() {
   const rows = results.map(hit => {
     const title = hit.title || hit.path.split('/').pop().replace(/\.html$/, '').replace(/[-_]/g, ' ');
     const cat = hit.category ? '<span class="ts"> · ' + esc(dirLabel(hit.category)) + '</span>' : '';
+    const argsLine = hit.args_display ? '<br><span class="ts">' + esc(hit.args_display) + '</span>' : '';
     const href = encodeURI(hit.path);
-    return '<tr><td class="left"><a href="' + href + '" target="_blank">' + esc(title) + '</a>' + cat + '</td></tr>';
+    return '<tr><td class="left"><a href="' + href + '" target="_blank">' + esc(title) + '</a>' + cat + argsLine + '</td></tr>';
   }).join('');
   out.innerHTML =
     '<table style="margin-top:8px;width:100%"><tr><th class="left">Match</th></tr>' + rows + '</table>';

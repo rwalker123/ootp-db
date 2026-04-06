@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import CAREER_STATS_LOOKBACK_YEARS, REGRESSION_EXPONENT, PA_REGRESSION_THRESHOLD, WRC_CAP_HEADROOM
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
@@ -893,7 +893,8 @@ def wrc_td(val):
 def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
                alternation_score, dh_used, save_name, excluded_names,
                primary_only=False, forced_bench=None, fatigue_threshold=None,
-               fatigue_benched=None, favor_offense=False, args_str=""):
+               fatigue_benched=None, favor_offense=False, args_str="",
+               args_display=""):
     now = datetime.now()
     now_str = now.strftime("%B %d, %Y %I:%M %p")
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1044,6 +1045,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
   <title>{html_mod.escape(report_title)}</title>
   <meta name="ootp-skill" content="lineup-optimizer">
   <meta name="ootp-args" content="{html_mod.escape(args_str)}">
+  <meta name="ootp-args-display" content="{html_mod.escape(args_display)}">
   <meta name="ootp-save" content="{html_mod.escape(save_name)}">
   <meta name="ootp-generated" content="{now_iso}">
   <style>{css}
@@ -1375,7 +1377,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
                            opponent_hand=None, excluded_names=None,
                            primary_only=False, forced_starts=None,
                            forced_bench=None, fatigue_threshold=None,
-                           favor_offense=False):
+                           favor_offense=False, raw_args=""):
     """
     Generate (or return cached) lineup optimizer report.
 
@@ -1402,9 +1404,6 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
     if hand not in ("L", "R"):
         hand = None
 
-    has_overrides = bool(forced_starts or forced_bench or fatigue_threshold is not None
-                         or favor_offense)
-
     # Cache check requires team_abbr — resolve team with a quick DB call
     engine = get_engine(save_name)
     with engine.connect() as conn:
@@ -1412,14 +1411,21 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         if not team_id:
             return None, None
 
-        hand_key = hand or "any"
-        pos_key = "primary" if primary_only else "multi"
-        fd_key = "_fo" if favor_offense else ""
-        slug = f"{team_abbr.lower()}_{philosophy}_{hand_key}_{pos_key}{fd_key}"
+        args_key = dict(
+            philosophy=philosophy,
+            hand=hand,
+            primary_only=primary_only,
+            excluded=sorted(excluded_names),
+            forced_starts=sorted(str(fs) for fs in (forced_starts or [])),
+            forced_bench=sorted(forced_bench or []),
+            fatigue_threshold=fatigue_threshold,
+            favor_offense=favor_offense,
+            raw_args=raw_args.strip().lower(),
+        )
         report_dir = get_reports_dir(save_name, "lineups")
-        report_path = report_dir / f"{slug}.html"
+        report_path = report_dir / report_filename("lineup_" + team_abbr.lower(), args_key)
         last_import = get_last_import_time()
-        if not has_overrides and report_path.exists() and last_import:
+        if report_path.exists() and last_import:
             if report_path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
                 return str(report_path), None
 
@@ -1448,6 +1454,24 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
     fatigue_threshold = data.pop("_fatigue_threshold")
     favor_offense = data.pop("_favor_offense")
 
+    _disp = []
+    if hand:
+        _disp.append("vs LHP" if hand == "L" else "vs RHP")
+    if primary_only:
+        _disp.append("Primary only")
+    if favor_offense:
+        _disp.append("Favor offense")
+    if excluded_names:
+        names = ", ".join(excluded_names[:3]) + ("…" if len(excluded_names) > 3 else "")
+        _disp.append(f"Excl: {names}")
+    if forced_bench:
+        _disp.append("Bench: " + ", ".join(forced_bench[:2]))
+    if fatigue_threshold is not None:
+        _disp.append(f"Fatigue ≤{fatigue_threshold}%")
+    if raw_args.strip():
+        _disp.append(raw_args.strip())
+    args_display = " · ".join(_disp)
+
     html_content = build_html(
         team_name, team_abbr, philosophy, hand,
         lineup, batters, alt_score,
@@ -1458,6 +1482,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         fatigue_benched=fatigue_benched,
         favor_offense=favor_offense,
         args_str=args_str,
+        args_display=args_display,
     )
     write_report_html(report_path, html_content)
 

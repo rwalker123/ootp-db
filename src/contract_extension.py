@@ -5,7 +5,7 @@ import html as html_mod
 from datetime import datetime
 from pathlib import Path
 
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
 from sqlalchemy import text
 
@@ -784,7 +784,7 @@ def query_contract_extension(save_name, first_name, last_name):
     return data_dict
 
 
-def generate_contract_extension_report(save_name, first_name, last_name):
+def generate_contract_extension_report(save_name, first_name, last_name, raw_args=""):
     """Generate a contract extension advisor HTML report.
 
     Returns (path_str, data_dict) on generation, or (path_str, None) on cache hit.
@@ -801,9 +801,8 @@ def generate_contract_extension_report(save_name, first_name, last_name):
         return None, None
 
     # ── Cache check ──────────────────────────────────────────────────────
-    slug = f"{first_name.lower()}_{last_name.lower()}_{player_id}"
     report_dir = get_reports_dir(save_name, "contract_extensions")
-    report_path = report_dir / f"{slug}.html"
+    report_path = report_dir / report_filename(f"contract_{player_id}", dict(raw_args=raw_args.strip().lower()))
 
     if report_path.exists() and last_import:
         import_dt = datetime.fromisoformat(last_import)
@@ -947,6 +946,7 @@ def generate_contract_extension_report(save_name, first_name, last_name):
     _ootp_meta = (
         '<meta name="ootp-skill" content="contract-extension">'
         f'<meta name="ootp-args" content="{html_mod.escape(first_name)} {html_mod.escape(last_name)}">'
+        '<meta name="ootp-args-display" content="">'
         f'<meta name="ootp-save" content="{html_mod.escape(save_name)}">'
     )
 

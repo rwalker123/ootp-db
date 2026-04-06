@@ -5,7 +5,7 @@ import html
 from datetime import datetime
 from pathlib import Path
 
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
 from sqlalchemy import text
 
@@ -174,12 +174,14 @@ def _fmt_pct(val):
     return f"{float(val) * 100:.1f}%"
 
 
-def find_existing_waiver_report(player_id, save_name):
+def find_existing_waiver_report(player_id, save_name, raw_args=""):
     reports_dir = get_reports_dir(save_name, "waiver_claims")
-    for f in reports_dir.glob(f"*_{player_id}.html"):
-        last_import = get_last_import_time()
-        if last_import is None or f.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
-            return str(f)
+    path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
+    if not path.exists():
+        return None
+    last_import = get_last_import_time()
+    if last_import is None or path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
+        return str(path)
     return None
 
 
@@ -1327,7 +1329,7 @@ def query_waiver_claim(save_name, first_name, last_name):
     return data
 
 
-def generate_waiver_claim_report(save_name, first_name, last_name):
+def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
     """Generate a waiver claim evaluation report.
 
     Returns:
@@ -1345,7 +1347,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         player_id = candidate["player_id"]
 
         # Cache check
-        existing = find_existing_waiver_report(player_id, save_name)
+        existing = find_existing_waiver_report(player_id, save_name, raw_args)
         if existing:
             return existing, None
 
@@ -1398,6 +1400,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ootp-skill" content="waiver-claim">
   <meta name="ootp-args" content="{esc_first} {esc_last}">
+  <meta name="ootp-args-display" content="">
   <meta name="ootp-save" content="{esc_save}">
   <title>{title}</title>
   <style>{css}</style>
@@ -1419,8 +1422,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 </html>"""
 
     reports_dir = get_reports_dir(save_name, "waiver_claims")
-    slug = f"{full_name}_{player_id}"
-    report_path = reports_dir / f"{slug}.html"
+    report_path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
     write_report_html(report_path, html_doc)
 
     data["report_path"] = str(report_path)

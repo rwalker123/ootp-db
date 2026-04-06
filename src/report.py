@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
@@ -1014,7 +1014,7 @@ def generate_pitcher_section_html(data):
 
 
 
-def find_existing_report(save_name, first_name, last_name):
+def find_existing_report(save_name, first_name, last_name, raw_args=""):
     """Check if a fresh report already exists for this player.
 
     Returns the report path if it exists and was generated after the last import,
@@ -1030,8 +1030,7 @@ def find_existing_report(save_name, first_name, last_name):
             return None
         player_id = row[0]
 
-    slug = f"{first_name}_{last_name}_{player_id}".lower()
-    report_path = PROJECT_ROOT / "reports" / save_name / "players" / f"{slug}.html"
+    report_path = PROJECT_ROOT / "reports" / save_name / "players" / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
 
     if not report_path.exists():
         return None
@@ -1050,13 +1049,13 @@ def find_existing_report(save_name, first_name, last_name):
     return None
 
 
-def generate_player_report(save_name, first_name, last_name):
+def generate_player_report(save_name, first_name, last_name, raw_args=""):
     """Main entry: generate a report for one player.
 
     Detects two-way players by checking for both batting and pitching career data.
     Returns (path, data_dict) where data_dict is None on a cache hit.
     """
-    existing = find_existing_report(save_name, first_name, last_name)
+    existing = find_existing_report(save_name, first_name, last_name, raw_args)
     if existing:
         return existing, None
 
@@ -1139,14 +1138,14 @@ def generate_player_report(save_name, first_name, last_name):
     _ootp_meta = (
         '<meta name="ootp-skill" content="player-stats">'
         f'<meta name="ootp-args" content="{first_name} {last_name}">'
+        '<meta name="ootp-args-display" content="">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_kwargs_esc}">'
     )
     html = html.replace('</title>', '</title>\n' + _ootp_meta, 1)
 
     # Write report
-    slug = f"{first_name}_{last_name}_{player_id}".lower()
-    report_path = get_reports_dir(save_name, "players") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "players") / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
     write_report_html(report_path, html)
 
     return report_path, data

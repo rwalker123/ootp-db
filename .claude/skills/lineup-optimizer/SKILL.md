@@ -102,6 +102,7 @@ path, data = generate_lineup_report(
                               # pos: C=2,1B=3,2B=4,3B=5,SS=6,LF=7,CF=8,RF=9,DH=0; None if unspecified
     forced_bench=[],          # replace with list of name strings to sit
     fatigue_threshold=None,   # replace with int (0-100) to auto-bench fatigued players
+    raw_args="$ARGUMENTS",    # pass the original argument string verbatim for cache keying
 )
 if path is None:
     print("NOT_FOUND")

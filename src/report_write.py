@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import html as html_module
 import json
 import re
 from pathlib import Path
 
 _TITLE_RE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_ARGS_DISPLAY_RE = re.compile(r'<meta name="ootp-args-display" content="([^"]*)"', re.IGNORECASE)
 _STYLE_RE = re.compile(r"<style[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
 _SCRIPT_RE = re.compile(r"<script[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>", re.DOTALL)
@@ -33,6 +35,17 @@ def html_to_search_text(html: str) -> str:
     return _WS_RE.sub(" ", plain).strip()
 
 
+def args_hash(args_key: dict) -> str:
+    """Return an 8-char hex hash of the normalized args dict."""
+    payload = json.dumps(args_key, sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:8]
+
+
+def report_filename(base: str, args_key: dict) -> str:
+    """Return ``{base}.{hash8}.html`` for the given base name and args."""
+    return f"{base}.{args_hash(args_key)}.html"
+
+
 def sidecar_path_for_html(html_path: Path) -> Path:
     return html_path.with_name(html_path.stem + ".search.json")
 
@@ -45,7 +58,9 @@ def write_report_html(html_path: Path, html: str) -> None:
     stem_words = html_path.stem.replace("_", " ").replace("-", " ")
     if stem_words and stem_words.lower() not in text.lower():
         text = f"{text} {stem_words}".strip()
-    payload = dict(title=title, text=text)
+    m = _ARGS_DISPLAY_RE.search(html)
+    args_display = html_module.unescape(m.group(1)) if m else ""
+    payload = dict(title=title, text=text, args_display=args_display)
     sidecar_path_for_html(html_path).write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",

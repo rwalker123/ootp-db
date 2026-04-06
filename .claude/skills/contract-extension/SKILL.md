@@ -40,7 +40,7 @@ sys.path.insert(0, "src")
 from contract_extension import generate_contract_extension_report
 from shared_css import load_saves_registry
 save_name = load_saves_registry()["active"]
-path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>")
+path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>", raw_args="$ARGUMENTS")
 if path is None:
     print("PLAYER_NOT_FOUND")
 elif data is None:

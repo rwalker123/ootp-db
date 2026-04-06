@@ -41,7 +41,7 @@ from config import (
     STARTER_MIN_GS,
     WRC_CAP_HEADROOM,
 )
-from report_write import write_report_html
+from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
 
@@ -74,8 +74,8 @@ def find_existing_rating_report(save_name, first_name, last_name, engine, focus_
             return None
         player_id = row[0]
 
-    slug = _rating_slug(first_name, last_name, player_id, focus_modifiers)
-    report_path = PROJECT_ROOT / "reports" / save_name / "ratings" / f"{slug}.html"
+    args_key = {"focus": sorted(m.lower().strip(",") for m in focus_modifiers) if focus_modifiers else []}
+    report_path = PROJECT_ROOT / "reports" / save_name / "ratings" / report_filename(f"rating_{player_id}", args_key)
 
     if not report_path.exists():
         return None
@@ -628,10 +628,12 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     )
 
     _focus_str = (' ' + ' '.join(focus_modifiers)) if focus_modifiers else ''
+    _focus_display = ("Focus: " + ", ".join(focus_modifiers)) if focus_modifiers else ""
     _ootp_kwargs_esc = json.dumps(dict(first=first_name, last=last_name, focus_modifiers=focus_modifiers)).replace('"', '&quot;')
     _ootp_meta = (
         '<meta name="ootp-skill" content="player-rating">'
         f'<meta name="ootp-args" content="{first_name} {last_name}{_focus_str}">'
+        f'<meta name="ootp-args-display" content="{_focus_display}">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
@@ -718,8 +720,8 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 </div>
 </body></html>"""
 
-    slug = _rating_slug(first_name, last_name, player_id, focus_modifiers)
-    report_path = get_reports_dir(save_name, "ratings") / f"{slug}.html"
+    args_key = {"focus": sorted(m.lower().strip(",") for m in focus_modifiers) if focus_modifiers else []}
+    report_path = get_reports_dir(save_name, "ratings") / report_filename(f"rating_{player_id}", args_key)
     write_report_html(report_path, html)
 
     return str(report_path), dict(
