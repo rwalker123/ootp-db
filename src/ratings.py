@@ -26,6 +26,10 @@ from config import (
     DEFENSE_BAT_FIRST_MULTIPLIER,
     DEFENSE_PREMIUM_MULTIPLIER,
     FIELDING_MIN_GAMES,
+    INJURY_DURABLE_MAX,
+    INJURY_FRAGILE_MAX,
+    INJURY_IRON_MAN_MAX,
+    INJURY_NORMAL_MAX,
     INJURY_OVERALL_DEDUCTION,
     INJURY_PRONE_THRESHOLD,
     IP_REGRESSION_THRESHOLD,
@@ -39,6 +43,10 @@ from config import (
     RELIEVER_G_TARGET,
     STARTER_IP_TARGET,
     STARTER_MIN_GS,
+    TRAIT_AVERAGE_MAX,
+    TRAIT_BELOW_AVG_MAX,
+    TRAIT_GOOD_MAX,
+    TRAIT_POOR_MAX,
     WRC_CAP_HEADROOM,
 )
 from ootp_db_constants import (
@@ -533,13 +541,13 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         if val is None:
             return "Unknown"
         v = int(val)
-        if v <= 25:
+        if v <= INJURY_IRON_MAN_MAX:
             return "Iron Man"
-        if v <= 75:
+        if v <= INJURY_DURABLE_MAX:
             return "Durable"
-        if v <= 125:
+        if v <= INJURY_NORMAL_MAX:
             return "Normal"
-        if v <= 174:
+        if v <= INJURY_FRAGILE_MAX:
             return "Fragile"
         return "Wrecked"
 
@@ -547,9 +555,9 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         if val is None:
             return "#888"
         v = int(val)
-        if v <= 75:
+        if v <= INJURY_DURABLE_MAX:
             return "#1a7a1a"
-        if v <= 125:
+        if v <= INJURY_NORMAL_MAX:
             return "#cc7700"
         return "#cc2222"
 
@@ -557,13 +565,13 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         if val is None:
             return "Unknown"
         v = int(val)
-        if v <= 50:
+        if v <= TRAIT_POOR_MAX:
             return "Poor"
-        if v <= 100:
+        if v <= TRAIT_BELOW_AVG_MAX:
             return "Below Avg"
-        if v <= 130:
+        if v <= TRAIT_AVERAGE_MAX:
             return "Average"
-        if v <= 160:
+        if v <= TRAIT_GOOD_MAX:
             return "Good"
         return "Elite"
 
@@ -572,16 +580,16 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
             return "#888"
         v = int(val)
         if invert:
-            if v >= 161:
+            if v > TRAIT_GOOD_MAX:
                 return "#cc2222"
-            if v >= 131:
+            if v > TRAIT_AVERAGE_MAX:
                 return "#cc7700"
             return "#1a7a1a"
-        if v >= 161:
+        if v > TRAIT_GOOD_MAX:
             return "#1a7a1a"
-        if v >= 131:
+        if v > TRAIT_AVERAGE_MAX:
             return "#4a9a2a"
-        if v >= 101:
+        if v > TRAIT_BELOW_AVG_MAX:
             return "#888"
         return "#cc7700"
 
