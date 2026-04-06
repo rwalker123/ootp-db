@@ -196,7 +196,6 @@ def fetch_common_data(conn, player_id):
         "SUM(thbs.hr), SUM(thbs.bb), SUM(thbs.hp), SUM(thbs.sf), SUM(thbs.pa), SUM(thbs.r) "
         "FROM team_history_batting_stats thbs "
         "JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = 203 "
-        "WHERE thbs.level_id = 1 AND thbs.split_id = 1 "
         "GROUP BY thbs.year")).fetchall()
     for r in rows:
         lg[int(r[0])] = tuple(int(x) for x in r[1:])
@@ -227,7 +226,6 @@ def fetch_common_data(conn, player_id):
         "SUM(thps.k), SUM(thps.er) "
         "FROM team_history_pitching_stats thps "
         "JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = 203 "
-        "WHERE thps.level_id = 1 AND thps.split_id = 1 "
         "GROUP BY thps.year")).fetchall()
     for r in rows:
         lg_pitch[int(r[0])] = tuple(float(x) for x in r[1:])
