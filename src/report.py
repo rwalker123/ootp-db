@@ -335,13 +335,16 @@ def fetch_fielding_stats(conn, player_id, primary_position):
         "GROUP BY position ORDER BY SUM(g) DESC"
     ), dict(pid=player_id, yr=max_year)).fetchall()
 
-    career = conn.execute(text(
-        "SELECT year, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
+    # Query all positions per year; pick the one with most games played (primary_position
+    # is their *current* position, which may differ from earlier in their career).
+    career_all = conn.execute(text(
+        "SELECT year, position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
         "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
         "FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND position = :pos AND level_id = 1 AND league_id = 203 "
-        "GROUP BY year ORDER BY year"
-    ), dict(pid=player_id, pos=primary_position)).fetchall()
+        "WHERE player_id = :pid AND level_id = 1 AND league_id = 203 "
+        "GROUP BY year, position ORDER BY year, SUM(g) DESC"
+    ), dict(pid=player_id)).fetchall()
+    career = career_all
 
     return dict(current=current, career=career)
 
@@ -478,10 +481,10 @@ def generate_fielding_stats_html(fielding_data, primary_position):
             html += '</tr>'
         html += '</table>'
 
-    # Career by year at primary position
+    # Career by year — primary position per year (most games played)
     if career:
-        html += f'<h3>Career Fielding — {POS_MAP.get(primary_position, "?")} (MLB)</h3><table><tr>'
-        car_hdrs = ['Year', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
+        html += '<h3>Career Fielding (MLB)</h3><table><tr>'
+        car_hdrs = ['Year', 'Pos', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
         if is_catcher:
             car_hdrs += ['PB', 'SBA', 'CS', 'CS%', 'Framing', 'Arm']
         for h in car_hdrs:
@@ -489,10 +492,11 @@ def generate_fielding_stats_html(fielding_data, primary_position):
         html += '</tr>'
         max_year = max(r[0] for r in career)
         for row in career:
-            yr, g, gs, ipf, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
+            yr, pos_yr, g, gs, ipf, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
             inn = f"{float(ipf):.1f}" if ipf else "—"
             style = ' style="font-weight:bold;background:#e8f0fe"' if yr == max_year else ''
             html += (f'<tr{style}><td>{yr}</td>'
+                     f'<td>{POS_MAP.get(pos_yr, str(pos_yr))}</td>'
                      f'<td>{g}</td><td>{gs}</td><td>{inn}</td>'
                      f'<td>{tc}</td><td>{po}</td><td>{a}</td><td>{e}</td>'
                      f'<td>{_fpct_html(tc, e)}</td><td>{dp}</td>'
@@ -888,8 +892,8 @@ def generate_pitcher_section_html(data):
         cq_vals = [
             fmt_int(padv.get('bb_against')),
             fmt_rate(padv.get('avg_ev_against'), 1),
-            fmt_pct(padv.get('hard_hit_pct_against', 0) * 100),
-            fmt_pct(padv.get('barrel_pct_against', 0) * 100),
+            fmt_pct((padv.get('hard_hit_pct_against') or 0) * 100),
+            fmt_pct((padv.get('barrel_pct_against') or 0) * 100),
             fmt_rate(padv.get('xba_against')),
             fmt_rate(padv.get('xwoba_against')),
         ]
@@ -908,9 +912,9 @@ def generate_pitcher_section_html(data):
                 fmt_int(padv.get(f'bf{sfx}')),
                 fmt_rate(padv.get(f'era{sfx}'), 2),
                 fmt_rate(padv.get(f'fip{sfx}'), 2),
-                fmt_pct(padv.get(f'k_pct{sfx}', 0) * 100),
-                fmt_pct(padv.get(f'bb_pct{sfx}', 0) * 100),
-                fmt_pct(padv.get(f'k_bb_pct{sfx}', 0) * 100),
+                fmt_pct((padv.get(f'k_pct{sfx}') or 0) * 100),
+                fmt_pct((padv.get(f'bb_pct{sfx}') or 0) * 100),
+                fmt_pct((padv.get(f'k_bb_pct{sfx}') or 0) * 100),
                 fmt_rate(padv.get(f'whip{sfx}'), 2),
                 fmt_rate(padv.get(f'babip{sfx}')),
             ]
