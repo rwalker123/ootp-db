@@ -178,7 +178,7 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
       MY_TEAM_ID=<id>
       MY_TEAM_ABBR=<abbr>
       MY_TEAM_NAME=<name>
-      PLAYER=<player_id>|<first>|<last>|<pos>|<age>|<oa>|<pot>|<rating>|
+      PLAYER=<player_id>|<first>|<last>|<pos>|<age>|<oa>|<pot>|<rating_overall>|
              <player_type>|<wrc_fip>|<war>|<yrs_remaining>|<salary>|<svc_years>|<team_abbr>
       NEED=<position>|<cnt>|<avg_rating>|<best_rating>  (offering mode, sorted by avg_rating)
     """
@@ -194,7 +194,7 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT name, nickname FROM teams WHERE team_id = :tid LIMIT 1"),
-            {"tid": my_team_id},
+            dict(tid=my_team_id),
         ).mappings().fetchone()
         my_team_name = f"{row['name']} {row['nickname']}" if row else my_team_abbr
 
@@ -242,7 +242,7 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
                 "WHERE tr.team_id = :tid AND tr.list_id IN (1, 2) "
                 "GROUP BY pr.position "
                 "ORDER BY avg_rating ASC"
-            ), {"tid": my_team_id}).fetchall()
+            ), dict(tid=my_team_id)).fetchall()
             for r in needs:
                 pos, cnt, avg_r, best_r = r
                 print(f"NEED={pos}|{cnt}|{avg_r}|{best_r}")
