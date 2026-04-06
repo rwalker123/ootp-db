@@ -136,7 +136,8 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
                pr.rating_durability, pr.rating_development, pr.rating_clubhouse,
                pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
                pr.prone_overall, pr.work_ethic, pr.intelligence, pr.greed, pr.loyalty,
-               p.bats, p.throws
+               p.bats, p.throws,
+               pr.rating_now, pr.rating_ceiling
         FROM player_ratings pr
         JOIN players p ON p.player_id = pr.player_id
         {join_clause}
@@ -161,6 +162,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
             flag_injury_risk=r[19], flag_leader=r[20], flag_high_ceiling=r[21],
             prone_overall=r[22], work_ethic=r[23], intelligence=r[24],
             greed=r[25], loyalty=r[26], bats=r[27], throws=r[28],
+            rating_now=r[29], rating_ceiling=r[30],
         ))
     return results
 
@@ -195,8 +197,8 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
                     else str(int(r["wrc_plus"])) if r["wrc_plus"] is not None else "—")
         key_label = "FIP" if is_pitcher else "wRC+"
         war_disp = f"{float(r['war']):.1f}" if r["war"] is not None else "—"
-        oa_v = int(r["oa"]) if r["oa"] is not None else 0
-        pot_v = int(r["pot"]) if r["pot"] is not None else 0
+        rating_now = float(r["rating_now"]) if r.get("rating_now") is not None else None
+        rating_ceiling = float(r["rating_ceiling"]) if r.get("rating_ceiling") is not None else None
         prone_v = r["prone_overall"]
         greed_v = r["greed"]
         we_v = r["work_ethic"] or 0
@@ -229,7 +231,8 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
             f'<td class="left"><b>{r["first_name"]} {r["last_name"]}</b></td>'
             f'<td>{pos_name}</td>'
             f'<td>{int(r["age"]) if r["age"] else "?"}</td>'
-            f'<td>{oa_v}/{pot_v}</td>'
+            f'{_fmt_score(rating_now)}'
+            f'{_fmt_score(rating_ceiling)}'
             f'<td>{grade_badge(rating)}</td>'
             f'{extra_cells}'
             f'<td>{key_stat}</td>'
@@ -300,7 +303,7 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
   <div class="section-title">Results</div>
   <table>
   <tr>
-  <th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th><th>OA/POT</th>
+  <th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Now</th><th>Ceiling</th>
   <th>Rating</th>{extra_headers}<th>{key_header}</th><th>WAR</th><th>Injury</th><th>Greed</th><th>Flags</th>
   </tr>
   {table_rows}
