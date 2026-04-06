@@ -21,10 +21,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from config import (
+    BATTER_WEIGHT_BASERUNNING,
+    BATTER_WEIGHT_CLUBHOUSE,
+    BATTER_WEIGHT_CONTACT,
+    BATTER_WEIGHT_DEFENSE,
+    BATTER_WEIGHT_DEVELOPMENT,
+    BATTER_WEIGHT_DISCIPLINE,
+    BATTER_WEIGHT_DURABILITY,
+    BATTER_WEIGHT_OFFENSE,
+    BATTER_WEIGHT_POTENTIAL,
     CATCHER_MIN_CS_ATTEMPTS,
     CEILING_GAP_THRESHOLD,
     DEFENSE_BAT_FIRST_MULTIPLIER,
     DEFENSE_PREMIUM_MULTIPLIER,
+    DEVELOPMENT_EXPONENT,
+    DEVELOPMENT_MAX_AGE,
+    DEVELOPMENT_MIN_AGE,
     FIELDING_MIN_GAMES,
     INJURY_DURABLE_MAX,
     INJURY_FRAGILE_MAX,
@@ -39,6 +51,15 @@ from config import (
     OFFENSE_XWOBA_WEIGHT,
     OOTP_MAX_BLEND_WEIGHT,
     PA_REGRESSION_THRESHOLD,
+    PITCHER_WEIGHT_CLUBHOUSE,
+    PITCHER_WEIGHT_COMMAND,
+    PITCHER_WEIGHT_CONTACT_SUPPRESSION,
+    PITCHER_WEIGHT_DEVELOPMENT,
+    PITCHER_WEIGHT_DOMINANCE,
+    PITCHER_WEIGHT_DURABILITY,
+    PITCHER_WEIGHT_POTENTIAL,
+    PITCHER_WEIGHT_ROLE_VALUE,
+    PITCHER_WEIGHT_RUN_PREVENTION,
     REGRESSION_EXPONENT,
     RELIEVER_G_TARGET,
     STARTER_IP_TARGET,
@@ -138,6 +159,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
             "pr.rating_development, pr.rating_clubhouse, pr.rating_baserunning, "
             "pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling, "
             "pr.wrc_plus, pr.war, pr.prone_overall, "
+            "pr.rating_now, pr.rating_ceiling, "
             "p.bats, p.throws, "
             "p.prone_leg, p.prone_back, p.prone_arm, "
             "p.personality_work_ethic, p.personality_intelligence, p.personality_leader, "
@@ -155,6 +177,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
          r_durability, r_development, r_clubhouse, r_baserunning,
          flag_injury, flag_leader_val, flag_ceiling,
          wrc_plus_or_fip, war, prone_overall,
+         rating_now, rating_ceiling,
          bats, throws, prone_leg, prone_back, prone_arm,
          work_ethic, intelligence, leader, greed, loyalty, play_for_winner) = row
 
@@ -433,6 +456,8 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         player_type=player_type,
         is_pitcher=is_pitcher,
         rating_overall=rating_overall,
+        rating_now=float(rating_now) if rating_now is not None else 0.0,
+        rating_ceiling=float(rating_ceiling) if rating_ceiling is not None else 0.0,
         scores=scores,
         weights=weights,
         component_labels=component_labels,
@@ -502,6 +527,8 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     player_type = data["player_type"]
     is_pitcher = data["is_pitcher"]
     rating_overall = data["rating_overall"]
+    rating_now = data["rating_now"]
+    rating_ceiling = data["rating_ceiling"]
     scores = data["scores"]
     weights = data["weights"]
     component_labels = data["component_labels"]
@@ -678,8 +705,14 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     <div class="grade-badge">{lg(final_rating)}</div>
   </div>
   <div class="rating-bar-wrap">
-    <span class="rating-label">Overall Rating</span>
+    <span class="rating-label">Now</span>
+    <span class="rating-val">{rating_now:.1f}</span>
+    <span style="font-size:12px;color:#aaa;margin:0 8px">&bull;</span>
+    <span class="rating-label">Overall</span>
     <span class="rating-val">{final_rating:.1f}</span>
+    <span style="font-size:12px;color:#aaa;margin:0 8px">&bull;</span>
+    <span class="rating-label">Ceiling</span>
+    <span class="rating-val">{rating_ceiling:.1f}</span>
     <span class="oa-pot">&nbsp;&bull;&nbsp;#{rank} of {rank_total} {pos_name}</span>
   </div>
   <div class="import-ts">Generated: {generated_at} &bull; Last DB import: {last_import or "unknown"}</div>
@@ -887,30 +920,30 @@ POS_FIELD_COL = {
     POS_RF: "fielding_rating_pos9",
 }
 
-# Default weights for position players
+# Dimension weights — sourced from config.py so they can be tuned without
+# touching logic. See config.py for documentation on each weight.
 BATTER_WEIGHTS = {
-    "offense": 0.30,
-    "contact_quality": 0.15,
-    "discipline": 0.10,
-    "defense": 0.15,
-    "potential": 0.15,
-    "durability": 0.05,   # injury risk only (was 0.10)
-    "development": 0.03,  # work ethic + intelligence
-    "clubhouse": 0.02,    # leadership + greed(inv) + loyalty
-    "baserunning": 0.05,
+    "offense":         BATTER_WEIGHT_OFFENSE,
+    "contact_quality": BATTER_WEIGHT_CONTACT,
+    "discipline":      BATTER_WEIGHT_DISCIPLINE,
+    "defense":         BATTER_WEIGHT_DEFENSE,
+    "potential":       BATTER_WEIGHT_POTENTIAL,
+    "durability":      BATTER_WEIGHT_DURABILITY,
+    "development":     BATTER_WEIGHT_DEVELOPMENT,
+    "clubhouse":       BATTER_WEIGHT_CLUBHOUSE,
+    "baserunning":     BATTER_WEIGHT_BASERUNNING,
 }
 
-# Default weights for pitchers
 PITCHER_WEIGHTS = {
-    "run_prevention": 0.30,
-    "dominance": 0.15,
-    "contact_suppression": 0.15,
-    "command": 0.10,
-    "potential": 0.15,
-    "durability": 0.05,   # injury risk only (was 0.10)
-    "development": 0.03,  # work ethic + intelligence
-    "clubhouse": 0.02,    # leadership + greed(inv) + loyalty
-    "role_value": 0.05,
+    "run_prevention":      PITCHER_WEIGHT_RUN_PREVENTION,
+    "dominance":           PITCHER_WEIGHT_DOMINANCE,
+    "contact_suppression": PITCHER_WEIGHT_CONTACT_SUPPRESSION,
+    "command":             PITCHER_WEIGHT_COMMAND,
+    "potential":           PITCHER_WEIGHT_POTENTIAL,
+    "durability":          PITCHER_WEIGHT_DURABILITY,
+    "development":         PITCHER_WEIGHT_DEVELOPMENT,
+    "clubhouse":           PITCHER_WEIGHT_CLUBHOUSE,
+    "role_value":          PITCHER_WEIGHT_ROLE_VALUE,
 }
 
 
@@ -1332,35 +1365,50 @@ def score_role_value(row):
 # ---------------------------------------------------------------------------
 # Shared sub-scores
 # ---------------------------------------------------------------------------
-def score_potential(value_row, age, current_metric, prev_metric):
-    """Potential & trajectory score."""
-    # Ceiling gap
+def compute_ceiling_score(value_row):
+    """Raw ceiling score (0–100) based on OA/POT gap, independent of age.
+
+    Exposed separately so callers can store rating_ceiling without re-computing.
+    gap * 5 maps the 20-point max gap on OOTP's scale to a 0-100 score.
+    """
     oa = value_row.get("oa", 50) if value_row is not None else 50
     pot = value_row.get("pot", 50) if value_row is not None else 50
     if pd.isna(oa):
         oa = 50
     if pd.isna(pot):
         pot = 50
-    gap = pot - oa
-    score_ceiling = clamp(gap * 5)
+    return clamp((pot - oa) * 5)
 
-    # Career trend
-    if current_metric is not None and prev_metric is not None:
-        diff = current_metric - prev_metric
-        score_trend = clamp(50 + diff * 2)
-    else:
-        score_trend = 50.0
 
-    # Age-based blending
+def score_potential(value_row, age, _current_metric=None, _prev_metric=None):
+    """Potential score: ceiling gap discounted by age-decay credit.
+
+    Growth credit follows a configurable power curve from DEVELOPMENT_MIN_AGE
+    (full credit = 1.0) to DEVELOPMENT_MAX_AGE (zero credit). Ages below the
+    minimum are treated as the minimum; ages at or above the maximum return 0.
+    Curve shape is controlled by DEVELOPMENT_EXPONENT (same pattern as
+    REGRESSION_EXPONENT): 0.5=sqrt generous, 1.0=linear, 2.0=steep.
+
+    The trend (year-over-year metric change) was previously blended in here but
+    that signal belongs in score_development(). Keeping this dimension focused
+    on ceiling-vs-age keeps the two columns interpretable independently.
+    """
+    ceiling = compute_ceiling_score(value_row)
+
     if pd.isna(age):
-        age = 27
-    age = int(age)
-    if age < 26:
-        return score_ceiling * 0.7 + score_trend * 0.3
-    elif age > 32:
-        return score_ceiling * 0.3 + score_trend * 0.7
+        age = DEVELOPMENT_MAX_AGE
+    age = float(age)
+
+    age_clamped = max(DEVELOPMENT_MIN_AGE, min(DEVELOPMENT_MAX_AGE, age))
+    years_remaining = DEVELOPMENT_MAX_AGE - age_clamped
+    years_total = DEVELOPMENT_MAX_AGE - DEVELOPMENT_MIN_AGE
+
+    if years_total <= 0 or years_remaining <= 0:
+        growth_credit = 0.0
     else:
-        return score_ceiling * 0.5 + score_trend * 0.5
+        growth_credit = (years_remaining / years_total) ** DEVELOPMENT_EXPONENT
+
+    return ceiling * growth_credit
 
 
 def score_durability(player_row):
@@ -1541,6 +1589,27 @@ def compute_batter_ratings(engine):
         s_development = score_development(row)
         s_clubhouse = score_clubhouse(row)
 
+        # Ceiling score (raw, age-independent) stored as rating_ceiling
+        ceiling_score = compute_ceiling_score(row)
+
+        # rating_now: production dimensions only, potential excluded.
+        # Weights are renormalized so they still sum to 1.0.
+        now_total_weight = (
+            BATTER_WEIGHT_OFFENSE + BATTER_WEIGHT_CONTACT + BATTER_WEIGHT_DISCIPLINE +
+            BATTER_WEIGHT_DEFENSE + BATTER_WEIGHT_DURABILITY + BATTER_WEIGHT_DEVELOPMENT +
+            BATTER_WEIGHT_CLUBHOUSE + BATTER_WEIGHT_BASERUNNING
+        )
+        rating_now = clamp((
+            s_offense    * BATTER_WEIGHT_OFFENSE     +
+            s_contact    * BATTER_WEIGHT_CONTACT      +
+            s_discipline * BATTER_WEIGHT_DISCIPLINE   +
+            s_defense    * BATTER_WEIGHT_DEFENSE      +
+            s_durability * BATTER_WEIGHT_DURABILITY   +
+            s_development * BATTER_WEIGHT_DEVELOPMENT +
+            s_clubhouse  * BATTER_WEIGHT_CLUBHOUSE    +
+            s_baserunning * BATTER_WEIGHT_BASERUNNING
+        ) / now_total_weight)
+
         # Weighted composite
         overall = (
             s_offense * BATTER_WEIGHTS["offense"] +
@@ -1593,6 +1662,8 @@ def compute_batter_ratings(engine):
             oa=row.get("oa"),
             pot=row.get("pot"),
             rating_overall=round(overall, 1),
+            rating_now=round(rating_now, 1),
+            rating_ceiling=round(ceiling_score, 1),
             rating_offense=round(s_offense, 1),
             rating_contact_quality=round(s_contact, 1),
             rating_discipline=round(s_discipline, 1),
@@ -1696,6 +1767,28 @@ def compute_pitcher_ratings(engine):
         s_clubhouse = score_clubhouse(row)
         s_role = score_role_value(row)
 
+        # Ceiling score (raw, age-independent) stored as rating_ceiling
+        ceiling_score = compute_ceiling_score(row)
+
+        # rating_now: production dimensions only, potential excluded.
+        # Weights are renormalized so they still sum to 1.0.
+        now_total_weight = (
+            PITCHER_WEIGHT_RUN_PREVENTION + PITCHER_WEIGHT_DOMINANCE +
+            PITCHER_WEIGHT_CONTACT_SUPPRESSION + PITCHER_WEIGHT_COMMAND +
+            PITCHER_WEIGHT_DURABILITY + PITCHER_WEIGHT_DEVELOPMENT +
+            PITCHER_WEIGHT_CLUBHOUSE + PITCHER_WEIGHT_ROLE_VALUE
+        )
+        rating_now = clamp((
+            s_run_prev   * PITCHER_WEIGHT_RUN_PREVENTION      +
+            s_dominance  * PITCHER_WEIGHT_DOMINANCE           +
+            s_suppress   * PITCHER_WEIGHT_CONTACT_SUPPRESSION +
+            s_command    * PITCHER_WEIGHT_COMMAND             +
+            s_durability * PITCHER_WEIGHT_DURABILITY          +
+            s_development * PITCHER_WEIGHT_DEVELOPMENT        +
+            s_clubhouse  * PITCHER_WEIGHT_CLUBHOUSE           +
+            s_role       * PITCHER_WEIGHT_ROLE_VALUE
+        ) / now_total_weight)
+
         overall = (
             s_run_prev * PITCHER_WEIGHTS["run_prevention"] +
             s_dominance * PITCHER_WEIGHTS["dominance"] +
@@ -1737,6 +1830,8 @@ def compute_pitcher_ratings(engine):
             oa=row.get("oa"),
             pot=row.get("pot"),
             rating_overall=round(overall, 1),
+            rating_now=round(rating_now, 1),
+            rating_ceiling=round(ceiling_score, 1),
             rating_offense=round(s_run_prev, 1),  # reuse column, means "run prevention"
             rating_contact_quality=round(s_suppress, 1),  # means "contact suppression"
             rating_discipline=round(s_dominance, 1),  # means "dominance"

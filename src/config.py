@@ -150,6 +150,54 @@ GREED_HIGH_MAX = 160
                  # > 160 → "Very High" / "Demanding"
 
 # ---------------------------------------------------------------------------
+# Batter dimension weights  (must sum to 1.0)
+# ---------------------------------------------------------------------------
+BATTER_WEIGHT_OFFENSE     = 0.30
+BATTER_WEIGHT_CONTACT     = 0.15
+BATTER_WEIGHT_DISCIPLINE  = 0.10
+BATTER_WEIGHT_DEFENSE     = 0.15
+BATTER_WEIGHT_POTENTIAL   = 0.15
+BATTER_WEIGHT_DURABILITY  = 0.05   # injury risk only
+BATTER_WEIGHT_DEVELOPMENT = 0.03   # work ethic + intelligence
+BATTER_WEIGHT_CLUBHOUSE   = 0.02   # leadership + greed(inv) + loyalty
+BATTER_WEIGHT_BASERUNNING = 0.05
+
+# ---------------------------------------------------------------------------
+# Pitcher dimension weights  (must sum to 1.0)
+# ---------------------------------------------------------------------------
+PITCHER_WEIGHT_RUN_PREVENTION      = 0.30
+PITCHER_WEIGHT_DOMINANCE           = 0.15
+PITCHER_WEIGHT_CONTACT_SUPPRESSION = 0.15
+PITCHER_WEIGHT_COMMAND             = 0.10
+PITCHER_WEIGHT_POTENTIAL           = 0.15
+PITCHER_WEIGHT_DURABILITY          = 0.05   # injury risk only
+PITCHER_WEIGHT_DEVELOPMENT         = 0.03   # work ethic + intelligence
+PITCHER_WEIGHT_CLUBHOUSE           = 0.02   # leadership + greed(inv) + loyalty
+PITCHER_WEIGHT_ROLE_VALUE          = 0.05
+
+# ---------------------------------------------------------------------------
+# Development / age-decay curve
+# ---------------------------------------------------------------------------
+
+# Age at or below which a player gets full ceiling credit (floor).
+# Anyone younger than this is treated as if they are exactly this age —
+# we don't have enough evidence that very young players develop faster.
+DEVELOPMENT_MIN_AGE = 23
+
+# Age at or above which ceiling credit reaches zero (peak age).
+# Based on community observation that OOTP players stop progressing ~27;
+# treat as a configurable assumption, not a hard game mechanic.
+DEVELOPMENT_MAX_AGE = 27
+
+# Curve shape for the age-decay — same exponent pattern as REGRESSION_EXPONENT:
+#   0.50 = sqrt    — generous, a 26-year-old still gets ~50% credit
+#   0.75           — moderate
+#   1.0  = linear  — proportional, clean straight-line decay
+#   2.0            — steep, only the youngest get meaningful credit
+# Applied as: ((max_age - age) / (max_age - min_age)) ** DEVELOPMENT_EXPONENT
+DEVELOPMENT_EXPONENT = 0.75
+
+# ---------------------------------------------------------------------------
 # wOBA linear weights (FanGraphs-style, used across analytics, report, lineup)
 # Canonical source: analytics.py values at project inception.
 # ---------------------------------------------------------------------------

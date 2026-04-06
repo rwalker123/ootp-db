@@ -584,12 +584,14 @@ or comparing players.**
 `oa` (OOTP overall), `pot` (OOTP potential), `player_type` ("batter" or "pitcher")
 
 **Composite ratings (0–100 scale):**
-- `rating_overall` — primary composite score; use this to rank players
+- `rating_overall` — primary composite score; blends current production + age-weighted upside; use this to rank players by asset value
+- `rating_now` — current production only (potential excluded, remaining weights renormalized); use this to rank players by what they can do today
+- `rating_ceiling` — raw ceiling gap score (0–100), age-independent; `(pot - oa) * 5`; use this to find upside; compute `rating_ceiling - rating_now` for the biggest gap players
 - `rating_offense` — hitting value
 - `rating_contact_quality` — contact + exit velocity
 - `rating_discipline` — walk/strikeout approach
 - `rating_defense` — fielding at primary position
-- `rating_potential` — upside/development ceiling
+- `rating_potential` — age-discounted ceiling score (ceiling × growth_credit); shaped by DEVELOPMENT_EXPONENT/MIN_AGE/MAX_AGE in config.py
 - `rating_durability` — injury resistance
 - `rating_development` — recent trajectory trend
 - `rating_clubhouse` — personality/leadership

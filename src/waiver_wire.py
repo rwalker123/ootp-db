@@ -216,6 +216,7 @@ def _lookup_player(conn, first_name, last_name):
             pr.rating_contact_quality, pr.rating_discipline,
             pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
             pr.oa, pr.pot, pr.war, pr.wrc_plus,
+            pr.rating_now, pr.rating_ceiling,
             pr.prone_overall as pr_prone,
             pr.player_type, pr.team_abbr,
             pr.work_ethic, pr.intelligence, pr.greed, pr.loyalty,
@@ -257,7 +258,8 @@ def _get_incumbents(conn, my_team_id, comparison_positions, player_type, player_
     sql = f"""
         SELECT
             pr.player_id, pr.first_name, pr.last_name, pr.position, pr.age,
-            pr.oa, pr.pot, pr.rating_overall, pr.rating_offense, pr.rating_defense,
+            pr.oa, pr.pot, pr.rating_now, pr.rating_ceiling,
+            pr.rating_overall, pr.rating_offense, pr.rating_defense,
             pr.rating_durability, pr.rating_development, pr.war, pr.wrc_plus,
             pr.flag_injury_risk, pr.flag_leader, pr.player_type,
             prs.is_active, prs.is_on_dl, prs.is_on_dl60, prs.mlb_service_years,
@@ -393,8 +395,8 @@ def _build_candidate_header(p, adv):
     role_label = ROLE_MAP.get(int(p.get("role") or 0), "—")
     player_type = p.get("player_type", "batter")
 
-    oa = p.get("oa") or 0
-    pot = p.get("pot") or 0
+    rating_now = float(p.get("rating_now") or 0)
+    rating_ceiling = float(p.get("rating_ceiling") or 0)
     rating = float(p.get("rating_overall") or 0)
     grade = letter_grade(rating)
     team_disp = p.get("team_abbr") or "FA"
@@ -484,8 +486,8 @@ def _build_candidate_header(p, adv):
         {pos_label}{f" ({role_label})" if pos_label == "P" else ""} &bull;
         {team_disp_esc} &bull; Age {p.get("age", "?")} &bull;
         {bats}/{throws} &bull;
-        <span class="badge badge-oa">OA {oa}</span>&nbsp;
-        <span class="badge badge-pot">POT {pot}</span>
+        <span class="badge badge-oa">NOW {rating_now:.1f}</span>&nbsp;
+        <span class="badge badge-pot">CEIL {rating_ceiling:.1f}</span>
       </div>
       <div style="margin-top:8px">{status_html}</div>
       {flags_html}
@@ -902,7 +904,7 @@ def _build_incumbents_section(incumbents, candidate, comparison_positions, my_te
     header = """
 <tr>
   <th class="left">Player</th><th>Pos</th><th>Age</th>
-  <th>OA</th><th>Rating</th>
+  <th>Now</th><th>Ceiling</th><th>Rating</th>
   <th>WAR</th><th>wRC+/ERA</th>
   <th>Salary</th><th>Yrs Left</th><th>Service</th>
   <th>Options</th><th>Status</th>
@@ -924,7 +926,8 @@ def _build_incumbents_section(incumbents, candidate, comparison_positions, my_te
       <td class="left"><b>{candidate.get("first_name", "")} {candidate.get("last_name", "")} <span style="font-weight:normal;color:#856404">(Waiver Candidate)</span></b></td>
       <td>{cand_pos_label}</td>
       <td>{candidate.get("age", "?")}</td>
-      <td>{candidate.get("oa") or "?"}</td>
+      {_score_td(candidate.get("rating_now"))}
+      {_score_td(candidate.get("rating_ceiling"))}
       {_score_td(candidate.get("rating_overall"))}
       {_war_td(candidate.get("war"))}
       {cand_key_td}
@@ -972,7 +975,8 @@ def _build_incumbents_section(incumbents, candidate, comparison_positions, my_te
           <td class="left"><b>{inc.get("first_name", "")} {inc.get("last_name", "")}</b></td>
           <td>{pos_label}</td>
           <td>{inc.get("age", "?")}</td>
-          <td>{inc.get("oa") or "?"}</td>
+          {_score_td(inc.get("rating_now"))}
+          {_score_td(inc.get("rating_ceiling"))}
           {_score_td(inc.get("rating_overall"))}
           {_war_td(inc.get("war"))}
           {key_stat_td}
