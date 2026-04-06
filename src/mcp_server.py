@@ -405,7 +405,9 @@ def _format_trade_targets(data: dict, offer_label: str, mode: str) -> str:
 def get_save_info() -> str:
     """Get the current active OOTP save, your managed team, and last import timestamp."""
     saves = _load_saves()
-    active = saves["active"]
+    active = saves.get("active")
+    if not active:
+        return "No active save configured. Run `./import.sh <save-name>` to import a save first."
     info = saves["saves"].get(active, {})
     lines = [
         f"Active save: {active}",

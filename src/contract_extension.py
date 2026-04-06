@@ -521,6 +521,20 @@ def _compute_comp_scalars(comp_rows):
     return median_sal, comp_names
 
 
+def _lookup_player_id(conn, first_name, last_name):
+    """Lightweight lookup: return player_id for a non-retired, non-free-agent player, or None."""
+    row = conn.execute(
+        text(
+            "SELECT p.player_id FROM players p"
+            " JOIN player_ratings pr ON pr.player_id = p.player_id"
+            " WHERE p.first_name = :f AND p.last_name = :l"
+            " AND p.retired = 0 AND p.free_agent = 0 LIMIT 1"
+        ),
+        dict(f=first_name, l=last_name),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def query_contract_extension(save_name, first_name, last_name):
     """Query all data needed for a contract extension recommendation.
 
@@ -589,7 +603,7 @@ def query_contract_extension(save_name, first_name, last_name):
                 text("""
                 SELECT year, g, gs, ip, ha, bb, k, er, hra, war
                 FROM players_career_pitching_stats
-                WHERE player_id = :pid AND split_id IN (0, 1)
+                WHERE player_id = :pid AND split_id = 1
                   AND league_id = 203 AND level_id = 1
                 ORDER BY year DESC LIMIT 5
                 """),
@@ -600,7 +614,7 @@ def query_contract_extension(save_name, first_name, last_name):
                 text("""
                 SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war
                 FROM players_career_batting_stats
-                WHERE player_id = :pid AND split_id IN (0, 1)
+                WHERE player_id = :pid AND split_id = 1
                   AND league_id = 203 AND level_id = 1
                 ORDER BY year DESC LIMIT 5
                 """),
@@ -779,7 +793,25 @@ def generate_contract_extension_report(save_name, first_name, last_name):
     last_import = get_last_import_time()
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-    # Query all data (handles player lookup, returns None if not found)
+    # ── Lightweight player lookup for cache key ──────────────────────────
+    engine = get_engine(save_name)
+    with engine.connect() as conn:
+        player_id = _lookup_player_id(conn, first_name, last_name)
+    if player_id is None:
+        return None, None
+
+    # ── Cache check ──────────────────────────────────────────────────────
+    slug = f"{first_name.lower()}_{last_name.lower()}_{player_id}"
+    report_dir = get_reports_dir(save_name, "contract_extensions")
+    report_path = report_dir / f"{slug}.html"
+
+    if report_path.exists() and last_import:
+        import_dt = datetime.fromisoformat(last_import)
+        report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
+        if report_mtime >= import_dt:
+            return str(report_path), None
+
+    # ── Cache miss — run full queries ────────────────────────────────────
     data_dict = query_contract_extension(save_name, first_name, last_name)
     if data_dict is None:
         return None, None
@@ -793,17 +825,6 @@ def generate_contract_extension_report(save_name, first_name, last_name):
 
     player_type = d["player_type"]
     pos_str = POS_MAP.get(d["position"], str(d["position"]))
-
-    # ── Cache check ─────────────────────────────────────────────────────
-    slug = f"{first_name.lower()}_{last_name.lower()}_{player_id}"
-    report_dir = get_reports_dir(save_name, "contract_extensions")
-    report_path = report_dir / f"{slug}.html"
-
-    if report_path.exists() and last_import:
-        import_dt = datetime.fromisoformat(last_import)
-        report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
-        if report_mtime >= import_dt:
-            return str(report_path), None
 
     # ── Build data components ─────────────────────────────────────────────
     if player_type == "pitcher":

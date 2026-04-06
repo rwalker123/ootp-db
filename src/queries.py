@@ -47,7 +47,13 @@ def _load_saves():
 
 
 def _active_save():
-    return _load_saves()["active"]
+    saves = _load_saves()
+    active = saves.get("active")
+    if not active:
+        raise RuntimeError(
+            "No active save configured. Run `./import.sh <save-name>` to import a save first."
+        )
+    return active
 
 
 # ── Standalone query functions ───────────────────────────────────────────────

@@ -58,15 +58,12 @@ Check spelling, then try a partial last name match:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, os
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
-from shared_css import load_saves_registry
-load_dotenv(".env")
-save_name = load_saves_registry()["active"]
-db = save_name.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+from sqlalchemy import text
+from shared_css import get_engine, load_saves_registry
+save = load_saves_registry()["active"]
+engine = get_engine(save)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT first_name, last_name, team_id, position, age FROM players "

@@ -172,8 +172,15 @@ def _is_sqlite():
         return True  # SQLite is the default when no .env exists
     for line in env_path.read_text().splitlines():
         if line.startswith("DATABASE_URL="):
-            return line.split("=", 1)[1].strip().lower().startswith("sqlite")
-    return True  # no DATABASE_URL line → default to SQLite
+            val = line.split("=", 1)[1].strip().lower()
+            if val.startswith("postgresql"):
+                return False
+            return val.startswith("sqlite")
+        if line.startswith("POSTGRES_URL="):
+            val = line.split("=", 1)[1].strip()
+            if val:
+                return False  # legacy POSTGRES_URL present → PostgreSQL
+    return True  # no DATABASE_URL or POSTGRES_URL → default to SQLite
 
 
 def check_packages():
