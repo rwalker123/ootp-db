@@ -11,11 +11,10 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from shared_css import db_name_from_save
+from shared_css import db_name_from_save, get_saves_path, load_saves_registry
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SAVES_JSON = PROJECT_ROOT / "saves.json"
 
 # Known OOTP install root patterns, searched in order, per platform
 if platform.system() == "Windows":
@@ -139,22 +138,23 @@ def list_saves():
 
 
 def _load_registry():
-    if SAVES_JSON.exists():
-        return json.loads(SAVES_JSON.read_text())
-    return {"saves": {}}
+    return load_saves_registry()
 
 
 def _update_registry(save_name, db_name, csv_dir):
     registry = _load_registry()
-    registry.setdefault("saves", {})[save_name] = {
+    saves = registry.setdefault("saves", {})
+    existing = saves.get(save_name, {})
+    existing.update({
         "db_name": db_name,
         "last_import": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "csv_path": str(csv_dir),
-    }
+    })
+    saves[save_name] = existing
     # Set active only if not already set
     if not registry.get("active"):
         registry["active"] = save_name
-    SAVES_JSON.write_text(json.dumps(registry, indent=2))
+    get_saves_path().write_text(json.dumps(registry, indent=2))
 
 
 def resolve_save(arg, ootp_root=None):
@@ -221,14 +221,10 @@ def main():
         print("  python src/import.py list")
         sys.exit(1)
 
-    # Load .env
+    # Load .env (optional — defaults to SQLite if not present)
     env_path = PROJECT_ROOT / ".env"
-    if not env_path.exists():
-        print("Error: .env file not found.")
-        print("Copy .env.example to .env and fill in your paths:")
-        print(f"  cp {env_path.parent / '.env.example'} {env_path}")
-        sys.exit(1)
-    load_dotenv(env_path)
+    if env_path.exists():
+        load_dotenv(env_path)
 
     if sys.argv[1] == "list":
         list_saves()
@@ -241,36 +237,38 @@ def main():
     ootp_root = os.getenv("OOTP_CSV_PATH")  # optional, for backward compat
     csv_dir, save_name = resolve_save(arg, ootp_root=ootp_root)
 
-    # Connect to Postgres using save name as database name
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
+    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
+    if not os.getenv("DATABASE_URL") and os.getenv("POSTGRES_URL"):
+        print("Warning: POSTGRES_URL is deprecated, rename to DATABASE_URL in .env")
 
     db_name = db_name_from_save(save_name)
+    is_sqlite = database_url.lower().startswith("sqlite")
 
-    # Create database if it doesn't exist
-    try:
-        admin_engine = create_engine(
-            f"{postgres_host.rstrip('/')}/postgres",
-            isolation_level="AUTOCOMMIT",
-        )
-        with admin_engine.connect() as conn:
-            exists = conn.execute(
-                text("SELECT 1 FROM pg_database WHERE datname = :db"),
-                {"db": db_name},
-            ).fetchone()
-            if not exists:
-                conn.execute(text(f'CREATE DATABASE "{db_name}"'))
-                print(f"Created database: {db_name}")
-        admin_engine.dispose()
-    except Exception as e:
-        print(f"Error: Could not connect to PostgreSQL: {e}")
-        sys.exit(1)
-
-    # Connect to the target database
-    postgres_url = f"{postgres_host.rstrip('/')}/{db_name}"
-    engine = create_engine(postgres_url)
+    if is_sqlite:
+        db_dir = PROJECT_ROOT / "db"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        engine = create_engine(f"sqlite:///{db_dir / db_name}.db")
+        print(f"Using SQLite database: {db_dir / db_name}.db")
+    else:
+        # Create PostgreSQL database if it doesn't exist
+        try:
+            admin_engine = create_engine(
+                f"{database_url.rstrip('/')}/postgres",
+                isolation_level="AUTOCOMMIT",
+            )
+            with admin_engine.connect() as conn:
+                exists = conn.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :db"),
+                    {"db": db_name},
+                ).fetchone()
+                if not exists:
+                    conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+                    print(f"Created database: {db_name}")
+            admin_engine.dispose()
+        except Exception as e:
+            print(f"Error: Could not connect to PostgreSQL: {e}")
+            sys.exit(1)
+        engine = create_engine(f"{database_url.rstrip('/')}/{db_name}")
 
     csv_files = sorted(csv_dir.glob("*.csv"))
 
@@ -303,16 +301,24 @@ def main():
         for csv_file in csv_files:
             table_name = csv_file.stem.lower()
             try:
-                cols = [
-                    row[0]
-                    for row in conn.execute(
-                        text(
-                            "SELECT column_name FROM information_schema.columns "
-                            "WHERE table_name = :t ORDER BY ordinal_position"
-                        ),
-                        {"t": table_name},
-                    )
-                ]
+                if engine.dialect.name == "sqlite":
+                    cols = [
+                        row[1]
+                        for row in conn.execute(
+                            text(f"PRAGMA table_info('{table_name}')")
+                        )
+                    ]
+                else:
+                    cols = [
+                        row[0]
+                        for row in conn.execute(
+                            text(
+                                "SELECT column_name FROM information_schema.columns "
+                                "WHERE table_name = :t ORDER BY ordinal_position"
+                            ),
+                            {"t": table_name},
+                        )
+                    ]
             except Exception:
                 conn.rollback()
                 continue
@@ -328,18 +334,31 @@ def main():
 
             if pk_cols:
                 pk_col_list = ", ".join(f'"{c}"' for c in pk_cols)
-                conn.execute(text("SAVEPOINT pk_attempt"))
-                try:
-                    conn.execute(
-                        text(
-                            f'ALTER TABLE "{table_name}" '
-                            f"ADD PRIMARY KEY ({pk_col_list})"
+                if engine.dialect.name == "sqlite":
+                    idx_name = f"idx_{table_name}_pk"
+                    try:
+                        conn.execute(
+                            text(
+                                f'CREATE UNIQUE INDEX IF NOT EXISTS "{idx_name}" '
+                                f'ON "{table_name}" ({pk_col_list})'
+                            )
                         )
-                    )
-                    conn.execute(text("RELEASE SAVEPOINT pk_attempt"))
-                    print(f"  PK {table_name} ({', '.join(pk_cols)})")
-                except Exception:
-                    conn.execute(text("ROLLBACK TO SAVEPOINT pk_attempt"))
+                        print(f"  PK {table_name} ({', '.join(pk_cols)})")
+                    except Exception:
+                        pass
+                else:
+                    conn.execute(text("SAVEPOINT pk_attempt"))
+                    try:
+                        conn.execute(
+                            text(
+                                f'ALTER TABLE "{table_name}" '
+                                f"ADD PRIMARY KEY ({pk_col_list})"
+                            )
+                        )
+                        conn.execute(text("RELEASE SAVEPOINT pk_attempt"))
+                        print(f"  PK {table_name} ({', '.join(pk_cols)})")
+                    except Exception:
+                        conn.execute(text("ROLLBACK TO SAVEPOINT pk_attempt"))
 
             # Indexes on all other _id columns not part of the primary key
             pk_set = set(pk_cols) if pk_cols else set()

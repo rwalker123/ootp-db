@@ -86,10 +86,11 @@ From $ARGUMENTS, identify:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from lineup_optimizer import generate_lineup_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 path, data = generate_lineup_report(
     save_name,
     team_query=None,          # replace None with "<TEAM>" if team was specified
@@ -101,6 +102,7 @@ path, data = generate_lineup_report(
                               # pos: C=2,1B=3,2B=4,3B=5,SS=6,LF=7,CF=8,RF=9,DH=0; None if unspecified
     forced_bench=[],          # replace with list of name strings to sit
     fatigue_threshold=None,   # replace with int (0-100) to auto-bench fatigued players
+    raw_args="$ARGUMENTS",    # pass the original argument string verbatim for cache keying
 )
 if path is None:
     print("NOT_FOUND")
@@ -117,14 +119,14 @@ If `NOT_FOUND` — team not found or no batters in database. Try to find the tea
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json, os
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
-save_name = json.loads(open("saves.json").read())["active"]
-db = save_name.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+save_name = load_saves_registry()["active"]
+engine = get_engine(save_name)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT team_id, name, nickname, abbr FROM teams "

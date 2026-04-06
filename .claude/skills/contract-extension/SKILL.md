@@ -38,8 +38,9 @@ Parse the first two words of $ARGUMENTS as the player's first and last name.
 import sys, json
 sys.path.insert(0, "src")
 from contract_extension import generate_contract_extension_report
-save_name = json.loads(open("saves.json").read())["active"]
-path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>")
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
+path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>", raw_args="$ARGUMENTS")
 if path is None:
     print("PLAYER_NOT_FOUND")
 elif data is None:
@@ -55,15 +56,14 @@ If the output is `PLAYER_NOT_FOUND` — the player wasn't found in the active sa
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
-import os
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
-save_name = json.loads(open("saves.json").read())["active"]
-db = save_name.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
+save_name = load_saves_registry()["active"]
+engine = get_engine(save_name)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT first_name, last_name, team_id, position, age FROM players "

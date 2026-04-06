@@ -3,30 +3,21 @@
 
 import html
 import json
-import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import (
+    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+)
+from ootp_db_constants import MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -36,37 +27,34 @@ def get_last_import_time():
 
 
 def letter_grade(score):
-    if score >= 90:
+    if score >= GRADE_A_PLUS:
         return "A+"
-    if score >= 80:
+    if score >= GRADE_A:
         return "A"
-    if score >= 70:
+    if score >= GRADE_B_PLUS:
         return "B+"
-    if score >= 60:
+    if score >= GRADE_B:
         return "B"
-    if score >= 50:
+    if score >= GRADE_C_PLUS:
         return "C+"
-    if score >= 40:
+    if score >= GRADE_C:
         return "C"
-    if score >= 30:
+    if score >= GRADE_D:
         return "D"
     return "F"
-
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
 
 
 def injury_label(val):
     if val is None:
         return "Unknown"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -75,9 +63,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -258,41 +246,21 @@ def build_table_rows(results, show_team, highlight):
     return html
 
 
-def generate_trade_targets_report(
-    save_name,
-    offer_label,
-    offered_where,
-    target_where,
-    my_team_id,
-    mode="offering",
-    target_join="",
-    order_by="pr.rating_overall DESC",
-    limit=25,
-    highlight=None,
-):
-    """Generate a trade targets HTML report.
+def query_trade_targets(save_name, offer_label, offered_where, target_where, my_team_id,
+                        mode="offering", target_join="", order_by="pr.rating_overall DESC",
+                        limit=25, highlight=None):
+    """Query offered and target players for a trade evaluation.
 
-    offer_label:   Human-readable label, e.g. "Johnny Bench".
-    offered_where: SQL WHERE fragment for the player(s) on the offer side.
-    target_where:  SQL WHERE fragment for the return side.
-    my_team_id:    The managed team's team_id (read from saves.json).
-    mode:          "offering" — you're trading away your player, seeking returns.
-                   "acquiring" — you want someone else's player; show what you'd give up.
-    target_join:   Optional JOIN clause for advanced stats tables.
-    highlight:     List of (col_key, display_label) tuples for extra columns, or None.
-
-    Returns (path_str, dict(offered=list, targets=list)).
+    Returns dict(offered=list, targets=list).
     """
     engine = get_engine(save_name)
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     if mode == "acquiring":
-        offered_team_filter = f"p.team_id != {my_team_id} AND p.league_id = 203"
+        offered_team_filter = f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
         target_team_filter = f"p.team_id = {my_team_id}"
     else:
         offered_team_filter = f"p.team_id = {my_team_id}"
-        target_team_filter = f"p.team_id != {my_team_id} AND p.league_id = 203"
+        target_team_filter = f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
 
     offered_sql = (
         _SELECT
@@ -323,12 +291,57 @@ def generate_trade_targets_report(
         offered = [row_to_dict(r) for r in conn.execute(text(offered_sql)).fetchall()]
         targets = [row_to_dict(r) for r in conn.execute(text(target_sql)).fetchall()]
 
+    return dict(offered=offered, targets=targets)
+
+
+def generate_trade_targets_report(
+    save_name,
+    offer_label,
+    offered_where,
+    target_where,
+    my_team_id,
+    mode="offering",
+    target_join="",
+    order_by="pr.rating_overall DESC",
+    limit=25,
+    highlight=None,
+):
+    """Generate a trade targets HTML report.
+
+    offer_label:   Human-readable label, e.g. "Johnny Bench".
+    offered_where: SQL WHERE fragment for the player(s) on the offer side.
+    target_where:  SQL WHERE fragment for the return side.
+    my_team_id:    The managed team's team_id (read from saves.json).
+    mode:          "offering" — you're trading away your player, seeking returns.
+                   "acquiring" — you want someone else's player; show what you'd give up.
+    target_join:   Optional JOIN clause for advanced stats tables.
+    highlight:     List of (col_key, display_label) tuples for extra columns, or None.
+
+    Returns (path_str, dict(offered=list, targets=list)).
+    """
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    result = query_trade_targets(save_name, offer_label, offered_where, target_where,
+                                  my_team_id, mode, target_join, order_by, limit, highlight)
+    offered = result["offered"]
+    targets = result["targets"]
+
     if offered:
         p = offered[0]
-        base = re.sub(r"[^a-z0-9_]", "", f"{p['first_name']}_{p['last_name']}".lower())[:40]
-        slug = f"{base}_{p['player_id']}"
+        _trade_base = f"trade_{p['player_id']}"
     else:
-        slug = re.sub(r"[^a-z0-9_]", "", offer_label.lower().replace(" ", "_"))[:50]
+        _trade_base = "trade_offer"
+    args_key = {
+        "label": offer_label,
+        "mode": mode,
+        "offered_where": offered_where,
+        "target_where": target_where,
+        "target_join": target_join,
+        "order_by": order_by,
+        "limit": limit,
+        "highlight": highlight,
+    }
 
     offer_label_esc = html.escape(offer_label, quote=True)
     if mode == "acquiring":
@@ -403,6 +416,7 @@ def generate_trade_targets_report(
     _ootp_meta = (
         '<meta name="ootp-skill" content="trade-targets">'
         f'<meta name="ootp-args" content="{_args_esc}">'
+        f'<meta name="ootp-args-display" content="{_args_esc}">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
@@ -445,7 +459,7 @@ def generate_trade_targets_report(
 </div>
 </body></html>"""
 
-    report_path = get_reports_dir(save_name, "trade_targets") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "trade_targets") / report_filename(_trade_base, args_key)
     write_report_html(report_path, html_doc)
 
     return str(report_path), dict(offered=offered, targets=targets)

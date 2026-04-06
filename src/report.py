@@ -2,34 +2,26 @@
 """Generate HTML player reports from OOTP database."""
 
 import json
-import os
 import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    POS_MAP, BATS_MAP, THROWS_MAP,
+    SPLIT_CAREER_OVERALL, SPLIT_CAREER_VS_LHP, SPLIT_CAREER_VS_RHP,
+    SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
-WOBA_WEIGHTS = dict(bb=0.69, hbp=0.72, s=0.87, d=1.27, t=1.62, hr=2.10)
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -52,9 +44,9 @@ def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
     babip_denom = ab - k - hr + sf
     babip = (h - hr) / babip_denom if babip_denom > 0 else 0.0
 
-    woba_num = (WOBA_WEIGHTS["bb"] * bb + WOBA_WEIGHTS["hbp"] * hp +
-                WOBA_WEIGHTS["s"] * singles + WOBA_WEIGHTS["d"] * d +
-                WOBA_WEIGHTS["t"] * t + WOBA_WEIGHTS["hr"] * hr)
+    woba_num = (WOBA_BB * bb + WOBA_HBP * hp +
+                WOBA_1B * singles + WOBA_2B * d +
+                WOBA_3B * t + WOBA_HR * hr)
     woba_den = ab + bb + hp + sf
     woba = woba_num / woba_den if woba_den > 0 else 0.0
 
@@ -65,9 +57,9 @@ def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
         lg_singles = lg_h - lg_d - lg_t - lg_hr
         lg_obp = (lg_h + lg_bb + lg_hp) / (lg_ab + lg_bb + lg_hp + lg_sf)
         lg_slg = (lg_singles + 2 * lg_d + 3 * lg_t + 4 * lg_hr) / lg_ab
-        lg_woba_num = (WOBA_WEIGHTS["bb"] * lg_bb + WOBA_WEIGHTS["hbp"] * lg_hp +
-                       WOBA_WEIGHTS["s"] * lg_singles + WOBA_WEIGHTS["d"] * lg_d +
-                       WOBA_WEIGHTS["t"] * lg_t + WOBA_WEIGHTS["hr"] * lg_hr)
+        lg_woba_num = (WOBA_BB * lg_bb + WOBA_HBP * lg_hp +
+                       WOBA_1B * lg_singles + WOBA_2B * lg_d +
+                       WOBA_3B * lg_t + WOBA_HR * lg_hr)
         lg_woba = lg_woba_num / (lg_ab + lg_bb + lg_hp + lg_sf)
         lg_rpa = lg_r / lg_pa
         wrc_plus = ((woba - lg_woba) / 1.15 + lg_rpa) / lg_rpa * 100
@@ -204,8 +196,7 @@ def fetch_common_data(conn, player_id):
         "SELECT thbs.year, SUM(thbs.ab), SUM(thbs.h), SUM(thbs.d), SUM(thbs.t), "
         "SUM(thbs.hr), SUM(thbs.bb), SUM(thbs.hp), SUM(thbs.sf), SUM(thbs.pa), SUM(thbs.r) "
         "FROM team_history_batting_stats thbs "
-        "JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = 203 "
-        "WHERE thbs.level_id = 1 AND thbs.split_id IN (0, 1) "
+        f"JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = {MLB_LEAGUE_ID} "
         "GROUP BY thbs.year")).fetchall()
     for r in rows:
         lg[int(r[0])] = tuple(int(x) for x in r[1:])
@@ -214,12 +205,12 @@ def fetch_common_data(conn, player_id):
         "SELECT SUM(tbs.ab), SUM(tbs.h), SUM(tbs.d), SUM(tbs.t), SUM(tbs.hr), "
         "SUM(tbs.bb), SUM(tbs.hp), SUM(tbs.sf), SUM(tbs.pa), SUM(tbs.r) "
         "FROM team_batting_stats tbs "
-        "JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = 203 "
-        "WHERE tbs.level_id = 1 AND tbs.split_id = 0")).fetchone()
+        f"JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
+        f"WHERE tbs.level_id = {MLB_LEVEL_ID} AND tbs.split_id = {SPLIT_TEAM_BATTING_OVERALL}")).fetchone()
     if cur and cur[0]:
         # Use current year from league_history or pitching history
         yr_row = conn.execute(text(
-            "SELECT MAX(year) FROM team_history WHERE league_id = 203")).fetchone()
+            f"SELECT MAX(year) FROM team_history WHERE league_id = {MLB_LEAGUE_ID}")).fetchone()
         # Current season is one after the latest history year, or derive from career data
         cur_year_candidates = []
         if yr_row and yr_row[0]:
@@ -235,8 +226,7 @@ def fetch_common_data(conn, player_id):
         "SELECT thps.year, SUM(thps.ip), SUM(thps.hra), SUM(thps.bb), SUM(thps.hp), "
         "SUM(thps.k), SUM(thps.er) "
         "FROM team_history_pitching_stats thps "
-        "JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = 203 "
-        "WHERE thps.level_id = 1 AND thps.split_id IN (0, 1) "
+        f"JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = {MLB_LEAGUE_ID} "
         "GROUP BY thps.year")).fetchall()
     for r in rows:
         lg_pitch[int(r[0])] = tuple(float(x) for x in r[1:])
@@ -244,8 +234,8 @@ def fetch_common_data(conn, player_id):
     cur_p = conn.execute(text(
         "SELECT SUM(tps.ip), SUM(tps.hra), SUM(tps.bb), SUM(tps.hp), SUM(tps.k), SUM(tps.er) "
         "FROM team_pitching_stats tps "
-        "JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = 203 "
-        "WHERE tps.level_id = 1 AND tps.split_id IN (0, 1)")).fetchone()
+        f"JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
+        f"WHERE tps.level_id = {MLB_LEVEL_ID} AND tps.split_id = {SPLIT_TEAM_PITCHING_OVERALL}")).fetchone()
     if cur_p and cur_p[0]:
         lg_pitch[lg_cur_year] = tuple(float(x) for x in cur_p)
 
@@ -293,21 +283,21 @@ def fetch_batter_data(conn, player_id, common=None):
     data["career_overall"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHP
     data["career_lhp"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 2 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs RHP
     data["career_rhp"] = conn.execute(text(
         "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
         "FROM players_career_batting_stats "
-        "WHERE player_id = :pid AND split_id = 3 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Advanced stats history (graceful fallback if table doesn't exist yet)
@@ -331,7 +321,7 @@ def fetch_fielding_stats(conn, player_id, primary_position):
     """
     max_year_row = conn.execute(text(
         "SELECT MAX(year) FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND level_id = 1 AND league_id = 203"
+        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID}"
     ), dict(pid=player_id)).fetchone()
     max_year = int(max_year_row[0]) if max_year_row and max_year_row[0] else None
 
@@ -342,17 +332,20 @@ def fetch_fielding_stats(conn, player_id, primary_position):
         "SELECT position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
         "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
         "FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND year = :yr AND level_id = 1 AND league_id = 203 "
+        f"WHERE player_id = :pid AND year = :yr AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
         "GROUP BY position ORDER BY SUM(g) DESC"
     ), dict(pid=player_id, yr=max_year)).fetchall()
 
-    career = conn.execute(text(
-        "SELECT year, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
+    # Query all positions per year; pick the one with most games played (primary_position
+    # is their *current* position, which may differ from earlier in their career).
+    career_all = conn.execute(text(
+        "SELECT year, position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
         "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
         "FROM players_career_fielding_stats "
-        "WHERE player_id = :pid AND position = :pos AND level_id = 1 AND league_id = 203 "
-        "GROUP BY year ORDER BY year"
-    ), dict(pid=player_id, pos=primary_position)).fetchall()
+        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
+        "GROUP BY year, position ORDER BY year, SUM(g) DESC"
+    ), dict(pid=player_id)).fetchall()
+    career = career_all
 
     return dict(current=current, career=career)
 
@@ -388,7 +381,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id IN (0, 1) AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs LHB
@@ -396,7 +389,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 2 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Career vs RHB
@@ -404,7 +397,7 @@ def fetch_pitcher_data(conn, player_id, common=None):
         "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
         "qs, cg, sho, gb, fb, war, wpa "
         "FROM players_career_pitching_stats "
-        "WHERE player_id = :pid AND split_id = 3 AND league_id = 203 AND level_id = 1 "
+        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
         "ORDER BY year"), dict(pid=player_id)).fetchall()
 
     # Pitching advanced stats history (graceful fallback if table doesn't exist yet)
@@ -489,10 +482,10 @@ def generate_fielding_stats_html(fielding_data, primary_position):
             html += '</tr>'
         html += '</table>'
 
-    # Career by year at primary position
+    # Career by year — primary position per year (most games played)
     if career:
-        html += f'<h3>Career Fielding — {POS_MAP.get(primary_position, "?")} (MLB)</h3><table><tr>'
-        car_hdrs = ['Year', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
+        html += '<h3>Career Fielding (MLB)</h3><table><tr>'
+        car_hdrs = ['Year', 'Pos', 'G', 'GS', 'Inn', 'TC', 'PO', 'A', 'E', 'FPct', 'DP', 'ZR']
         if is_catcher:
             car_hdrs += ['PB', 'SBA', 'CS', 'CS%', 'Framing', 'Arm']
         for h in car_hdrs:
@@ -500,10 +493,11 @@ def generate_fielding_stats_html(fielding_data, primary_position):
         html += '</tr>'
         max_year = max(r[0] for r in career)
         for row in career:
-            yr, g, gs, ipf, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
+            yr, pos_yr, g, gs, ipf, tc, po, a, e, dp, pb, sba, rto, framing, arm, zr = row
             inn = f"{float(ipf):.1f}" if ipf else "—"
             style = ' style="font-weight:bold;background:#e8f0fe"' if yr == max_year else ''
             html += (f'<tr{style}><td>{yr}</td>'
+                     f'<td>{POS_MAP.get(pos_yr, str(pos_yr))}</td>'
                      f'<td>{g}</td><td>{gs}</td><td>{inn}</td>'
                      f'<td>{tc}</td><td>{po}</td><td>{a}</td><td>{e}</td>'
                      f'<td>{_fpct_html(tc, e)}</td><td>{dp}</td>'
@@ -545,8 +539,7 @@ def generate_batter_html(data, generated_at, last_import):
 
     stale = ""
     if last_import and generated_at:
-        stale_banner = ('<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
-                        'border-radius:4px;margin:8px 0;font-size:13px">'
+        stale_banner = ('<div class="stale-banner">'
                         'This report may be outdated &mdash; database was updated after this report was generated. '
                         'Regenerate with <code>/player-stats</code>.</div>')
         # We'll inject JS to compare timestamps
@@ -670,12 +663,14 @@ def generate_batter_section_html(data):
         for c in cq_cols:
             html += f'<th>{c}</th>'
         html += '</tr><tr>'
+        def _pct_or_dash(v):
+            return fmt_pct(v * 100) if v is not None else '—'
         cq_vals = [
             fmt_int(adv['batted_balls']), fmt_rate(adv['avg_ev'], 1), fmt_rate(adv['max_ev'], 1),
             fmt_rate(adv.get('avg_la', 0), 1),
-            fmt_pct(adv['hard_hit_pct'] * 100), fmt_pct(adv['barrel_pct'] * 100),
-            fmt_pct(adv['sweet_spot_pct'] * 100),
-            fmt_pct(adv['gb_pct'] * 100), fmt_pct(adv['ld_pct'] * 100), fmt_pct(adv['fb_pct'] * 100),
+            _pct_or_dash(adv['hard_hit_pct']), _pct_or_dash(adv['barrel_pct']),
+            _pct_or_dash(adv['sweet_spot_pct']),
+            _pct_or_dash(adv['gb_pct']), _pct_or_dash(adv['ld_pct']), _pct_or_dash(adv['fb_pct']),
             fmt_rate(adv['xba']), fmt_rate(adv['xslg']), fmt_rate(adv['xwoba']), fmt_rate(adv['xbacon']),
         ]
         for v in cq_vals:
@@ -694,13 +689,13 @@ def generate_batter_section_html(data):
                 fmt_int(adv.get(f'pa{sfx}')),
                 fmt_rate(adv.get(f'ba{sfx}')), fmt_rate(adv.get(f'obp{sfx}')),
                 fmt_rate(adv.get(f'slg{sfx}')), fmt_rate(adv.get(f'iso{sfx}')),
-                fmt_pct(adv.get(f'k_pct{sfx}', 0) * 100),
-                fmt_pct(adv.get(f'bb_pct{sfx}', 0) * 100),
+                _pct_or_dash(adv.get(f'k_pct{sfx}')),
+                _pct_or_dash(adv.get(f'bb_pct{sfx}')),
                 fmt_rate(adv.get(f'woba{sfx}')),
                 fmt_int(adv.get(f'wrc_plus{sfx}')),
                 fmt_rate(adv.get(f'avg_ev{sfx}'), 1),
-                fmt_pct(adv.get(f'hard_hit_pct{sfx}', 0) * 100),
-                fmt_pct(adv.get(f'barrel_pct{sfx}', 0) * 100),
+                _pct_or_dash(adv.get(f'hard_hit_pct{sfx}')),
+                _pct_or_dash(adv.get(f'barrel_pct{sfx}')),
                 fmt_rate(adv.get(f'xba{sfx}')), fmt_rate(adv.get(f'xslg{sfx}')),
                 fmt_rate(adv.get(f'xwoba{sfx}')),
             ]
@@ -762,6 +757,13 @@ def generate_batter_section_html(data):
                  f'<td>{float(war):.1f}</td><td>{float(wpa):.1f}</td></tr>')
     html += '</table>'
 
+    # Fallback: split rows sometimes have team_id=0; use overall row's team for that year
+    overall_team_by_year = {}
+    for row in data.get("career_overall", []):
+        yr_o, tid_o = int(row[0]), row[1]
+        if tid_o:
+            overall_team_by_year[yr_o] = tid_o
+
     def split_table(title, rows):
         h = f'<h3>{title}</h3><table><tr>'
         for c in ['Year', 'Tm', 'G', 'PA', 'AB', 'R', 'H', '2B', '3B', 'HR', 'RBI', 'BB', 'K', 'SB',
@@ -773,7 +775,8 @@ def generate_batter_section_html(data):
             lg = lg_avgs.get(int(yr))
             rates = calc_rates(int(ab), int(h_val), int(d), int(t), int(hr), int(bb), int(k),
                                int(hp), int(sf), int(pa), lg)
-            tm = team_abbrs.get(tid, "?")
+            effective_tid = tid if tid else overall_team_by_year.get(int(yr), 0)
+            tm = team_abbrs.get(effective_tid, "?")
             h += (f'<tr><td>{yr}</td><td>{tm}</td><td>{g}</td><td>{pa}</td><td>{ab}</td>'
                   f'<td>{r}</td><td>{h_val}</td><td>{d}</td><td>{t}</td><td>{hr}</td>'
                   f'<td>{rbi}</td><td>{bb}</td><td>{k}</td><td>{sb}</td>'
@@ -890,8 +893,8 @@ def generate_pitcher_section_html(data):
         cq_vals = [
             fmt_int(padv.get('bb_against')),
             fmt_rate(padv.get('avg_ev_against'), 1),
-            fmt_pct(padv.get('hard_hit_pct_against', 0) * 100),
-            fmt_pct(padv.get('barrel_pct_against', 0) * 100),
+            fmt_pct((padv.get('hard_hit_pct_against') or 0) * 100),
+            fmt_pct((padv.get('barrel_pct_against') or 0) * 100),
             fmt_rate(padv.get('xba_against')),
             fmt_rate(padv.get('xwoba_against')),
         ]
@@ -910,9 +913,9 @@ def generate_pitcher_section_html(data):
                 fmt_int(padv.get(f'bf{sfx}')),
                 fmt_rate(padv.get(f'era{sfx}'), 2),
                 fmt_rate(padv.get(f'fip{sfx}'), 2),
-                fmt_pct(padv.get(f'k_pct{sfx}', 0) * 100),
-                fmt_pct(padv.get(f'bb_pct{sfx}', 0) * 100),
-                fmt_pct(padv.get(f'k_bb_pct{sfx}', 0) * 100),
+                fmt_pct((padv.get(f'k_pct{sfx}') or 0) * 100),
+                fmt_pct((padv.get(f'bb_pct{sfx}') or 0) * 100),
+                fmt_pct((padv.get(f'k_bb_pct{sfx}') or 0) * 100),
                 fmt_rate(padv.get(f'whip{sfx}'), 2),
                 fmt_rate(padv.get(f'babip{sfx}')),
             ]
@@ -985,6 +988,12 @@ def generate_pitcher_section_html(data):
         html += '</table>'
 
         # Career pitching splits
+        overall_team_by_year_p = {}
+        for row in career_p:
+            yr_o, tid_o = int(row[0]), row[1]
+            if tid_o:
+                overall_team_by_year_p[yr_o] = tid_o
+
         def pitch_split_table(title, rows):
             h = f'<h3>{title}</h3><table><tr>'
             for c in ['Year', 'Tm', 'G', 'IP', 'H', 'HR', 'BB', 'K',
@@ -997,7 +1006,8 @@ def generate_pitcher_section_html(data):
                 lg_p = lg_pitch.get(int(yr))
                 rates = calc_pitching_rates(float(ip), int(ha), int(hra), int(bb), int(k),
                                             int(er), int(bf), int(hp), int(gb), int(fb), lg_p)
-                tm = team_abbrs.get(tid, "?")
+                effective_tid = tid if tid else overall_team_by_year_p.get(int(yr), 0)
+                tm = team_abbrs.get(effective_tid, "?")
                 h += (f'<tr><td>{yr}</td><td>{tm}</td><td>{g}</td>'
                       f'<td>{float(ip):.1f}</td><td>{ha}</td><td>{hra}</td>'
                       f'<td>{bb}</td><td>{k}</td>'
@@ -1022,7 +1032,7 @@ def generate_pitcher_section_html(data):
 
 
 
-def find_existing_report(save_name, first_name, last_name):
+def find_existing_report(save_name, first_name, last_name, raw_args=""):
     """Check if a fresh report already exists for this player.
 
     Returns the report path if it exists and was generated after the last import,
@@ -1038,8 +1048,7 @@ def find_existing_report(save_name, first_name, last_name):
             return None
         player_id = row[0]
 
-    slug = f"{first_name}_{last_name}_{player_id}".lower()
-    report_path = PROJECT_ROOT / "reports" / save_name / "players" / f"{slug}.html"
+    report_path = PROJECT_ROOT / "reports" / save_name / "players" / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
 
     if not report_path.exists():
         return None
@@ -1058,13 +1067,13 @@ def find_existing_report(save_name, first_name, last_name):
     return None
 
 
-def generate_player_report(save_name, first_name, last_name):
+def generate_player_report(save_name, first_name, last_name, raw_args=""):
     """Main entry: generate a report for one player.
 
     Detects two-way players by checking for both batting and pitching career data.
     Returns (path, data_dict) where data_dict is None on a cache hit.
     """
-    existing = find_existing_report(save_name, first_name, last_name)
+    existing = find_existing_report(save_name, first_name, last_name, raw_args)
     if existing:
         return existing, None
 
@@ -1078,11 +1087,11 @@ def generate_player_report(save_name, first_name, last_name):
             "SELECT p.player_id, p.position FROM players p "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(pa) AS total_pa FROM players_career_batting_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
+            f"  WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} GROUP BY player_id"
             ") bs ON bs.player_id = p.player_id "
             "LEFT JOIN ("
             "  SELECT player_id, SUM(ip) AS total_ip FROM players_career_pitching_stats "
-            "  WHERE league_id = 203 AND level_id = 1 AND split_id IN (0, 1) GROUP BY player_id"
+            f"  WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} GROUP BY player_id"
             ") ps ON ps.player_id = p.player_id "
             "WHERE p.first_name = :first AND p.last_name = :last "
             "ORDER BY COALESCE(bs.total_pa, 0) + COALESCE(ps.total_ip, 0) DESC"),
@@ -1103,12 +1112,12 @@ def generate_player_report(save_name, first_name, last_name):
         # otherwise incidental plate appearances pollute the report with empty batting tables.
         has_pitching = conn.execute(text(
             "SELECT 1 FROM players_career_pitching_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1) LIMIT 1"),
+            f"WHERE player_id = :pid AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL} LIMIT 1"),
             dict(pid=player_id)).fetchone() is not None
 
         batting_pa_row = conn.execute(text(
             "SELECT SUM(pa) FROM players_career_batting_stats "
-            "WHERE player_id = :pid AND league_id = 203 AND level_id = 1 AND split_id IN (0, 1)"),
+            f"WHERE player_id = :pid AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_CAREER_OVERALL}"),
             dict(pid=player_id)).fetchone()
         career_pa = int(batting_pa_row[0] or 0)
         pa_threshold = 100 if position == 1 else 1
@@ -1147,14 +1156,14 @@ def generate_player_report(save_name, first_name, last_name):
     _ootp_meta = (
         '<meta name="ootp-skill" content="player-stats">'
         f'<meta name="ootp-args" content="{first_name} {last_name}">'
+        '<meta name="ootp-args-display" content="">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_kwargs_esc}">'
     )
     html = html.replace('</title>', '</title>\n' + _ootp_meta, 1)
 
     # Write report
-    slug = f"{first_name}_{last_name}_{player_id}".lower()
-    report_path = get_reports_dir(save_name, "players") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "players") / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
     write_report_html(report_path, html)
 
     return report_path, data
@@ -1173,8 +1182,7 @@ def generate_pitcher_only_html(data, generated_at, last_import):
 
     stale = ""
     if last_import and generated_at:
-        stale_banner = ('<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
-                        'border-radius:4px;margin:8px 0;font-size:13px">'
+        stale_banner = ('<div class="stale-banner">'
                         'This report may be outdated &mdash; database was updated after this report was generated. '
                         'Regenerate with <code>/player-stats</code>.</div>')
         stale = f"""<div id="stale-banner" style="display:none">{stale_banner}</div>

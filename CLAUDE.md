@@ -9,22 +9,32 @@ When answering questions about OOTP data, always use `.venv/bin/python3` with sq
 and a heredoc to avoid shell quoting issues:
 ```bash
 .venv/bin/python3 << 'PYEOF'
-from sqlalchemy import create_engine, text
-engine = create_engine("postgresql://postgres@localhost:5432/<active_db_name>")
+from sqlalchemy import text
+from shared_css import get_engine, load_saves_registry
+import sys
+sys.path.insert(0, "src")
+save = load_saves_registry()["active"]
+engine = get_engine(save)
 with engine.connect() as conn:
     result = conn.execute(text("SELECT ...")).fetchall()
     for row in result:
         print(row)
 PYEOF
 ```
+- **Never** hardcode a database URL — use `get_engine(save_name)` from `src/shared_css.py`,
+  which reads `DATABASE_URL` from `.env` and routes to SQLite or PostgreSQL automatically.
+- The active DB engine is configured via `DATABASE_URL` in `.env`:
+  - `DATABASE_URL=sqlite` → SQLite files under `db/<save_name>.db`
+  - `DATABASE_URL=postgresql://...` → PostgreSQL
 - **Never** use `psql`, `source .venv/bin/activate`, or other approaches
 - **Always** use `.venv/bin/python3` directly (not `python3` or `source ... && python3`)
 - **Always** use heredoc (`<< 'PYEOF'`) syntax, never `-c` with inline strings
 - **Never** use Python dicts (`{"key": val}`) or f-strings with braces in heredocs — 
   the shell flags curly braces as suspicious. Use `dict(key=val)` instead of `{"key": val}`.
-- The active save and database name are tracked in `saves.json` at the project root.
-  Read it to get the current active DB: `json.loads(open("saves.json").read())["active"]`
-  gives the save name; the DB name is `save_name.lower().replace("-", "_")`.
+- The active save and database name are tracked in `saves.postgresql.json` or `saves.sqlite.json`
+  at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
+  or use `load_saves_registry()` from `src/shared_css.py`.
+  Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_")`.
 - The MLB league_id is **203** — always filter by `league_id = 203` unless the user 
   specifically asks about minor leagues. Other league_ids are minor league levels.
 - Current-season data is in the main tables (e.g. `team_record`, `team_batting_stats`).
@@ -92,7 +102,9 @@ All dependencies go in `requirements.txt`:
 All configuration is via a `.env` file in the project root. A `.env.example` should be 
 created as a template. Never commit `.env`.
 ```
-POSTGRES_URL=postgresql://localhost
+# Use 'sqlite' for local SQLite files (db/<save>.db), or a full PostgreSQL URL
+DATABASE_URL=sqlite
+# DATABASE_URL=postgresql://localhost
 
 # Optional: only needed if auto-discovery fails (see import.py Behavior below)
 # OOTP_CSV_PATH=/Users/<username>/Library/Containers/com.ootpdevelopments.ootp27macqlm/Data/Application Support/Out of the Park Developments/OOTP Baseball 27
@@ -123,8 +135,8 @@ ootp-db/
 - After a successful import, update `saves.json` with the save's db name, last import time,
   and csv path. Sets `active` to this save if no active save is set yet.
 - Derive database name from save name (lowercase, hyphens → underscores)
-- Create the database if it doesn't already exist (connects to `postgres` db with AUTOCOMMIT)
-- Connect to Postgres via POSTGRES_URL/<db_name>
+- Create the database if it doesn't already exist (SQLite: creates file; PostgreSQL: connects to `postgres` db with AUTOCOMMIT)
+- Connect via DATABASE_URL/<db_name> (or POSTGRES_URL for backward compat)
 - For each `.csv` file in the dump directory:
   - Derive table name from filename (strip `.csv` extension, lowercase)
   - Read into a pandas DataFrame
@@ -361,13 +373,12 @@ view but may differ by 5 points on individual ratings.
 #### Enum Values
 - `split_id` **in player career tables** (`players_career_batting_stats`, `players_career_pitching_stats`,
   `players_career_fielding_stats`):
-  - **0 = simulated seasons** (years the sim generated, e.g. 2026+)
-  - **1 = real historical seasons** (pre-sim MLB history, e.g. ≤2025)
+  - **1 = overall regular season** — used for ALL seasons, both real history (pre-sim) and
+    simulated seasons. `split_id=0` does not exist in these tables. `split_id=1` alone gives
+    complete career totals. (Earlier docs incorrectly stated 0=sim, 1=real — verified wrong.)
   - 2 = vs LHP (batting) / vs LHB (pitching), 3 = vs RHP / vs RHB, 21 = postseason
-  - **CRITICAL — always use `split_id IN (0, 1)` for overall stats.** Using only `split_id = 1`
-    silently drops every simulated season. This bug is easy to introduce and hard to notice.
     ```sql
-    AND split_id IN (0, 1)   -- overall (real history + sim seasons)
+    AND split_id = 1         -- overall (all seasons: real history + sim)
     AND split_id = 2         -- vs LHP/LHB splits only
     AND split_id = 3         -- vs RHP/RHB splits only
     ```

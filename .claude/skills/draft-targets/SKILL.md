@@ -157,10 +157,11 @@ Default limit: 25 results.
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from draft_targets import generate_draft_targets_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"
@@ -176,10 +177,11 @@ PYEOF
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from ifa_targets import generate_ifa_targets_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"

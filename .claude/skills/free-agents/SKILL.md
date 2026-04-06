@@ -32,17 +32,21 @@ Search for free agents matching **"$ARGUMENTS"**.
 
 ### Step 1: Parse Criteria
 
+**Default player_type rule:** Unless the query explicitly mentions pitchers, SP, RP, closer,
+or reliever, always add `pr.player_type='batter'` to the filters. A generic batting search
+("best bat", "power hitter", "contact SS") must never return pitchers.
+
 Translate the natural language query into SQL filters using this mapping:
 
 | User says | SQL filter |
 |-----------|-----------|
-| SP / starter / starting pitcher | `pr.player_type='pitcher'` + prefer starters (gs > g/2 in pitcher_advanced_stats) |
-| RP / reliever / closer | `pr.player_type='pitcher'` + prefer relievers |
+| SP / starter / starting pitcher | `pr.player_type='pitcher'` (overrides batter default) + prefer starters (gs > g/2 in pitcher_advanced_stats) |
+| RP / reliever / closer | `pr.player_type='pitcher'` (overrides batter default) + prefer relievers |
 | C, 1B, 2B, 3B, SS, LF, CF, RF | `pr.position=2/3/4/5/6/7/8/9` |
 | OF / outfielder | `pr.position IN (7,8,9)` |
 | IF / infielder | `pr.position IN (3,4,5,6)` |
 | batter / hitter / position player | `pr.player_type='batter'` |
-| pitcher | `pr.player_type='pitcher'` |
+| pitcher | `pr.player_type='pitcher'` (overrides batter default) |
 | lefty bat / left-handed hitter | `p.bats=2` |
 | righty bat | `p.bats=1` |
 | switch hitter | `p.bats=3` |
@@ -94,14 +98,15 @@ Using the WHERE clause, JOIN clause, order_by, and highlight from Step 1:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from free_agents import generate_free_agents_report
+from shared_css import load_saves_registry
 where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 join = "<AGENT_FILLS_IN_JOIN_CLAUSE_IF_NEEDED>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 highlight = <AGENT_FILLS_IN_HIGHLIGHT_OR_NONE>
-save_name = json.loads(open("saves.json").read())["active"]
+save_name = load_saves_registry()["active"]
 path, rows = generate_free_agents_report(save_name, criteria, where, join,
     highlight=highlight)
 print(f"GENERATED:{path}")

@@ -2,21 +2,25 @@
 """Contract extension advisor report generator for OOTP Baseball."""
 
 import html as html_mod
-import json
-import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import (
+    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    TRAIT_POOR_MAX, TRAIT_BELOW_AVG_MAX, TRAIT_AVERAGE_MAX, TRAIT_GOOD_MAX,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    POS_MAP, BATS_MAP, THROWS_MAP,
+    SPLIT_CAREER_OVERALL, SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+)
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
 
 _PLAYER_KEYS = [
     "player_id", "first_name", "last_name", "position",
@@ -38,17 +42,6 @@ _PLAYER_KEYS = [
 ]
 
 
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
-
-
 def get_last_import_time():
     if LAST_IMPORT_PATH.exists():
         return LAST_IMPORT_PATH.read_text().strip()
@@ -56,19 +49,19 @@ def get_last_import_time():
 
 
 def letter_grade(score):
-    if score >= 90:
+    if score >= GRADE_A_PLUS:
         return "A+"
-    if score >= 80:
+    if score >= GRADE_A:
         return "A"
-    if score >= 70:
+    if score >= GRADE_B_PLUS:
         return "B+"
-    if score >= 60:
+    if score >= GRADE_B:
         return "B"
-    if score >= 50:
+    if score >= GRADE_C_PLUS:
         return "C+"
-    if score >= 40:
+    if score >= GRADE_C:
         return "C"
-    if score >= 30:
+    if score >= GRADE_D:
         return "D"
     return "F"
 
@@ -104,13 +97,13 @@ def injury_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -119,9 +112,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -130,13 +123,13 @@ def trait_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= TRAIT_POOR_MAX:
         return "Very Low"
-    if v <= 75:
+    if v <= TRAIT_BELOW_AVG_MAX:
         return "Low"
-    if v <= 125:
+    if v <= TRAIT_AVERAGE_MAX:
         return "Average"
-    if v <= 175:
+    if v <= TRAIT_GOOD_MAX:
         return "High"
     return "Elite"
 
@@ -147,15 +140,15 @@ def trait_color(val, invert=False):
         return "#888"
     v = int(val)
     if invert:
-        if v <= 75:
+        if v <= INJURY_DURABLE_MAX:
             return "#1a7a1a"
-        if v <= 125:
+        if v <= INJURY_NORMAL_MAX:
             return "#cc7700"
         return "#cc2222"
     else:
-        if v >= 150:
+        if v >= TRAIT_GOOD_MAX:
             return "#1a7a1a"
-        if v >= 75:
+        if v >= TRAIT_BELOW_AVG_MAX:
             return "#cc7700"
         return "#cc2222"
 
@@ -473,20 +466,95 @@ def _adv_data_dict(most_recent, player_type):
     )
 
 
-def generate_contract_extension_report(save_name, first_name, last_name):
-    """Generate a contract extension advisor HTML report.
+def _compute_war_vals_batter(war_rows):
+    """Extract war_vals list from batter WAR rows without generating HTML."""
+    war_vals = []
+    for r in war_rows:
+        year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war = r
+        war_f = float(war) if war is not None else None
+        if war_f is not None:
+            war_vals.append((int(year), war_f))
+    return war_vals
 
-    Returns (path_str, data_dict) on generation, or (path_str, None) on cache hit.
-    Returns (None, None) if the player is not found.
+
+def _compute_war_vals_pitcher(war_rows):
+    """Extract war_vals list from pitcher WAR rows without generating HTML."""
+    war_vals = []
+    for r in war_rows:
+        year, g, gs, ip, ha, bb, k, er, hra, war = r
+        war_f = float(war) if war is not None else None
+        if war_f is not None:
+            war_vals.append((int(year), war_f))
+    return war_vals
+
+
+def _compute_adv_most_recent_batter(rows):
+    """Return most-recent batter contact quality dict without generating HTML."""
+    if not rows:
+        return None
+    year, batted_balls, avg_ev, hard_hit_pct, barrel_pct, sweet_spot_pct, xba, xslg, xwoba, wrc_plus, war = rows[0]
+    return dict(avg_ev=avg_ev, hard_hit_pct=hard_hit_pct, barrel_pct=barrel_pct, xwoba=xwoba)
+
+
+def _compute_adv_most_recent_pitcher(rows):
+    """Return most-recent pitcher contact quality dict without generating HTML."""
+    if not rows:
+        return None
+    year, avg_ev_against, hard_hit_pct_against, barrel_pct_against, xba_against, xwoba_against, fip, xfip, k_pct, bb_pct, war = rows[0]
+    return dict(
+        avg_ev_against=avg_ev_against,
+        hard_hit_pct_against=hard_hit_pct_against,
+        barrel_pct_against=barrel_pct_against,
+        xwoba_against=xwoba_against,
+    )
+
+
+def _compute_comp_scalars(comp_rows):
+    """Return (median_comp_salary, comp_names) from comp rows without generating HTML."""
+    salaries = []
+    comp_parts = []
+    for r in comp_rows[:5]:
+        comp_d = dict(
+            years=r[7], current_year=r[8],
+            salary0=r[9], salary1=r[10], salary2=r[11], salary3=r[12], salary4=r[13],
+            salary5=r[14], salary6=r[15], salary7=r[16], salary8=r[17], salary9=r[18],
+        )
+        cur_sal = get_current_salary(comp_d)
+        sal_str = fmt_salary(cur_sal)
+        comp_parts.append(f"{r[0]} {r[1]} (OA:{int(r[3] or 0)}, {sal_str})")
+        if cur_sal and cur_sal > 0:
+            salaries.append(int(cur_sal))
+    median_sal = sorted(salaries)[len(salaries) // 2] if salaries else None
+    comp_names = "; ".join(comp_parts)
+    return median_sal, comp_names
+
+
+def _lookup_player_id(conn, first_name, last_name):
+    """Lightweight lookup: return player_id for a non-retired, non-free-agent player, or None."""
+    row = conn.execute(
+        text(
+            "SELECT p.player_id FROM players p"
+            " JOIN player_ratings pr ON pr.player_id = p.player_id"
+            " WHERE p.first_name = :f AND p.last_name = :l"
+            " AND p.retired = 0 AND p.free_agent = 0 LIMIT 1"
+        ),
+        dict(f=first_name, l=last_name),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def query_contract_extension(save_name, first_name, last_name):
+    """Query all data needed for a contract extension recommendation.
+
+    Returns the complete data dict (with private _* keys for HTML generation),
+    or None if the player is not found. Does NOT perform a cache check.
     """
-    saves = json.loads((PROJECT_ROOT / "saves.json").read_text())
+    saves = load_saves_registry()
     save_data = saves.get("saves", {}).get(save_name, {})
     my_team_abbr = save_data.get("my_team_abbr") or "your team"
     my_team_id = int(save_data.get("my_team_id") or 0)
 
     engine = get_engine(save_name)
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # ── 1. Main player query ────────────────────────────────────────────
     with engine.connect() as conn:
@@ -530,44 +598,32 @@ def generate_contract_extension_report(save_name, first_name, last_name):
         ).fetchone()
 
     if player_row is None:
-        return None, None
+        return None
 
     d = dict(zip(_PLAYER_KEYS, player_row))
     player_id = d["player_id"]
     player_type = d["player_type"]
-    pos_str = POS_MAP.get(d["position"], str(d["position"]))
-
-    # ── Cache check ─────────────────────────────────────────────────────
-    slug = f"{first_name.lower()}_{last_name.lower()}_{player_id}"
-    report_dir = get_reports_dir(save_name, "contract_extensions")
-    report_path = report_dir / f"{slug}.html"
-
-    if report_path.exists() and last_import:
-        import_dt = datetime.fromisoformat(last_import)
-        report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
-        if report_mtime >= import_dt:
-            return str(report_path), None
 
     # ── 2. WAR trend (last 5 MLB seasons) ───────────────────────────────
     with engine.connect() as conn:
         if player_type == "pitcher":
             war_rows = conn.execute(
-                text("""
+                text(f"""
                 SELECT year, g, gs, ip, ha, bb, k, er, hra, war
                 FROM players_career_pitching_stats
-                WHERE player_id = :pid AND split_id IN (0, 1)
-                  AND league_id = 203 AND level_id = 1
+                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
+                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
                 ORDER BY year DESC LIMIT 5
                 """),
                 dict(pid=player_id),
             ).fetchall()
         else:
             war_rows = conn.execute(
-                text("""
+                text(f"""
                 SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war
                 FROM players_career_batting_stats
-                WHERE player_id = :pid AND split_id IN (0, 1)
-                  AND league_id = 203 AND level_id = 1
+                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
+                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
                 ORDER BY year DESC LIMIT 5
                 """),
                 dict(pid=player_id),
@@ -635,6 +691,148 @@ def generate_contract_extension_report(save_name, first_name, last_name):
             ),
         ).fetchall()
 
+    # ── Compute scalars ────────────────────────────────────────────────────
+    if player_type == "pitcher":
+        war_vals = _compute_war_vals_pitcher(war_rows)
+        adv_most_recent = _compute_adv_most_recent_pitcher(adv_rows)
+    else:
+        war_vals = _compute_war_vals_batter(war_rows)
+        adv_most_recent = _compute_adv_most_recent_batter(adv_rows)
+
+    median_comp_salary, comp_names = _compute_comp_scalars(comp_rows)
+
+    # Contract details
+    years_remaining = get_years_remaining(d)
+    current_salary = get_current_salary(d)
+    service_years = d.get("mlb_service_years")
+
+    pos_str = POS_MAP.get(d["position"], str(d["position"]))
+    avg_war = (
+        sum(v for _, v in war_vals) / len(war_vals) if war_vals else None
+    )
+    war_trend_str = "|".join(f"{yr}:{v:.1f}" for yr, v in war_vals)
+
+    oa_v = int(d.get("oa") or 0)
+    pot_v = int(d.get("pot") or 0)
+    age_v = int(d.get("age") or 0)
+    team_abbr = d.get("team_abbr") or "—"
+    rating_overall = float(d.get("rating_overall") or 0)
+    wrc_fip = d.get("wrc_plus")
+    is_pitcher = player_type == "pitcher"
+    key_stat_label = "FIP" if is_pitcher else "wRC+"
+    key_stat_str = (
+        f"{float(wrc_fip):.2f}" if wrc_fip is not None and is_pitcher
+        else str(int(wrc_fip)) if wrc_fip is not None
+        else "—"
+    )
+    war_str = f"{float(d.get('war')):.1f}" if d.get("war") is not None else "—"
+    status_label = arb_status_label(service_years)
+
+    greed_v = int(d.get("greed") or 100)
+    loyalty_v = int(d.get("loyalty") or 100)
+    pfw_v = int(d.get("play_for_winner") or 100)
+    local_pop_v = int(d.get("local_pop") or 0)
+    national_pop_v = int(d.get("national_pop") or 0)
+    prone_v = d.get("prone_overall")
+
+    if age_v < 26:
+        age_phase = "Pre-Peak"
+    elif age_v <= 30:
+        age_phase = "Peak Years"
+    elif age_v <= 33:
+        age_phase = "Late Peak"
+    else:
+        age_phase = "Decline Phase"
+
+    data_dict = dict(
+        player_name=f"{first_name} {last_name}",
+        player_type=player_type,
+        position=pos_str,
+        team_abbr=team_abbr,
+        age=age_v,
+        oa=oa_v,
+        pot=pot_v,
+        oa_pot_gap=pot_v - oa_v,
+        age_phase=age_phase,
+        rating_overall=round(rating_overall, 1),
+        key_stat_label=key_stat_label,
+        key_stat=key_stat_str,
+        war_current_season=war_str,
+        war_trend=war_trend_str,
+        avg_war_last_seasons=f"{avg_war:.2f}" if avg_war is not None else "—",
+        current_salary=fmt_salary(current_salary),
+        years_remaining=years_remaining,
+        mlb_service_years=f"{float(service_years):.1f}" if service_years is not None else "—",
+        arb_status=status_label,
+        greed=greed_v,
+        loyalty=loyalty_v,
+        play_for_winner=pfw_v,
+        local_pop=local_pop_v,
+        national_pop=national_pop_v,
+        prone_overall=injury_label(prone_v),
+        flag_injury_risk=bool(d.get("flag_injury_risk")),
+        flag_high_ceiling=bool(d.get("flag_high_ceiling")),
+        rating_development=round(float(d.get("rating_development") or 0), 1),
+        rating_potential=round(float(d.get("rating_potential") or 0), 1),
+        rating_durability=round(float(d.get("rating_durability") or 0), 1),
+        median_comp_salary=fmt_salary(median_comp_salary),
+        top_comps=comp_names,
+        adv_years_available=len(adv_rows),
+        my_team_abbr=my_team_abbr,
+        my_team_name=my_team_name,
+        **_adv_data_dict(adv_most_recent, player_type),
+        # Private keys for HTML generation
+        _war_rows=war_rows,
+        _adv_rows=adv_rows,
+        _comp_rows=comp_rows,
+        _player_row_d=d,
+        _player_id=player_id,
+    )
+
+    return data_dict
+
+
+def generate_contract_extension_report(save_name, first_name, last_name, raw_args=""):
+    """Generate a contract extension advisor HTML report.
+
+    Returns (path_str, data_dict) on generation, or (path_str, None) on cache hit.
+    Returns (None, None) if the player is not found.
+    """
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    # ── Lightweight player lookup for cache key ──────────────────────────
+    engine = get_engine(save_name)
+    with engine.connect() as conn:
+        player_id = _lookup_player_id(conn, first_name, last_name)
+    if player_id is None:
+        return None, None
+
+    # ── Cache check ──────────────────────────────────────────────────────
+    report_dir = get_reports_dir(save_name, "contract_extensions")
+    report_path = report_dir / report_filename(f"contract_{player_id}", dict(raw_args=raw_args.strip().lower()))
+
+    if report_path.exists() and last_import:
+        import_dt = datetime.fromisoformat(last_import)
+        report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
+        if report_mtime >= import_dt:
+            return str(report_path), None
+
+    # ── Cache miss — run full queries ────────────────────────────────────
+    data_dict = query_contract_extension(save_name, first_name, last_name)
+    if data_dict is None:
+        return None, None
+
+    # Extract private keys for HTML generation
+    war_rows = data_dict.pop("_war_rows")
+    adv_rows = data_dict.pop("_adv_rows")
+    comp_rows = data_dict.pop("_comp_rows")
+    d = data_dict.pop("_player_row_d")
+    player_id = data_dict.pop("_player_id")
+
+    player_type = d["player_type"]
+    pos_str = POS_MAP.get(d["position"], str(d["position"]))
+
     # ── Build data components ─────────────────────────────────────────────
     if player_type == "pitcher":
         war_rows_html, war_vals = build_war_table_pitcher(war_rows)
@@ -663,7 +861,7 @@ def generate_contract_extension_report(save_name, first_name, last_name):
 
     comps_rows_html, median_comp_salary = build_comps_table(comp_rows)
 
-    # Contract details
+    # Contract details (from player row d)
     years_remaining = get_years_remaining(d)
     current_salary = get_current_salary(d)
     total_years = int(d.get("years") or 0)
@@ -677,31 +875,32 @@ def generate_contract_extension_report(save_name, first_name, last_name):
         sal = d.get(f"salary{i}")
         salary_timeline_rows += f"<tr><td>{yr_label}</td><td>{fmt_salary(sal)}</td></tr>\n"
 
-    # Derived data for agent
-    avg_war = (
-        sum(v for _, v in war_vals) / len(war_vals) if war_vals else None
-    )
-    war_trend_str = "|".join(f"{yr}:{v:.1f}" for yr, v in war_vals)
-    comp_parts = []
-    for r in comp_rows[:5]:
-        comp_d = dict(
-            years=r[7], current_year=r[8],
-            salary0=r[9], salary1=r[10], salary2=r[11], salary3=r[12], salary4=r[13],
-            salary5=r[14], salary6=r[15], salary7=r[16], salary8=r[17], salary9=r[18],
-        )
-        sal_str = fmt_salary(get_current_salary(comp_d))
-        comp_parts.append(f"{r[0]} {r[1]} (OA:{int(r[3] or 0)}, {sal_str})")
-    comp_names = "; ".join(comp_parts)
-
-    # ── Personality / flags section HTML ─────────────────────────────────
-    greed_v = int(d.get("greed") or 100)
-    loyalty_v = int(d.get("loyalty") or 100)
-    pfw_v = int(d.get("play_for_winner") or 100)
-    local_pop_v = int(d.get("local_pop") or 0)
-    national_pop_v = int(d.get("national_pop") or 0)
+    # Extract display values from data_dict (already computed by query_contract_extension)
+    oa_v = data_dict["oa"]
+    pot_v = data_dict["pot"]
+    age_v = data_dict["age"]
+    team_abbr = data_dict["team_abbr"]
+    rating_overall = data_dict["rating_overall"]
+    key_stat_label = data_dict["key_stat_label"]
+    key_stat_str = data_dict["key_stat"]
+    war_str = data_dict["war_current_season"]
+    status_label = data_dict["arb_status"]
+    age_phase = data_dict["age_phase"]
+    greed_v = data_dict["greed"]
+    loyalty_v = data_dict["loyalty"]
+    pfw_v = data_dict["play_for_winner"]
+    local_pop_v = data_dict["local_pop"]
+    national_pop_v = data_dict["national_pop"]
     we_v = int(d.get("work_ethic") or 100)
     iq_v = int(d.get("intelligence") or 100)
     prone_v = d.get("prone_overall")
+
+    age_phase_color = (
+        "#1a7a1a" if age_v < 26 else
+        "#2266cc" if age_v <= 30 else
+        "#cc7700" if age_v <= 33 else
+        "#cc2222"
+    )
 
     personality_rows = (
         f'<tr><td class="left">Greed</td><td>{greed_v}</td>'
@@ -732,7 +931,6 @@ def generate_contract_extension_report(save_name, first_name, last_name):
         f"{injury_label(prone_v)}</td></tr>\n"
     )
 
-    # ── Flags ─────────────────────────────────────────────────────────────
     flags_html = ""
     if d.get("flag_injury_risk"):
         flags_html += '<span class="flag flag-red">⚕ Injury Risk</span> '
@@ -751,42 +949,12 @@ def generate_contract_extension_report(save_name, first_name, last_name):
     if d.get("no_trade"):
         flags_html += '<span class="flag flag-yellow">🔒 No-Trade Clause</span> '
 
-    # ── Header data ───────────────────────────────────────────────────────
-    rating_overall = float(d.get("rating_overall") or 0)
-    oa_v = int(d.get("oa") or 0)
-    pot_v = int(d.get("pot") or 0)
-    age_v = int(d.get("age") or 0)
-    team_abbr = d.get("team_abbr") or "—"
-    wrc_fip = d.get("wrc_plus")
-    is_pitcher = player_type == "pitcher"
-    key_stat_label = "FIP" if is_pitcher else "wRC+"
-    key_stat_str = (
-        f"{float(wrc_fip):.2f}" if wrc_fip is not None and is_pitcher
-        else str(int(wrc_fip)) if wrc_fip is not None
-        else "—"
-    )
-    war_str = f"{float(d.get('war')):.1f}" if d.get("war") is not None else "—"
-    status_label = arb_status_label(service_years)
     player_name_esc = html_mod.escape(f"{first_name} {last_name}")
 
-    # ── Aging context ─────────────────────────────────────────────────────
-    if age_v < 26:
-        age_phase = "Pre-Peak"
-        age_phase_color = "#1a7a1a"
-    elif age_v <= 30:
-        age_phase = "Peak Years"
-        age_phase_color = "#2266cc"
-    elif age_v <= 33:
-        age_phase = "Late Peak"
-        age_phase_color = "#cc7700"
-    else:
-        age_phase = "Decline Phase"
-        age_phase_color = "#cc2222"
-
-    # ── Meta tags ─────────────────────────────────────────────────────────
     _ootp_meta = (
         '<meta name="ootp-skill" content="contract-extension">'
         f'<meta name="ootp-args" content="{html_mod.escape(first_name)} {html_mod.escape(last_name)}">'
+        '<meta name="ootp-args-display" content="">'
         f'<meta name="ootp-save" content="{html_mod.escape(save_name)}">'
     )
 
@@ -887,45 +1055,5 @@ def generate_contract_extension_report(save_name, first_name, last_name):
 </body></html>"""
 
     write_report_html(report_path, html_doc)
-
-    # Build data dict for agent
-    data_dict = dict(
-        player_name=f"{first_name} {last_name}",
-        player_type=player_type,
-        position=pos_str,
-        team_abbr=team_abbr,
-        age=age_v,
-        oa=oa_v,
-        pot=pot_v,
-        oa_pot_gap=pot_v - oa_v,
-        age_phase=age_phase,
-        rating_overall=round(rating_overall, 1),
-        key_stat_label=key_stat_label,
-        key_stat=key_stat_str,
-        war_current_season=war_str,
-        war_trend=war_trend_str,
-        avg_war_last_seasons=f"{avg_war:.2f}" if avg_war is not None else "—",
-        current_salary=fmt_salary(current_salary),
-        years_remaining=years_remaining,
-        mlb_service_years=f"{float(service_years):.1f}" if service_years is not None else "—",
-        arb_status=status_label,
-        greed=greed_v,
-        loyalty=loyalty_v,
-        play_for_winner=pfw_v,
-        local_pop=local_pop_v,
-        national_pop=national_pop_v,
-        prone_overall=injury_label(prone_v),
-        flag_injury_risk=bool(d.get("flag_injury_risk")),
-        flag_high_ceiling=bool(d.get("flag_high_ceiling")),
-        rating_development=round(float(d.get("rating_development") or 0), 1),
-        rating_potential=round(float(d.get("rating_potential") or 0), 1),
-        rating_durability=round(float(d.get("rating_durability") or 0), 1),
-        median_comp_salary=fmt_salary(median_comp_salary),
-        top_comps=comp_names,
-        adv_years_available=len(adv_rows),
-        my_team_abbr=my_team_abbr,
-        my_team_name=my_team_name,
-        **_adv_data_dict(adv_most_recent, player_type),
-    )
 
     return str(report_path), data_dict

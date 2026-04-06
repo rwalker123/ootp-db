@@ -35,10 +35,11 @@ modifiers (e.g., "defense", "power, discipline").
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from ratings import generate_rating_report
-save_name = json.loads(open("saves.json").read())["active"]
+from shared_css import load_saves_registry
+save_name = load_saves_registry()["active"]
 args = "<FIRST> <LAST>".split()  # substituted from $ARGUMENTS
 first, last = args[0], args[1]
 focus = args[2:] if len(args) > 2 else None
@@ -72,15 +73,14 @@ query to get year-by-year rate stats. Use `dict()` not `{}` for params:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
-import os
+from shared_css import load_saves_registry, get_engine
 load_dotenv(".env")
-save_name = json.loads(open("saves.json").read())["active"]
-db_name = save_name.lower().replace(" ", "_").replace("-", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db_name)
+save_name = load_saves_registry()["active"]
+engine = get_engine(save_name)
 
 def safe_div(n, d):
     return n / d if d and d > 0 else None

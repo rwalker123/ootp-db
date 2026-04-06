@@ -12,33 +12,30 @@ Run after import.py:
     python src/analytics.py My-Save-2026
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
-from shared_css import db_name_from_save
-from sqlalchemy import create_engine, inspect, text
+from config import (
+    CAREER_STATS_LOOKBACK_YEARS,
+    WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, MLB_LEVEL_ID,
+    RESULT_K, RESULT_BB, RESULT_GROUNDOUT, RESULT_FLYOUT,
+    RESULT_SINGLE, RESULT_DOUBLE, RESULT_TRIPLE, RESULT_HR, RESULT_HBP,
+    SPLIT_CAREER_OVERALL, SPLIT_CAREER_VS_LHP, SPLIT_CAREER_VS_RHP,
+    SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+    GAME_TYPE_REGULAR,
+)
+from shared_css import db_name_from_save, get_engine
+from sqlalchemy import inspect, text
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MLB_LEAGUE_ID = 203
-MLB_LEVEL_ID = 1
-
-# At-bat result codes
-RESULT_K = 1
-RESULT_BB = 2
-RESULT_GROUNDOUT = 4
-RESULT_FLYOUT = 5
-RESULT_SINGLE = 6
-RESULT_DOUBLE = 7
-RESULT_TRIPLE = 8
-RESULT_HR = 9
-RESULT_HBP = 10
 
 BATTED_BALL_RESULTS = {RESULT_GROUNDOUT, RESULT_FLYOUT, RESULT_SINGLE,
                        RESULT_DOUBLE, RESULT_TRIPLE, RESULT_HR}
@@ -47,14 +44,6 @@ HIT_RESULTS = {RESULT_SINGLE, RESULT_DOUBLE, RESULT_TRIPLE, RESULT_HR}
 # Total bases by result
 TB_MAP = {RESULT_GROUNDOUT: 0, RESULT_FLYOUT: 0,
           RESULT_SINGLE: 1, RESULT_DOUBLE: 2, RESULT_TRIPLE: 3, RESULT_HR: 4}
-
-# Standard FanGraphs wOBA linear weights (2010-era, widely used baseline)
-WOBA_BB = 0.69
-WOBA_HBP = 0.72
-WOBA_1B = 0.87
-WOBA_2B = 1.27
-WOBA_3B = 1.62
-WOBA_HR = 2.10
 
 # wOBA weights for batted ball results (used in xwOBA bin lookups)
 WOBA_RESULT_MAP = {RESULT_GROUNDOUT: 0.0, RESULT_FLYOUT: 0.0,
@@ -82,23 +71,6 @@ SWEET_SPOT_LA_MAX = 32
 # ---------------------------------------------------------------------------
 # Database setup
 # ---------------------------------------------------------------------------
-def setup_engine(save_name):
-    """Load .env, build engine for the OOTP database."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        print("Error: .env file not found.")
-        sys.exit(1)
-    load_dotenv(env_path)
-
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
-
-
 def get_current_year(engine):
     """Get the current (max) season year for MLB career stats."""
     with engine.connect() as conn:
@@ -130,7 +102,7 @@ def get_league_batting_averages(engine, year):
                SUM(hp) as hp, SUM(sf) as sf, SUM(sh) as sh, SUM(r) as r,
                SUM(ibb) as ibb, SUM(tb) as tb
         FROM team_batting_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = 0
+        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_BATTING_OVERALL}
     """, engine)
     row = df.iloc[0]
     s = row.h - row.d - row.t - row.hr
@@ -157,7 +129,7 @@ def get_league_pitching_averages(engine, year):
                SUM(hp) as hp, SUM(hra) as hra, SUM(ha) as ha, SUM(bf) as bf,
                SUM(gb) as gb, SUM(fb) as fb, SUM(ab) as ab, SUM(sf) as sf
         FROM team_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id IN (0, 1)
+        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
     """, engine)
     row = df.iloc[0]
     lg_era = row.er * 9 / row.ip if row.ip > 0 else 4.00
@@ -178,7 +150,7 @@ def compute_batter_career_stats(engine, year, lg):
     # SUM across teams for traded players
     df = pd.read_sql(f"""
         SELECT player_id,
-               CASE WHEN split_id IN (0, 1) THEN 1 ELSE split_id END AS split_id,
+               split_id,
                SUM(pa) as pa, SUM(ab) as ab, SUM(h) as h, SUM(d) as d,
                SUM(t) as t, SUM(hr) as hr, SUM(bb) as bb, SUM(k) as k,
                SUM(hp) as hp, SUM(sf) as sf, SUM(sh) as sh, SUM(rbi) as rbi,
@@ -187,9 +159,10 @@ def compute_batter_career_stats(engine, year, lg):
                SUM(war) as war, SUM(wpa) as wpa
         FROM players_career_batting_stats
         WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
-          AND split_id IN (0, 1, 2, 3)
-        GROUP BY player_id,
-                 CASE WHEN split_id IN (0, 1) THEN 1 ELSE split_id END
+          AND split_id IN ({SPLIT_CAREER_OVERALL}, {SPLIT_CAREER_VS_LHP}, {SPLIT_CAREER_VS_RHP})
+          AND year >= {year} - {CAREER_STATS_LOOKBACK_YEARS}
+          AND pa > 0
+        GROUP BY player_id, split_id
     """, engine)
 
     if df.empty:
@@ -249,9 +222,9 @@ def compute_batter_career_stats(engine, year, lg):
     stats = calc_stats(df)
 
     # Pivot splits into columns
-    overall = stats[stats["split_id"] == 1].drop(columns="split_id").copy()
-    vs_lhp = stats[stats["split_id"] == 2].drop(columns="split_id").copy()
-    vs_rhp = stats[stats["split_id"] == 3].drop(columns="split_id").copy()
+    overall = stats[stats["split_id"] == SPLIT_CAREER_OVERALL].drop(columns="split_id").copy()
+    vs_lhp = stats[stats["split_id"] == SPLIT_CAREER_VS_LHP].drop(columns="split_id").copy()
+    vs_rhp = stats[stats["split_id"] == SPLIT_CAREER_VS_RHP].drop(columns="split_id").copy()
 
     # Rename split columns
     keep_overall = ["player_id", "g", "pa", "ab", "h", "r", "rbi", "hr", "sb",
@@ -277,14 +250,14 @@ def compute_batter_career_stats(engine, year, lg):
 # ---------------------------------------------------------------------------
 def load_all_plate_appearances(engine):
     """Load all regular-season plate appearances with pitcher handedness."""
-    query = """
+    query = f"""
         SELECT ab.player_id, ab.opponent_player_id,
                ab.exit_velo, ab.launch_angle, ab.sprint_speed,
                ab.result, p_opp.throws as pitcher_throws
         FROM players_at_bat_batting_stats ab
         JOIN games g ON g.game_id = ab.game_id
         JOIN players p_opp ON p_opp.player_id = ab.opponent_player_id
-        WHERE g.game_type = 0
+        WHERE g.game_type = {GAME_TYPE_REGULAR}
     """
     df = pd.read_sql(query, engine)
 
@@ -517,8 +490,9 @@ def compute_pitcher_career_stats(engine, year, lg_pitch):
                SUM(s) as s, SUM(hld) as hld, SUM(qs) as qs,
                SUM(war) as war, SUM(wpa) as wpa, SUM(outs) as outs
         FROM players_career_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND year = {year}
-          AND split_id IN (1, 2, 3)
+        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
+          AND year >= {year} - {CAREER_STATS_LOOKBACK_YEARS}
+          AND split_id IN ({SPLIT_CAREER_OVERALL}, {SPLIT_CAREER_VS_LHP}, {SPLIT_CAREER_VS_RHP})
         GROUP BY player_id, split_id
     """, engine)
 
@@ -561,9 +535,9 @@ def compute_pitcher_career_stats(engine, year, lg_pitch):
     ))
 
     # Pivot splits
-    overall = stats[stats["split_id"] == 1].drop(columns="split_id").copy()
-    vs_lhb = stats[stats["split_id"] == 2].drop(columns="split_id").copy()
-    vs_rhb = stats[stats["split_id"] == 3].drop(columns="split_id").copy()
+    overall = stats[stats["split_id"] == SPLIT_CAREER_OVERALL].drop(columns="split_id").copy()
+    vs_lhb = stats[stats["split_id"] == SPLIT_CAREER_VS_LHP].drop(columns="split_id").copy()
+    vs_rhb = stats[stats["split_id"] == SPLIT_CAREER_VS_RHP].drop(columns="split_id").copy()
 
     split_cols = ["player_id", "bf", "era", "fip", "k_pct", "bb_pct",
                   "k_bb_pct", "whip", "babip"]
@@ -677,7 +651,7 @@ def main():
         sys.exit(1)
 
     save_name = sys.argv[1]
-    engine = setup_engine(save_name)
+    engine = get_engine(save_name)
     start = time.time()
 
     year = get_current_year(engine)
@@ -734,8 +708,12 @@ def main():
     batter_df.to_sql("batter_advanced_stats", engine, if_exists="replace", index=False)
     pitcher_df.to_sql("pitcher_advanced_stats", engine, if_exists="replace", index=False)
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE batter_advanced_stats ADD PRIMARY KEY (player_id)"))
-        conn.execute(text("ALTER TABLE pitcher_advanced_stats ADD PRIMARY KEY (player_id)"))
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_batter_advanced_stats_player_id ON batter_advanced_stats (player_id)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_pitcher_advanced_stats_player_id ON pitcher_advanced_stats (player_id)"))
+        else:
+            conn.execute(text("ALTER TABLE batter_advanced_stats ADD PRIMARY KEY (player_id)"))
+            conn.execute(text("ALTER TABLE pitcher_advanced_stats ADD PRIMARY KEY (player_id)"))
         conn.commit()
 
     # Also drop the old batter_xba table if it exists

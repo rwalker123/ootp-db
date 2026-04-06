@@ -3,9 +3,13 @@
 __pycache__/
 *.pyc
 reports/
+cache/
+db/
 saves.json
 .last_import
 .update-status
 .downloaded
 .claude/memory/
 .claude/settings.local.json
+saves.sqlite.json
+saves.postgresql.json

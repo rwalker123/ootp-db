@@ -2,24 +2,23 @@
 """Waiver wire claim evaluator report generator for OOTP Baseball."""
 
 import html
-import json
-import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import (
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    TRAIT_POOR_MAX, TRAIT_BELOW_AVG_MAX, TRAIT_AVERAGE_MAX, TRAIT_GOOD_MAX,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP, ROLE_MAP,
+    SPLIT_CAREER_OVERALL,
+)
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
-ROLE_MAP = {11: "SP", 12: "RP", 13: "CL", 0: "—"}
 
 # Positions considered "pitcher" for group comparison
 PITCHER_POS = {1}
@@ -29,17 +28,6 @@ OF_POS = {7, 8, 9}
 CORNER_IF_POS = {3, 5}
 # Middle IF that share comparison
 MIDDLE_IF_POS = {4, 6}
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -118,13 +106,13 @@ def injury_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -133,9 +121,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -144,13 +132,13 @@ def trait_label(val):
     if val is None:
         return "—"
     v = int(val)
-    if v <= 25:
+    if v <= TRAIT_POOR_MAX:
         return "Very Low"
-    if v <= 75:
+    if v <= TRAIT_BELOW_AVG_MAX:
         return "Low"
-    if v <= 125:
+    if v <= TRAIT_AVERAGE_MAX:
         return "Average"
-    if v <= 175:
+    if v <= TRAIT_GOOD_MAX:
         return "High"
     return "Elite"
 
@@ -189,12 +177,14 @@ def _fmt_pct(val):
     return f"{float(val) * 100:.1f}%"
 
 
-def find_existing_waiver_report(player_id, save_name):
+def find_existing_waiver_report(player_id, save_name, raw_args=""):
     reports_dir = get_reports_dir(save_name, "waiver_claims")
-    for f in reports_dir.glob(f"*_{player_id}.html"):
-        last_import = get_last_import_time()
-        if last_import is None or f.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
-            return str(f)
+    path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
+    if not path.exists():
+        return None
+    last_import = get_last_import_time()
+    if last_import is None or path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
+        return str(path)
     return None
 
 
@@ -374,10 +364,10 @@ def _get_fielding_details(conn, player_id):
 
 
 def _get_40man_count(conn, my_team_id):
-    result = conn.execute(text("""
+    result = conn.execute(text(f"""
         SELECT COUNT(*) FROM players p
         JOIN players_roster_status prs ON prs.player_id = p.player_id
-        WHERE p.team_id = :tid AND prs.league_id = 203
+        WHERE p.team_id = :tid AND prs.league_id = {MLB_LEAGUE_ID}
           AND p.retired = 0
     """), dict(tid=my_team_id)).fetchone()
     return int(result[0]) if result else 0
@@ -1210,15 +1200,13 @@ def _build_recommendation_placeholder():
 
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
-def generate_waiver_claim_report(save_name, first_name, last_name):
-    """Generate a waiver claim evaluation report.
+def query_waiver_claim(save_name, first_name, last_name):
+    """Query all data needed for a waiver claim evaluation.
 
-    Returns:
-        (None, None)   — player not found
-        (path, None)   — cache hit, path is existing report
-        (path, dict)   — newly generated report + data dict for agent summary
+    Returns the complete data dict, or None if the player is not found.
+    Does NOT perform a cache check.
     """
-    saves = json.loads((PROJECT_ROOT / "saves.json").read_text())
+    saves = load_saves_registry()
     save_data = saves.get("saves", {}).get(save_name, {})
     my_team_id = int(save_data.get("my_team_id") or 10)
     my_team_abbr = save_data.get("my_team_abbr") or "your team"
@@ -1233,15 +1221,9 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
 
         candidate = _lookup_player(conn, first_name, last_name)
         if not candidate:
-            return None, None
+            return None
 
         player_id = candidate["player_id"]
-
-        # Cache check
-        existing = find_existing_waiver_report(player_id, save_name)
-        if existing:
-            return existing, None
-
         player_type = candidate.get("player_type", "batter")
         position = int(candidate.get("position") or 0)
         player_role = int(candidate.get("role") or 0)
@@ -1257,61 +1239,6 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         field_positions = _get_fielding_positions(conn, player_id)
         fielding_details = _get_fielding_details(conn, player_id)
         roster_count = _get_40man_count(conn, my_team_id)
-
-    # Build HTML
-    css = get_report_css("1200px")
-    header_html = _build_candidate_header(candidate, adv)
-    ratings_html = _build_ratings_section(candidate)
-    contract_html = _build_contract_section(candidate)
-    adv_html = (
-        _build_adv_stats_batter(adv)
-        if player_type == "batter"
-        else _build_adv_stats_pitcher(adv)
-    )
-    incumbents_html = _build_incumbents_section(incumbents, candidate, comparison_positions, my_team_name)
-    fielding_html = _build_fielding_section(fielding_details, position)
-    flex_html = _build_positional_flexibility(field_positions, position, player_type)
-    roster_html = _build_40man_section(roster_count, candidate)
-    personality_html = _build_personality_section(candidate)
-    recommendation_html = _build_recommendation_placeholder()
-
-    full_name = f"{first_name}_{last_name}".lower().replace(" ", "_")
-    title = html.escape(f"Waiver Claim: {first_name} {last_name}")
-    esc_first = html.escape(first_name)
-    esc_last = html.escape(last_name)
-    esc_save = html.escape(save_name)
-
-    html_doc = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="ootp-skill" content="waiver-claim">
-  <meta name="ootp-args" content="{esc_first} {esc_last}">
-  <meta name="ootp-save" content="{esc_save}">
-  <title>{title}</title>
-  <style>{css}</style>
-</head>
-<body>
-<div class="container">
-  {header_html}
-  {recommendation_html}
-  {incumbents_html}
-  {adv_html}
-  {fielding_html}
-  {ratings_html}
-  {contract_html}
-  {flex_html}
-  {roster_html}
-  {personality_html}
-</div>
-</body>
-</html>"""
-
-    reports_dir = get_reports_dir(save_name, "waiver_claims")
-    slug = f"{full_name}_{player_id}"
-    report_path = reports_dir / f"{slug}.html"
-    write_report_html(report_path, html_doc)
 
     # Build data dict for agent
     best_incumbent = incumbents[0] if incumbents else None
@@ -1361,7 +1288,6 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         loyalty_label=trait_label(candidate.get("loyalty")),
         my_team_abbr=my_team_abbr,
         my_team_name=my_team_name,
-        report_path=str(report_path),
         # Advanced stats — batters
         adv_avg_ev=round(float(adv["avg_ev"]), 1) if adv and adv.get("avg_ev") is not None else None,
         adv_hard_hit_pct=_pct_fmt(adv.get("hard_hit_pct")) if adv and adv.get("hard_hit_pct") is not None else None,
@@ -1388,8 +1314,121 @@ def generate_waiver_claim_report(save_name, first_name, last_name):
         adv_fip_vs_rhb=round(float(adv["fip_vs_rhb"]), 2) if adv and adv.get("fip_vs_rhb") is not None else None,
         adv_bf_vs_lhb=adv.get("bf_vs_lhb") if adv else None,
         adv_bf_vs_rhb=adv.get("bf_vs_rhb") if adv else None,
+        # Private keys for HTML generation in generate_waiver_claim_report
+        _candidate=candidate,
+        _adv=adv,
+        _incumbents=incumbents,
+        _field_positions=field_positions,
+        _fielding_details=fielding_details,
+        _roster_count=roster_count,
+        _player_id=player_id,
+        _player_type=player_type,
+        _position=position,
+        _player_role=player_role,
+        _comparison_positions=comparison_positions,
+        _my_team_name=my_team_name,
     )
 
+    return data
+
+
+def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
+    """Generate a waiver claim evaluation report.
+
+    Returns:
+        (None, None)   — player not found
+        (path, None)   — cache hit, path is existing report
+        (path, dict)   — newly generated report + data dict for agent summary
+    """
+    engine = get_engine(save_name)
+
+    with engine.connect() as conn:
+        candidate = _lookup_player(conn, first_name, last_name)
+        if not candidate:
+            return None, None
+
+        player_id = candidate["player_id"]
+
+        # Cache check
+        existing = find_existing_waiver_report(player_id, save_name, raw_args)
+        if existing:
+            return existing, None
+
+    # Cache miss — query all data
+    data = query_waiver_claim(save_name, first_name, last_name)
+    if data is None:
+        return None, None
+
+    # Extract private keys for HTML construction
+    candidate = data.pop("_candidate")
+    adv = data.pop("_adv")
+    incumbents = data.pop("_incumbents")
+    field_positions = data.pop("_field_positions")
+    fielding_details = data.pop("_fielding_details")
+    roster_count = data.pop("_roster_count")
+    player_id = data.pop("_player_id")
+    player_type = data.pop("_player_type")
+    position = data.pop("_position")
+    player_role = data.pop("_player_role")
+    comparison_positions = data.pop("_comparison_positions")
+    my_team_name = data.pop("_my_team_name")
+
+    # Build HTML
+    css = get_report_css("1200px")
+    header_html = _build_candidate_header(candidate, adv)
+    ratings_html = _build_ratings_section(candidate)
+    contract_html = _build_contract_section(candidate)
+    adv_html = (
+        _build_adv_stats_batter(adv)
+        if player_type == "batter"
+        else _build_adv_stats_pitcher(adv)
+    )
+    incumbents_html = _build_incumbents_section(incumbents, candidate, comparison_positions, my_team_name)
+    fielding_html = _build_fielding_section(fielding_details, position)
+    flex_html = _build_positional_flexibility(field_positions, position, player_type)
+    roster_html = _build_40man_section(roster_count, candidate)
+    personality_html = _build_personality_section(candidate)
+    recommendation_html = _build_recommendation_placeholder()
+
+    full_name = f"{first_name}_{last_name}".lower().replace(" ", "_")
+    title = html.escape(f"Waiver Claim: {first_name} {last_name}")
+    esc_first = html.escape(first_name)
+    esc_last = html.escape(last_name)
+    esc_save = html.escape(save_name)
+
+    html_doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="ootp-skill" content="waiver-claim">
+  <meta name="ootp-args" content="{esc_first} {esc_last}">
+  <meta name="ootp-args-display" content="">
+  <meta name="ootp-save" content="{esc_save}">
+  <title>{title}</title>
+  <style>{css}</style>
+</head>
+<body>
+<div class="container">
+  {header_html}
+  {recommendation_html}
+  {incumbents_html}
+  {adv_html}
+  {fielding_html}
+  {ratings_html}
+  {contract_html}
+  {flex_html}
+  {roster_html}
+  {personality_html}
+</div>
+</body>
+</html>"""
+
+    reports_dir = get_reports_dir(save_name, "waiver_claims")
+    report_path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
+    write_report_html(report_path, html_doc)
+
+    data["report_path"] = str(report_path)
     return str(report_path), data
 
 

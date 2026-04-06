@@ -2,30 +2,22 @@
 """Free agent search report generator for OOTP Baseball."""
 
 import json
-import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import (
+    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
+    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    GREED_LOW_MAX, GREED_AVERAGE_MAX, GREED_HIGH_MAX,
+)
+from ootp_db_constants import MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def get_engine(save_name):
-    env_path = PROJECT_ROOT / ".env"
-    load_dotenv(env_path)
-    postgres_host = os.getenv("POSTGRES_URL")
-    if not postgres_host:
-        print("Error: POSTGRES_URL not set in .env")
-        sys.exit(1)
-    db_name = db_name_from_save(save_name)
-    return create_engine(f"{postgres_host.rstrip('/')}/{db_name}")
 
 
 def get_last_import_time():
@@ -35,39 +27,34 @@ def get_last_import_time():
 
 
 def letter_grade(score):
-    if score >= 90:
+    if score >= GRADE_A_PLUS:
         return "A+"
-    if score >= 80:
+    if score >= GRADE_A:
         return "A"
-    if score >= 70:
+    if score >= GRADE_B_PLUS:
         return "B+"
-    if score >= 60:
+    if score >= GRADE_B:
         return "B"
-    if score >= 50:
+    if score >= GRADE_C_PLUS:
         return "C+"
-    if score >= 40:
+    if score >= GRADE_C:
         return "C"
-    if score >= 30:
+    if score >= GRADE_D:
         return "D"
     return "F"
-
-
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-THROWS_MAP = {1: "R", 2: "L"}
 
 
 def injury_label(val):
     if val is None:
         return "Unknown"
     v = int(val)
-    if v <= 25:
+    if v <= INJURY_IRON_MAN_MAX:
         return "Iron Man"
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "Durable"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "Normal"
-    if v <= 174:
+    if v <= INJURY_FRAGILE_MAX:
         return "Fragile"
     return "Wrecked"
 
@@ -76,9 +63,9 @@ def injury_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v <= 75:
+    if v <= INJURY_DURABLE_MAX:
         return "#1a7a1a"
-    if v <= 125:
+    if v <= INJURY_NORMAL_MAX:
         return "#cc7700"
     return "#cc2222"
 
@@ -87,11 +74,11 @@ def greed_label(val):
     if val is None:
         return "Unknown"
     v = int(val)
-    if v < 80:
+    if v < GREED_LOW_MAX:
         return "Low"
-    if v <= 130:
+    if v <= GREED_AVERAGE_MAX:
         return "Average"
-    if v <= 160:
+    if v <= GREED_HIGH_MAX:
         return "High"
     return "Demanding"
 
@@ -100,11 +87,11 @@ def greed_color(val):
     if val is None:
         return "#888"
     v = int(val)
-    if v < 80:
+    if v < GREED_LOW_MAX:
         return "#1a7a1a"
-    if v <= 130:
+    if v <= GREED_AVERAGE_MAX:
         return "#cc7700"
-    if v <= 160:
+    if v <= GREED_HIGH_MAX:
         return "#cc5500"
     return "#cc2222"
 
@@ -131,21 +118,14 @@ def row_bg(rating):
     return "white"
 
 
-def generate_free_agents_report(save_name, criteria_label, where_clause,
-                                 join_clause="", order_by="pr.rating_overall DESC",
-                                 limit=25, highlight=None):
-    """Generate a free agent search results HTML report.
+def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
+                       order_by="pr.rating_overall DESC", limit=25, highlight=None):
+    """Query free agents matching the given criteria.
 
-    Always regenerates — no caching, criteria vary per search.
-
-    highlight: list of (col_key, display_label) tuples for extra stat columns,
-               e.g. [("rating_defense", "Defense"), ("rating_potential", "Potential")]
-
-    Returns (path_str, results_list) where results_list is list of dicts.
+    criteria_label is accepted for API consistency but not used in the query itself.
+    Returns a list of result dicts.
     """
     engine = get_engine(save_name)
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     sql = f"""
         SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,
@@ -182,9 +162,28 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
             prone_overall=r[22], work_ethic=r[23], intelligence=r[24],
             greed=r[25], loyalty=r[26], bats=r[27], throws=r[28],
         ))
+    return results
 
-    # Build slug from criteria
-    slug = re.sub(r"[^a-z0-9_]", "", criteria_label.lower().replace(" ", "_"))[:50]
+
+def generate_free_agents_report(save_name, criteria_label, where_clause,
+                                 join_clause="", order_by="pr.rating_overall DESC",
+                                 limit=25, highlight=None):
+    """Generate a free agent search results HTML report.
+
+    Always regenerates — no caching, criteria vary per search.
+
+    highlight: list of (col_key, display_label) tuples for extra stat columns,
+               e.g. [("rating_defense", "Defense"), ("rating_potential", "Potential")]
+
+    Returns (path_str, results_list) where results_list is list of dicts.
+    """
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    results = query_free_agents(save_name, criteria_label, where_clause, join_clause,
+                                 order_by, limit, highlight)
+
+    args_key = {"criteria": criteria_label}
 
     # Build results table rows
     table_rows = ""
@@ -276,6 +275,7 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
     _ootp_meta = (
         '<meta name="ootp-skill" content="free-agents">'
         f'<meta name="ootp-args" content="{_args_esc}">'
+        f'<meta name="ootp-args-display" content="{_args_esc}">'
         f'<meta name="ootp-save" content="{save_name}">'
         f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
     )
@@ -312,7 +312,7 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
 </div>
 </body></html>"""
 
-    report_path = get_reports_dir(save_name, "free_agents") / f"{slug}.html"
+    report_path = get_reports_dir(save_name, "free_agents") / report_filename("free_agents", args_key)
     write_report_html(report_path, html)
 
     return str(report_path), results

@@ -40,11 +40,13 @@ Before looking up players, determine trade direction and load team identity:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import json, os
+import sys, os
+sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from shared_css import load_saves_registry
 load_dotenv(".env")
-registry = json.loads(open("saves.json").read())
+registry = load_saves_registry()
 save = registry["active"]
 save_info = registry.get("saves", {}).get(save, {})
 my_team_id = save_info.get("my_team_id") or 10
@@ -77,13 +79,14 @@ Query the roster to identify the players in the trade. Team to search depends on
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import json
+import sys, os
+sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
-import os
+from shared_css import load_saves_registry
 from pathlib import Path
 load_dotenv(Path(".env"))
-registry = json.loads(open("saves.json").read())
+registry = load_saves_registry()
 save = registry["active"]
 my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
 db = save.lower().replace("-", "_").replace(" ", "_")
@@ -151,13 +154,14 @@ Otherwise, check which positions are thin on your team:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import json
+import sys, os
+sys.path.insert(0, "src")
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
-import os
+from shared_css import load_saves_registry
 from pathlib import Path
 load_dotenv(Path(".env"))
-registry = json.loads(open("saves.json").read())
+registry = load_saves_registry()
 save = registry["active"]
 my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
 db = save.lower().replace("-", "_").replace(" ", "_")
@@ -227,10 +231,11 @@ move candidates based on:
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, json
+import sys
 sys.path.insert(0, "src")
 from trade_targets import generate_trade_targets_report
-registry = json.loads(open("saves.json").read())
+from shared_css import load_saves_registry
+registry = load_saves_registry()
 save_name = registry["active"]
 my_team_id = registry.get("saves", {}).get(save_name, {}).get("my_team_id") or 10
 offered_where = "<AGENT FILLS: SQL WHERE matching offered/targeted player(s)>"

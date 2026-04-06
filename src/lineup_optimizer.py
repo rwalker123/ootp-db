@@ -11,23 +11,27 @@ Produces a batting order recommendation using one of four named philosophies:
 import html as html_mod
 import json
 import math
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
-from report_write import write_report_html
-from shared_css import db_name_from_save, get_report_css, get_reports_dir
-from sqlalchemy import create_engine, text
+from config import (
+    CAREER_STATS_LOOKBACK_YEARS, REGRESSION_EXPONENT, PA_REGRESSION_THRESHOLD,
+    WRC_CAP_HEADROOM, WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR,
+)
+from ootp_db_constants import (
+    MLB_LEAGUE_ID,
+    POS_MAP, BATS_MAP, POS_STR_MAP,
+)
+from report_write import write_report_html, report_filename
+from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
-POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-BATS_MAP = {1: "R", 2: "L", 3: "S"}
-# Reverse map for parsing position strings in override arguments
-POS_STR_MAP = {"c": 2, "1b": 3, "2b": 4, "3b": 5, "ss": 6, "lf": 7, "cf": 8, "rf": 9, "dh": 0}
+# lineup_optimizer uses WOBA_HP as local alias (other modules use WOBA_HBP)
+WOBA_HP = WOBA_HBP
 
 PHILOSOPHIES = ("modern", "traditional", "platoon", "hot-hand")
 PHIL_LABELS = {
@@ -36,14 +40,6 @@ PHIL_LABELS = {
     "platoon": "Platoon",
     "hot-hand": "Hot Hand",
 }
-
-# Approximate 2024 MLB wOBA linear weights
-WOBA_BB = 0.690
-WOBA_HP = 0.722
-WOBA_1B = 0.884
-WOBA_2B = 1.261
-WOBA_3B = 1.601
-WOBA_HR = 2.072
 
 # Slot mapping: slot_number -> rank_index (rank 0 = best sort score)
 # Modern / Platoon / Hot-Hand: best hitter at #2 (Tango-optimal)
@@ -81,15 +77,6 @@ MIN_POS_GAMES = 5                 # minimum career games at position (any level)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
-
-def get_engine(save_name):
-    load_dotenv(PROJECT_ROOT / ".env")
-    url = os.getenv("POSTGRES_URL")
-    if not url:
-        print("Error: POSTGRES_URL not set in .env", file=sys.stderr)
-        sys.exit(1)
-    return create_engine(f"{url.rstrip('/')}/{db_name_from_save(save_name)}")
-
 
 def get_last_import_time():
     if LAST_IMPORT_PATH.exists():
@@ -156,7 +143,7 @@ def resolve_team(conn, team_query):
         rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
             "WHERE (nickname ILIKE :q OR name ILIKE :q) "
-            "AND league_id = 203 ORDER BY name, team_id"
+            f"AND league_id = {MLB_LEAGUE_ID} ORDER BY name, team_id"
         ), dict(q=f"%{team_query}%")).fetchall()
         if not rows:
             return None, None, None
@@ -264,8 +251,8 @@ def load_position_games(conn, player_ids):
     result = {pid: {"games": {}, "usage_pct": {}, "total_3yr_games": 0} for pid in player_ids}
     try:
         # All-time games for eligibility.
-        # split_id=0 = simulated seasons; split_id=1 = real historical seasons.
-        # They cover non-overlapping year ranges so summing both is safe.
+        # For players_career_fielding_stats: split_id=0 = sim seasons (2026+),
+        # split_id=1 = real historical seasons (pre-sim). Both needed for all-time totals.
         rows = conn.execute(text(f"""
             SELECT player_id, position, SUM(g) AS total_games
             FROM players_career_fielding_stats
@@ -286,7 +273,7 @@ def load_position_games(conn, player_ids):
                 WHERE player_id IN ({clause})
                   AND split_id IN (0, 1)
                   AND year >= (
-                      SELECT MAX(year) - 2
+                      SELECT MAX(year) - {CAREER_STATS_LOOKBACK_YEARS}
                       FROM players_career_fielding_stats AS sub
                       WHERE sub.player_id = players_career_fielding_stats.player_id
                         AND sub.split_id IN (0, 1)
@@ -298,7 +285,7 @@ def load_position_games(conn, player_ids):
                 FROM recent GROUP BY player_id
             )
             SELECT r.player_id, r.position,
-                   r.pos_games::float / NULLIF(t.total_games, 0) AS usage_pct,
+                   r.pos_games * 1.0 / NULLIF(t.total_games, 0) AS usage_pct,
                    t.total_games
             FROM recent r JOIN totals t USING (player_id)
         """)).fetchall()
@@ -405,8 +392,12 @@ def compute_blended_woba(observed_woba, pa, rating_offense, league_avg_woba,
     """
     expected = league_avg_woba + ((rating_offense or avg_rating_offense) - avg_rating_offense) * _RATING_TO_WOBA_SLOPE
     expected = max(0.200, min(0.450, expected))  # clamp to realistic range
-    obs = observed_woba if observed_woba is not None else expected
     pa = pa or 0
+    obs = observed_woba if observed_woba is not None else expected
+    if pa < PA_REGRESSION_THRESHOLD and obs is not None:
+        pa_trust = min((pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
+        woba_cap = league_avg_woba + pa_trust * WRC_CAP_HEADROOM * _RATING_TO_WOBA_SLOPE
+        obs = min(obs, woba_cap)
     return (obs * pa + expected * reg_pa) / (pa + reg_pa)
 
 
@@ -899,7 +890,8 @@ def wrc_td(val):
 def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
                alternation_score, dh_used, save_name, excluded_names,
                primary_only=False, forced_bench=None, fatigue_threshold=None,
-               fatigue_benched=None, favor_offense=False, args_str=""):
+               fatigue_benched=None, favor_offense=False, args_str="",
+               args_display=""):
     now = datetime.now()
     now_str = now.strftime("%B %d, %Y %I:%M %p")
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1033,13 +1025,13 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         excl_html += f'<div class="stale-banner" style="margin-top:8px">Excluded (without): <b>{excl_list}</b></div>'
     if forced_bench:
         fb_list = ", ".join(html_mod.escape(n) for n in forced_bench)
-        excl_html += f'<div class="stale-banner" style="margin-top:4px;background:#cce5ff;color:#004085;border-color:#b8daff"><b>[F] Manager bench:</b> {fb_list}</div>'
+        excl_html += f'<div class="stale-banner-blue" style="margin-top:4px"><b>[F] Manager bench:</b> {fb_list}</div>'
     if fatigue_benched:
         fat_list = ", ".join(html_mod.escape(n) for n in fatigue_benched)
         thr_label = f" (threshold: {fatigue_threshold}%)" if fatigue_threshold is not None else ""
-        excl_html += f'<div class="stale-banner" style="margin-top:4px;background:#f8d7da;color:#721c24;border-color:#f5c6cb"><b>Fatigued — auto-benched{thr_label}:</b> {fat_list}</div>'
+        excl_html += f'<div class="stale-banner-red" style="margin-top:4px"><b>Fatigued — auto-benched{thr_label}:</b> {fat_list}</div>'
     if favor_offense:
-        excl_html += '<div class="stale-banner" style="margin-top:4px;background:#fff3cd;color:#856404;border-color:#ffc107"><b>Favor Offense:</b> defense weight reduced at C / 2B / SS / CF — batting quality has more influence over positional assignments.</div>'
+        excl_html += '<div class="stale-banner" style="margin-top:4px"><b>Favor Offense:</b> defense weight reduced at C / 2B / SS / CF — batting quality has more influence over positional assignments.</div>'
 
     css = get_report_css("1120px")
 
@@ -1050,6 +1042,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
   <title>{html_mod.escape(report_title)}</title>
   <meta name="ootp-skill" content="lineup-optimizer">
   <meta name="ootp-args" content="{html_mod.escape(args_str)}">
+  <meta name="ootp-args-display" content="{html_mod.escape(args_display)}">
   <meta name="ootp-save" content="{html_mod.escape(save_name)}">
   <meta name="ootp-generated" content="{now_iso}">
   <style>{css}
@@ -1166,27 +1159,16 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def generate_lineup_report(save_name, team_query=None, philosophy="modern",
-                           opponent_hand=None, excluded_names=None,
-                           primary_only=False, forced_starts=None,
-                           forced_bench=None, fatigue_threshold=None,
-                           favor_offense=False):
-    """
-    Generate (or return cached) lineup optimizer report.
+def query_lineup(save_name, team_query=None, philosophy="modern",
+                 opponent_hand=None, excluded_names=None,
+                 primary_only=False, forced_starts=None,
+                 forced_bench=None, fatigue_threshold=None,
+                 favor_offense=False):
+    """Query all data and compute the lineup without generating HTML or checking cache.
 
-    forced_starts:     list of {"name": str, "pos": int|None} — player is guaranteed
-                       a lineup spot; if pos is given they're locked to that position
-                       (bypasses eligibility floors).
-    forced_bench:      list of player name strings — excluded from lineup regardless.
-    fatigue_threshold: int 0-100 — auto-bench any player whose fatigue_points >= this.
-                       When set, also bypasses cache.
-    favor_offense:     bool — reduces defense weight at premium positions (C, 2B,
-                       SS, CF), overriding moderate batting advantages.
-
-    Returns:
-        (path_str, data_dict)  on generation
-        (path_str, None)       on cache hit
-        (None, None)           on error / team not found
+    Returns the complete data_dict (which includes 'slug', '_team_name', '_team_abbr',
+    '_lineup', '_batters', '_alt_score', '_dh_used', '_fatigue_benched', '_args_str'),
+    or None if the team is not found or there are no eligible batters.
     """
     if philosophy not in PHILOSOPHIES:
         philosophy = "modern"
@@ -1197,31 +1179,16 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
     if hand not in ("L", "R"):
         hand = None
 
-    has_overrides = bool(forced_starts or forced_bench or fatigue_threshold is not None
-                         or favor_offense)
-
     engine = get_engine(save_name)
     with engine.connect() as conn:
         team_id, team_name, team_abbr = resolve_team(conn, team_query)
         if not team_id:
-            return None, None
-
-        # Cache check — bypass when manual overrides are active (they change the output)
-        hand_key = hand or "any"
-        pos_key = "primary" if primary_only else "multi"
-        fd_key = "_fo" if favor_offense else ""
-        slug = f"{team_abbr.lower()}_{philosophy}_{hand_key}_{pos_key}{fd_key}"
-        report_dir = get_reports_dir(save_name, "lineups")
-        report_path = report_dir / f"{slug}.html"
-        last_import = get_last_import_time()
-        if not has_overrides and report_path.exists() and last_import:
-            if report_path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
-                return str(report_path), None
+            return None
 
         dh_used = get_dh_used(conn, team_id)
         batters = load_roster_batters(conn, team_id)
         if not batters:
-            return None, None
+            return None
 
         player_ids = [p["player_id"] for p in batters]
         adv_stats = load_batter_stats(conn, player_ids)
@@ -1229,12 +1196,11 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         fielding_ratings = load_fielding_ratings(conn, player_ids)
         pos_games = load_position_games(conn, player_ids)
 
-        # Full-league anchors — use MLB-wide averages, not roster averages,
-        # so a player's expected wOBA isn't inflated by being on a good team.
-        league_avg_woba = conn.execute(text("""
+        # Full-league anchors — use MLB-wide averages, not roster averages
+        league_avg_woba = conn.execute(text(f"""
             SELECT AVG(b.woba) FROM batter_advanced_stats b
             JOIN players p ON p.player_id = b.player_id
-            WHERE p.league_id = 203 AND b.pa >= 100
+            WHERE p.league_id = {MLB_LEAGUE_ID} AND b.pa >= 100
         """)).scalar() or 0.320
         avg_rating_offense = conn.execute(text("""
             SELECT AVG(pr.rating_offense) FROM player_ratings pr
@@ -1269,7 +1235,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
             avg_rating_offense=avg_rating_offense,
         )
 
-    # Apply fatigue auto-bench: any player at or above threshold sits
+    # Apply fatigue auto-bench
     fatigue_benched = []
     if fatigue_threshold is not None:
         for p in batters:
@@ -1277,7 +1243,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
             if fat >= fatigue_threshold:
                 fatigue_benched.append(f"{p['first_name']} {p['last_name']}")
 
-    # Merge all exclusions (without, forced_bench, fatigue)
+    # Merge all exclusions
     all_excluded = set(n.lower() for n in excluded_names + forced_bench + fatigue_benched)
     if all_excluded:
         batters = [
@@ -1285,8 +1251,8 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
             if f"{p['first_name']} {p['last_name']}".lower() not in all_excluded
         ]
 
-    # Resolve forced_starts to player_ids (after exclusions removed fatigue cases)
-    forced_pos: dict = {}       # player_id -> pos_code (or 0 for DH)
+    # Resolve forced_starts to player_ids
+    forced_pos: dict = {}
     forced_start_ids: set = set()
     for fs in forced_starts:
         player = _resolve_player_name(fs["name"], batters)
@@ -1306,7 +1272,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
 
     alt_score = score_alternation(lineup)
 
-    # Reconstruct args string for refresh metadata
+    # Reconstruct args string
     _pos_names = {2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF", 0: "DH"}
     _args_parts = []
     if team_query:
@@ -1332,20 +1298,12 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         _args_parts.append(f"fatigue {fatigue_threshold}")
     args_str = " ".join(_args_parts)
 
-    html_content = build_html(
-        team_name, team_abbr, philosophy, hand,
-        lineup, batters, alt_score,
-        dh_used, save_name, excluded_names,
-        primary_only=primary_only,
-        forced_bench=forced_bench,
-        fatigue_threshold=fatigue_threshold,
-        fatigue_benched=fatigue_benched,
-        favor_offense=favor_offense,
-        args_str=args_str,
-    )
-    write_report_html(report_path, html_content)
+    # Build data_dict for agent
+    hand_key = hand or "any"
+    pos_key = "primary" if primary_only else "multi"
+    fd_key = "_fo" if favor_offense else ""
+    slug = f"{team_abbr.lower()}_{philosophy}_{hand_key}_{pos_key}{fd_key}"
 
-    # Build data_dict for SKILL.md agent
     lineup_summary = []
     for slot in range(1, 10):
         if slot not in lineup:
@@ -1393,8 +1351,139 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         ]),
         slug=slug,
         save_name=save_name,
+        # Private keys for HTML generation
+        _team_name=team_name,
+        _team_abbr=team_abbr,
+        _lineup=lineup,
+        _batters=batters,
+        _alt_score=alt_score,
+        _dh_used=dh_used,
+        _fatigue_benched=fatigue_benched,
+        _args_str=args_str,
+        _hand=hand,
+        _excluded_names=excluded_names,
+        _forced_bench=forced_bench,
+        _primary_only=primary_only,
+        _fatigue_threshold=fatigue_threshold,
+        _favor_offense=favor_offense,
     )
-    return str(report_path), data_dict
+    return data_dict
+
+
+def generate_lineup_report(save_name, team_query=None, philosophy="modern",
+                           opponent_hand=None, excluded_names=None,
+                           primary_only=False, forced_starts=None,
+                           forced_bench=None, fatigue_threshold=None,
+                           favor_offense=False, raw_args=""):
+    """
+    Generate (or return cached) lineup optimizer report.
+
+    forced_starts:     list of {"name": str, "pos": int|None} — player is guaranteed
+                       a lineup spot; if pos is given they're locked to that position
+                       (bypasses eligibility floors).
+    forced_bench:      list of player name strings — excluded from lineup regardless.
+    fatigue_threshold: int 0-100 — auto-bench any player whose fatigue_points >= this.
+                       When set, also bypasses cache.
+    favor_offense:     bool — reduces defense weight at premium positions (C, 2B,
+                       SS, CF), overriding moderate batting advantages.
+
+    Returns:
+        (path_str, data_dict)  on generation
+        (path_str, None)       on cache hit
+        (None, None)           on error / team not found
+    """
+    if philosophy not in PHILOSOPHIES:
+        philosophy = "modern"
+    excluded_names = list(excluded_names or [])
+    forced_starts = forced_starts or []
+    forced_bench = forced_bench or []
+    hand = (opponent_hand or "").upper()[:1]
+    if hand not in ("L", "R"):
+        hand = None
+
+    # Cache check requires team_abbr — resolve team with a quick DB call
+    engine = get_engine(save_name)
+    with engine.connect() as conn:
+        team_id, team_name, team_abbr = resolve_team(conn, team_query)
+        if not team_id:
+            return None, None
+
+        args_key = dict(
+            philosophy=philosophy,
+            hand=hand,
+            primary_only=primary_only,
+            excluded=sorted(excluded_names),
+            forced_starts=sorted(str(fs) for fs in (forced_starts or [])),
+            forced_bench=sorted(forced_bench or []),
+            fatigue_threshold=fatigue_threshold,
+            favor_offense=favor_offense,
+            raw_args=raw_args.strip().lower(),
+        )
+        report_dir = get_reports_dir(save_name, "lineups")
+        report_path = report_dir / report_filename("lineup_" + team_abbr.lower(), args_key)
+        last_import = get_last_import_time()
+        if report_path.exists() and last_import:
+            if report_path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
+                return str(report_path), None
+
+    # Cache miss — query all data
+    data = query_lineup(save_name, team_query=team_query, philosophy=philosophy,
+                        opponent_hand=opponent_hand, excluded_names=excluded_names,
+                        primary_only=primary_only, forced_starts=forced_starts,
+                        forced_bench=forced_bench, fatigue_threshold=fatigue_threshold,
+                        favor_offense=favor_offense)
+    if data is None:
+        return None, None
+
+    # Extract private keys for HTML
+    team_name = data.pop("_team_name")
+    team_abbr = data.pop("_team_abbr")
+    lineup = data.pop("_lineup")
+    batters = data.pop("_batters")
+    alt_score = data.pop("_alt_score")
+    dh_used = data.pop("_dh_used")
+    fatigue_benched = data.pop("_fatigue_benched")
+    args_str = data.pop("_args_str")
+    hand = data.pop("_hand")
+    excluded_names = data.pop("_excluded_names")
+    forced_bench = data.pop("_forced_bench")
+    primary_only = data.pop("_primary_only")
+    fatigue_threshold = data.pop("_fatigue_threshold")
+    favor_offense = data.pop("_favor_offense")
+
+    _disp = []
+    if hand:
+        _disp.append("vs LHP" if hand == "L" else "vs RHP")
+    if primary_only:
+        _disp.append("Primary only")
+    if favor_offense:
+        _disp.append("Favor offense")
+    if excluded_names:
+        names = ", ".join(excluded_names[:3]) + ("…" if len(excluded_names) > 3 else "")
+        _disp.append(f"Excl: {names}")
+    if forced_bench:
+        _disp.append("Bench: " + ", ".join(forced_bench[:2]))
+    if fatigue_threshold is not None:
+        _disp.append(f"Fatigue ≤{fatigue_threshold}%")
+    if raw_args.strip():
+        _disp.append(raw_args.strip())
+    args_display = " · ".join(_disp)
+
+    html_content = build_html(
+        team_name, team_abbr, philosophy, hand,
+        lineup, batters, alt_score,
+        dh_used, save_name, excluded_names,
+        primary_only=primary_only,
+        forced_bench=forced_bench,
+        fatigue_threshold=fatigue_threshold,
+        fatigue_benched=fatigue_benched,
+        favor_offense=favor_offense,
+        args_str=args_str,
+        args_display=args_display,
+    )
+    write_report_html(report_path, html_content)
+
+    return str(report_path), data
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ AI features run locally through [Claude](https://claude.ai) — no data leaves y
 
 **How it works:**
 ```
-OOTP CSV export → importer → PostgreSQL → analytics engine → Claude skills + web UI
+OOTP CSV export → importer → SQLite/PostgreSQL → analytics engine → Claude skills + web UI
 ```
-OOTP exports your save as CSV files, which the importer loads into a local PostgreSQL database. Each import runs an analytics pipeline on top of the raw data — computing advanced stats like wRC+, FIP, and xFIP, along with composite player ratings. Because advanced stats accumulate across imports rather than being overwritten, you build up a multi-year picture of your players over time. Claude Code skills query that database to generate scouting reports, free agent searches, and draft analyses. A lightweight web UI ties it all together for triggering imports and browsing reports without touching the terminal.
+OOTP exports your save as CSV files, which the importer loads into a local database. **SQLite is the default** — no server setup required. Each import runs an analytics pipeline on top of the raw data — computing advanced stats like wRC+, FIP, and xFIP, along with composite player ratings. Because advanced stats accumulate across imports rather than being overwritten, you build up a multi-year picture of your players over time. Claude Code skills query that database to generate scouting reports, free agent searches, and draft analyses. A lightweight web UI ties it all together for triggering imports and browsing reports without touching the terminal.
 
 OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. It has not been tested with the Steam version or on Windows. Pull requests adding support for either are very welcome.
 
@@ -32,14 +32,20 @@ OOTP Analyst has been developed and tested on **macOS with the standalone versio
   - [`/contract-extension`](#contract-extension-first-last)
   - [`/waiver-claim`](#waiver-claim-first-last)
   - [`/lineup-optimizer`](#lineup-optimizer-options)
+- [Claude Desktop (MCP)](#claude-desktop-mcp)
+  - [Prerequisites](#prerequisites-1)
+  - [Configuration](#configuration)
+  - [Available Tools](#available-tools)
+  - [Example Conversations](#example-conversations)
 - [Contributing](#contributing)
 
 ## Prerequisites
 
 - [Python 3.11+](https://www.python.org/downloads/)
-- [PostgreSQL](https://www.postgresql.org/download/) running locally
 - [Claude Code CLI](https://claude.ai/code)
 - [OOTP Baseball 27](https://www.ootpdevelopments.com/out-of-the-park-baseball-home/)
+
+No database server required — SQLite is used by default and needs no configuration.
 
 ### Installing Python
 
@@ -56,7 +62,18 @@ Or download the installer from [python.org](https://www.python.org/downloads/).
 sudo apt update && sudo apt install python3.11 python3.11-venv
 ```
 
-### Installing PostgreSQL
+### Using PostgreSQL (optional)
+
+SQLite works well for most uses. If you want PostgreSQL (better performance for large saves or multi-user access), install it and add a `.env` file:
+
+```
+DATABASE_URL=postgresql://postgres@localhost:5432
+```
+
+Then install the PostgreSQL driver:
+```bash
+.venv/bin/pip install -r requirements-postgres.txt
+```
 
 **macOS:** The simplest option is [Postgres.app](https://postgresapp.com) — download, drag to Applications, and launch. It runs in your menu bar. Then add the CLI tools to your PATH (instructions on the Postgres.app site).
 
@@ -96,18 +113,15 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+```
 
-# Configure environment
+No `.env` file is needed for the default SQLite setup. If you want to use PostgreSQL or override the OOTP save discovery path, copy `.env.example` to `.env` and edit it:
+
+```bash
 cp .env.example .env
 ```
 
-Edit `.env` if needed — the default works for most setups:
-
-```
-POSTGRES_URL=postgresql://postgres@localhost:5432
-```
-
-> If the importer can't find your OOTP saves automatically, you can add `OOTP_CSV_PATH=` to `.env` pointing to your OOTP installation directory.
+> If the importer can't find your OOTP saves automatically, add `OOTP_CSV_PATH=` to `.env` pointing to your OOTP installation directory.
 
 ## Quick Start
 
@@ -116,7 +130,7 @@ POSTGRES_URL=postgresql://postgres@localhost:5432
    ```bash
    ./web-server.sh
    ```
-   This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. The UI shows any remaining pre-requisites (PostgreSQL, etc.) and guides you through setup.
+   This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. SQLite is used by default — no database server required.
 
 3. The UI auto-discovers OOTP 27 saves. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
 4. Before exporting, configure what gets included: go to **Game > Game Settings > Database tab** and click **Database Tools > Configure data export to CSV files**. I Enabled these two options, no guarantee that removing options will work (AI might not be able to find tables it is looking for):
@@ -545,6 +559,117 @@ Forced starters are shown with a blue `[F]` badge in the report. Forced-bench an
 - **LLM analysis** — four-bullet breakdown covering the philosophy rationale, key slot decisions, hot/cold interpretation, and handedness balance assessment
 
 Reports are cached per team + philosophy + handedness until the next DB import. Runs with any overrides (forced starts/bench, fatigue threshold, favor-offense) always regenerate.
+
+---
+
+---
+
+## Claude Desktop (MCP)
+
+In addition to Claude Code skills, OOTP Analyst can connect to the **Claude Desktop app** via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). This lets you ask natural language questions and run analyses directly in a conversation — no slash commands, no terminal, no browser reports.
+
+**Claude Code vs. Claude Desktop — when to use which:**
+
+| | Claude Code | Claude Desktop |
+|--|-------------|----------------|
+| Interface | Terminal slash commands | Conversational chat |
+| Output | Rich HTML reports in browser | Inline text in conversation |
+| Best for | Deep-dive reports, side-by-side comparisons | Quick lookups, ad-hoc questions |
+
+### Prerequisites
+
+- [Claude Desktop](https://claude.ai/download) installed (macOS or Windows)
+- OOTP Analyst set up and at least one save imported (see [Setup](#setup))
+
+### Configuration
+
+Add the MCP server to Claude Desktop's config file. On macOS, the file is at:
+```
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+On Windows it is at:
+```
+%APPDATA%\Claude\claude_desktop_config.json
+```
+
+Add an `mcpServers` block (preserve any existing keys like `preferences`):
+
+```json
+{
+  "mcpServers": {
+    "ootp": {
+      "command": "/path/to/ootp-db/.venv/bin/python3",
+      "args": ["/path/to/ootp-db/src/mcp_server.py"]
+    }
+  }
+}
+```
+
+Replace `/path/to/ootp-db` with the actual path to your project directory. On macOS with the default install location this looks like:
+
+```json
+{
+  "mcpServers": {
+    "ootp": {
+      "command": "/Users/yourname/source/ootp-db/.venv/bin/python3",
+      "args": ["/Users/yourname/source/ootp-db/src/mcp_server.py"]
+    }
+  }
+}
+```
+
+**Quit and relaunch Claude Desktop** after saving the file. The OOTP tools will appear under the tools icon (⚙) in any conversation.
+
+### Available Tools
+
+The MCP server exposes nine tools. Claude Desktop selects and calls them automatically based on your question — you never invoke them directly.
+
+| Tool | What it does |
+|------|-------------|
+| `get_save_info` | Active save name, your team, and last import timestamp |
+| `standings` | Current MLB division standings |
+| `player_stats` | Bio, composite ratings, and advanced stats for any MLB player |
+| `free_agents` | Filter free agents by position, age, rating, handedness, or custom SQL |
+| `draft_prospects` | Search the draft pool or IFA pool by position, age, and ceiling |
+| `waiver_claim` | Compare a waiver/DFA candidate against your roster; surfaces rating deltas, contract, and injury info |
+| `contract_extension` | Extension recommendation with WAR projection, market comps, and personality factors |
+| `lineup_optimizer` | Optimal batting order using one of four sabermetric philosophies |
+| `trade_targets` | Find realistic return candidates for a player you're willing to move |
+
+### Example Conversations
+
+```
+Who should I be targeting on waivers right now?
+
+Show me the AL Central standings.
+
+How is Jackson Jobe pitching this season?
+
+Find me a lefty reliever, ideally under 28 with a low injury risk.
+
+What would a fair extension look like for Riley Greene?
+
+Give me the modern lineup vs a right-handed starter.
+
+I want to trade Tarik Skubal — what kind of return could I get?
+
+Who are the best IFA prospects this year?
+```
+
+Because Claude Desktop is a full conversation, you can follow up naturally:
+
+```
+You: Show me the top free agent shortstops.
+Claude: [calls free_agents, returns list]
+
+You: Tell me more about the second one.
+Claude: [calls player_stats for that player]
+
+You: Would he be worth claiming if he clears waivers?
+Claude: [calls waiver_claim]
+```
+
+> **Note:** The active save and team are determined automatically from the saves registry (`saves.sqlite.json` or `saves.postgresql.json`). If you want to switch the active save before a session, use the web UI or run `./import.sh` for that save.
 
 ---
 
