@@ -752,6 +752,13 @@ def generate_batter_section_html(data):
                  f'<td>{float(war):.1f}</td><td>{float(wpa):.1f}</td></tr>')
     html += '</table>'
 
+    # Fallback: split rows sometimes have team_id=0; use overall row's team for that year
+    overall_team_by_year = {}
+    for row in data.get("career_overall", []):
+        yr_o, tid_o = int(row[0]), row[1]
+        if tid_o:
+            overall_team_by_year[yr_o] = tid_o
+
     def split_table(title, rows):
         h = f'<h3>{title}</h3><table><tr>'
         for c in ['Year', 'Tm', 'G', 'PA', 'AB', 'R', 'H', '2B', '3B', 'HR', 'RBI', 'BB', 'K', 'SB',
@@ -763,7 +770,8 @@ def generate_batter_section_html(data):
             lg = lg_avgs.get(int(yr))
             rates = calc_rates(int(ab), int(h_val), int(d), int(t), int(hr), int(bb), int(k),
                                int(hp), int(sf), int(pa), lg)
-            tm = team_abbrs.get(tid, "?")
+            effective_tid = tid if tid else overall_team_by_year.get(int(yr), 0)
+            tm = team_abbrs.get(effective_tid, "?")
             h += (f'<tr><td>{yr}</td><td>{tm}</td><td>{g}</td><td>{pa}</td><td>{ab}</td>'
                   f'<td>{r}</td><td>{h_val}</td><td>{d}</td><td>{t}</td><td>{hr}</td>'
                   f'<td>{rbi}</td><td>{bb}</td><td>{k}</td><td>{sb}</td>'
@@ -975,6 +983,12 @@ def generate_pitcher_section_html(data):
         html += '</table>'
 
         # Career pitching splits
+        overall_team_by_year_p = {}
+        for row in career_p:
+            yr_o, tid_o = int(row[0]), row[1]
+            if tid_o:
+                overall_team_by_year_p[yr_o] = tid_o
+
         def pitch_split_table(title, rows):
             h = f'<h3>{title}</h3><table><tr>'
             for c in ['Year', 'Tm', 'G', 'IP', 'H', 'HR', 'BB', 'K',
@@ -987,7 +1001,8 @@ def generate_pitcher_section_html(data):
                 lg_p = lg_pitch.get(int(yr))
                 rates = calc_pitching_rates(float(ip), int(ha), int(hra), int(bb), int(k),
                                             int(er), int(bf), int(hp), int(gb), int(fb), lg_p)
-                tm = team_abbrs.get(tid, "?")
+                effective_tid = tid if tid else overall_team_by_year_p.get(int(yr), 0)
+                tm = team_abbrs.get(effective_tid, "?")
                 h += (f'<tr><td>{yr}</td><td>{tm}</td><td>{g}</td>'
                       f'<td>{float(ip):.1f}</td><td>{ha}</td><td>{hra}</td>'
                       f'<td>{bb}</td><td>{k}</td>'
