@@ -825,9 +825,9 @@ def fetch_career_trend_stats(engine, first_name, last_name):
         rows = conn.execute(text(
             "SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war "
             "FROM players_career_batting_stats "
-            "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
+            "WHERE player_id=:pid AND split_id=:split_id AND league_id=:league_id AND level_id=:level_id "
             "ORDER BY year DESC LIMIT 4"
-        ), {"pid": pid}).fetchall()
+        ), dict(pid=pid, split_id=SPLIT_CAREER_OVERALL, league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID)).fetchall()
 
         if rows:
             lines = ["TYPE:batter"]
@@ -838,12 +838,12 @@ def fetch_career_trend_stats(engine, first_name, last_name):
                 obp   = safe_div((h or 0) + (bb or 0) + (hp or 0),
                                  (ab or 0) + (bb or 0) + (hp or 0) + (sf or 0))
                 slg   = safe_div(singles + 2*(d or 0) + 3*(t or 0) + 4*(hr or 0), ab)
-                iso   = (slg - avg) if slg and avg else None
+                iso   = (slg - avg) if slg is not None and avg is not None else None
                 babip = safe_div((h or 0) - (hr or 0),
                                  (ab or 0) - (k or 0) - (hr or 0) + (sf or 0))
                 k_pct  = safe_div((k or 0) * 100, pa)
                 bb_pct = safe_div((bb or 0) * 100, pa)
-                ops    = (obp + slg) if obp and slg else None
+                ops    = (obp + slg) if obp is not None and slg is not None else None
                 war_str = fmt_v(float(war), 1) if war is not None else "--"
                 lines.append(
                     f"YEAR:{yr} G:{g} PA:{pa} HR:{hr} "
@@ -856,9 +856,9 @@ def fetch_career_trend_stats(engine, first_name, last_name):
         rows = conn.execute(text(
             "SELECT year, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war "
             "FROM players_career_pitching_stats "
-            "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
+            "WHERE player_id=:pid AND split_id=:split_id AND league_id=:league_id AND level_id=:level_id "
             "ORDER BY year DESC LIMIT 4"
-        ), {"pid": pid}).fetchall()
+        ), dict(pid=pid, split_id=SPLIT_CAREER_OVERALL, league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID)).fetchall()
         if rows:
             lines = ["TYPE:pitcher"]
             for r in rows:
@@ -868,7 +868,7 @@ def fetch_career_trend_stats(engine, first_name, last_name):
                 whip   = safe_div((ha or 0) + (bb or 0), ip_f)
                 k_pct  = safe_div((k or 0) * 100, bf)
                 bb_pct = safe_div((bb or 0) * 100, bf)
-                kbb    = (k_pct - bb_pct) if k_pct and bb_pct else None
+                kbb    = (k_pct - bb_pct) if k_pct is not None and bb_pct is not None else None
                 hr9    = safe_div((hra or 0) * 9, ip_f)
                 total_bf = (gb or 0) + (fb or 0)
                 gb_pct = safe_div((gb or 0) * 100, total_bf)

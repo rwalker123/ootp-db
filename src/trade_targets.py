@@ -182,7 +182,7 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
              <player_type>|<wrc_fip>|<war>|<yrs_remaining>|<salary>|<svc_years>|<team_abbr>
       NEED=<position>|<cnt>|<avg_rating>|<best_rating>  (offering mode, sorted by avg_rating)
     """
-    from shared_css import load_saves_registry, get_engine
+    from shared_css import load_saves_registry
 
     registry = load_saves_registry()
     save_data = registry.get("saves", {}).get(save_name, {})
@@ -207,18 +207,18 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
             if len(parts) == 2:
                 first, last = parts[0], parts[1]
                 if mode == "acquiring":
-                    team_filter = (
-                        f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
-                    )
+                    team_filter = "p.team_id != :tid AND p.league_id = :league_id"
+                    query_params = dict(tid=my_team_id, league_id=MLB_LEAGUE_ID, first=first, last=last)
                 else:
-                    team_filter = f"p.team_id = {my_team_id}"
+                    team_filter = "p.team_id = :tid"
+                    query_params = dict(tid=my_team_id, first=first, last=last)
 
                 players = conn.execute(text(
                     _SELECT + _FROM
                     + f"WHERE {team_filter} AND p.free_agent = 0 AND p.retired = 0 "
                     "AND p.first_name = :first AND p.last_name = :last "
                     "ORDER BY pr.rating_overall DESC LIMIT 5"
-                ), {"first": first, "last": last}).fetchall()
+                ), query_params).fetchall()
 
                 for r in players:
                     d = row_to_dict(r)
