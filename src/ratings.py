@@ -766,6 +766,90 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     )
 
 
+def fetch_career_trend_stats(engine, first_name, last_name):
+    """Fetch last 4 MLB seasons of career rate stats for a player.
+
+    Returns a list of printable strings (TYPE: and YEAR: lines) for the agent.
+    """
+    def fmt_v(v, d=3):
+        return f"{v:.{d}f}" if v is not None else "--"
+
+    def fmt_pct(v):
+        return f"{v:.1f}%" if v is not None else "--"
+
+    def safe_div(n, d):
+        return n / d if d and d > 0 else None
+
+    with engine.connect() as conn:
+        pid_row = conn.execute(
+            text("SELECT player_id FROM players WHERE first_name=:f AND last_name=:l"),
+            {"f": first_name, "l": last_name},
+        ).fetchone()
+        if not pid_row:
+            return ["PLAYER_NOT_FOUND"]
+        pid = pid_row[0]
+
+        rows = conn.execute(text(
+            "SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war "
+            "FROM players_career_batting_stats "
+            "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
+            "ORDER BY year DESC LIMIT 4"
+        ), {"pid": pid}).fetchall()
+
+        if rows:
+            lines = ["TYPE:batter"]
+            for r in rows:
+                yr, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war = r
+                singles = h - (d or 0) - (t or 0) - (hr or 0)
+                avg   = safe_div(h, ab)
+                obp   = safe_div((h or 0) + (bb or 0) + (hp or 0),
+                                 (ab or 0) + (bb or 0) + (hp or 0) + (sf or 0))
+                slg   = safe_div(singles + 2*(d or 0) + 3*(t or 0) + 4*(hr or 0), ab)
+                iso   = (slg - avg) if slg and avg else None
+                babip = safe_div((h or 0) - (hr or 0),
+                                 (ab or 0) - (k or 0) - (hr or 0) + (sf or 0))
+                k_pct  = safe_div((k or 0) * 100, pa)
+                bb_pct = safe_div((bb or 0) * 100, pa)
+                ops    = (obp + slg) if obp and slg else None
+                war_str = fmt_v(float(war), 1) if war is not None else "--"
+                lines.append(
+                    f"YEAR:{yr} G:{g} PA:{pa} HR:{hr} "
+                    f"AVG:{fmt_v(avg)} OBP:{fmt_v(obp)} SLG:{fmt_v(slg)} OPS:{fmt_v(ops)} "
+                    f"ISO:{fmt_v(iso)} BABIP:{fmt_v(babip)} "
+                    f"K%:{fmt_pct(k_pct)} BB%:{fmt_pct(bb_pct)} WAR:{war_str}"
+                )
+            return lines
+
+        rows = conn.execute(text(
+            "SELECT year, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war "
+            "FROM players_career_pitching_stats "
+            "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
+            "ORDER BY year DESC LIMIT 4"
+        ), {"pid": pid}).fetchall()
+        if rows:
+            lines = ["TYPE:pitcher"]
+            for r in rows:
+                yr, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war = r
+                ip_f   = float(ip) if ip else 0
+                era    = safe_div((er or 0) * 9, ip_f)
+                whip   = safe_div((ha or 0) + (bb or 0), ip_f)
+                k_pct  = safe_div((k or 0) * 100, bf)
+                bb_pct = safe_div((bb or 0) * 100, bf)
+                kbb    = (k_pct - bb_pct) if k_pct and bb_pct else None
+                hr9    = safe_div((hra or 0) * 9, ip_f)
+                total_bf = (gb or 0) + (fb or 0)
+                gb_pct = safe_div((gb or 0) * 100, total_bf)
+                war_str = fmt_v(float(war), 1) if war is not None else "--"
+                lines.append(
+                    f"YEAR:{yr} G:{g} GS:{gs} IP:{fmt_v(ip_f, 1)} ERA:{fmt_v(era)} "
+                    f"WHIP:{fmt_v(whip)} K%:{fmt_pct(k_pct)} BB%:{fmt_pct(bb_pct)} "
+                    f"K-BB%:{fmt_pct(kbb)} HR/9:{fmt_v(hr9)} GB%:{fmt_pct(gb_pct)} WAR:{war_str}"
+                )
+            return lines
+
+        return ["NO_CAREER_DATA"]
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

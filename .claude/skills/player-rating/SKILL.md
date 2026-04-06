@@ -37,8 +37,8 @@ modifiers (e.g., "defense", "power, discipline").
 .venv/bin/python3 << 'PYEOF'
 import sys
 sys.path.insert(0, "src")
-from ratings import generate_rating_report
-from shared_css import load_saves_registry
+from ratings import generate_rating_report, fetch_career_trend_stats
+from shared_css import load_saves_registry, get_engine
 save_name = load_saves_registry()["active"]
 args = "<FIRST> <LAST>".split()  # substituted from $ARGUMENTS
 first, last = args[0], args[1]
@@ -50,6 +50,10 @@ else:
     print(f"GENERATED:{path}")
     for k, v in data.items():
         print(f"{k}={v}")
+    engine = get_engine(save_name)
+    career_lines = fetch_career_trend_stats(engine, first, last)
+    for line in career_lines:
+        print(line)
 PYEOF
 ```
 
@@ -64,98 +68,9 @@ Then print:
 `~ Cache hit — skipped regen | est. 1–2¢`
 Then STOP — do not regenerate or read the HTML file.
 
-If the output starts with `GENERATED:` — continue to Step 1.5.
-
-### Step 1.5: Fetch career trend stats (last 4 MLB seasons)
-
-Using the first/last name and `player_type` from the data dict, run this supplemental
-query to get year-by-year rate stats. Use `dict()` not `{}` for params:
-
-```bash
-.venv/bin/python3 << 'PYEOF'
-import sys
-sys.path.insert(0, "src")
-from sqlalchemy import text
-from dotenv import load_dotenv
-from shared_css import load_saves_registry, get_engine
-load_dotenv(".env")
-save_name = load_saves_registry()["active"]
-engine = get_engine(save_name)
-
-def safe_div(n, d):
-    return n / d if d and d > 0 else None
-
-with engine.connect() as conn:
-    pid_row = conn.execute(text(
-        "SELECT player_id FROM players WHERE first_name=:f AND last_name=:l"
-    ), dict(f="<FIRST>", l="<LAST>")).fetchone()
-    if not pid_row:
-        print("PLAYER_NOT_FOUND")
-    else:
-        pid = pid_row[0]
-
-        # Try batting first
-        rows = conn.execute(text(
-            "SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war "
-            "FROM players_career_batting_stats "
-            "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
-            "ORDER BY year DESC LIMIT 4"
-        ), dict(pid=pid)).fetchall()
-
-        if rows:
-            print("TYPE:batter")
-            for r in rows:
-                yr, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war = r
-                singles = h - (d or 0) - (t or 0) - (hr or 0)
-                avg  = safe_div(h, ab)
-                obp  = safe_div((h or 0) + (bb or 0) + (hp or 0),
-                                (ab or 0) + (bb or 0) + (hp or 0) + (sf or 0))
-                slg  = safe_div(singles + 2*(d or 0) + 3*(t or 0) + 4*(hr or 0), ab)
-                iso  = (slg - avg) if slg and avg else None
-                babip = safe_div((h or 0) - (hr or 0),
-                                 (ab or 0) - (k or 0) - (hr or 0) + (sf or 0))
-                k_pct  = safe_div((k or 0) * 100, pa)
-                bb_pct = safe_div((bb or 0) * 100, pa)
-                ops = (obp + slg) if obp and slg else None
-                def f(v): return f"{v:.3f}" if v is not None else "--"
-                def fp(v): return f"{v:.1f}%" if v is not None else "--"
-                war_str = f"{float(war):.1f}" if war is not None else "--"
-                print(f"YEAR:{yr} G:{g} PA:{pa} HR:{hr} AVG:{f(avg)} OBP:{f(obp)} "
-                      f"SLG:{f(slg)} OPS:{f(ops)} ISO:{f(iso)} BABIP:{f(babip)} "
-                      f"K%:{fp(k_pct)} BB%:{fp(bb_pct)} WAR:{war_str}")
-        else:
-            # Try pitching
-            rows = conn.execute(text(
-                "SELECT year, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war "
-                "FROM players_career_pitching_stats "
-                "WHERE player_id=:pid AND split_id=1 AND league_id=203 AND level_id=1 "
-                "ORDER BY year DESC LIMIT 4"
-            ), dict(pid=pid)).fetchall()
-            if rows:
-                print("TYPE:pitcher")
-                for r in rows:
-                    yr, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war = r
-                    ip_f = float(ip) if ip else 0
-                    era   = safe_div((er or 0) * 9, ip_f)
-                    whip  = safe_div((ha or 0) + (bb or 0), ip_f)
-                    k_pct = safe_div((k or 0) * 100, bf)
-                    bb_pct= safe_div((bb or 0) * 100, bf)
-                    kbb   = (k_pct - bb_pct) if k_pct and bb_pct else None
-                    hr9   = safe_div((hra or 0) * 9, ip_f)
-                    total_bf = (gb or 0) + (fb or 0)
-                    gb_pct = safe_div((gb or 0) * 100, total_bf)
-                    def f(v, d=2): return f"{v:.{d}f}" if v is not None else "--"
-                    def fp(v): return f"{v:.1f}%" if v is not None else "--"
-                    war_str = f"{float(war):.1f}" if war is not None else "--"
-                    print(f"YEAR:{yr} G:{g} GS:{gs} IP:{f(ip_f,1)} ERA:{f(era)} "
-                          f"WHIP:{f(whip)} K%:{fp(k_pct)} BB%:{fp(bb_pct)} "
-                          f"K-BB%:{fp(kbb)} HR/9:{f(hr9)} GB%:{fp(gb_pct)} WAR:{war_str}")
-            else:
-                print("NO_CAREER_DATA")
-PYEOF
-```
-
-Record all printed stats by year. You now have everything needed for Step 2.
+If the output starts with `GENERATED:` — continue to Step 2. The output also contains:
+- `key=value` lines from the data dict (player name, team, ratings, flags)
+- `TYPE:batter` or `TYPE:pitcher` followed by `YEAR:...` lines (last 4 MLB seasons)
 
 ### Step 2: Write the rating summary
 
@@ -168,7 +83,7 @@ analysis using the data dict from Step 1 and the WAR trend from Step 1.5.
 2. **Strengths / Weaknesses** — 2-3 top sub-scores vs bottom sub-scores; reference bands. For the Defense sub-score, note the position-specific factors that drove it: for catchers highlight framing and CS%; for middle infielders (2B/SS) note DP rate and ZR; for CF note range (ZR) and putout rate; for corner OF note arm and ZR
 3. **Durability & Personality** — injury risk flag, proneness profile, work ethic, leadership if flagged
 4. **Focus modifier impact** — if focus modifiers were passed, explain how re-weighting changes the picture; skip this bullet if no modifiers
-5. **Future Outlook** — synthesize the year-by-year trend data from Step 1.5 with the rating factors:
+5. **Future Outlook** — synthesize the year-by-year trend data (YEAR: lines from Step 1 output) with the rating factors:
    - **Trend direction**: for batters, look at OPS/ISO/BABIP/WAR direction over the last 3-4 seasons — rising, flat, or declining; for pitchers, use ERA/WHIP/K-BB%/WAR
    - **Consistency**: note if the stats are stable year-to-year or volatile (high variance = projection risk)
    - **OA→POT gap**: gap ≥ 10 = meaningful upside remaining; gap < 5 = near ceiling — combine with age to assess likelihood of realizing it

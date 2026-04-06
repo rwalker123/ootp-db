@@ -166,6 +166,86 @@ def get_years_remaining(d):
     return years - current_year
 
 
+def lookup_trade_context(save_name, player_name=None, mode="offering"):
+    """Pre-flight lookup for trade target search.
+
+    Loads team identity, optionally matches a player by name, and fetches
+    positional needs for the managed team (offering mode only).
+
+    Prints to stdout for the agent to parse:
+      MY_TEAM_ID=<id>
+      MY_TEAM_ABBR=<abbr>
+      MY_TEAM_NAME=<name>
+      PLAYER=<player_id>|<first>|<last>|<pos>|<age>|<oa>|<pot>|<rating>|
+             <player_type>|<wrc_fip>|<war>|<yrs_remaining>|<salary>|<svc_years>|<team_abbr>
+      NEED=<position>|<cnt>|<avg_rating>|<best_rating>  (offering mode, sorted by avg_rating)
+    """
+    from shared_css import load_saves_registry, get_engine
+
+    registry = load_saves_registry()
+    save_data = registry.get("saves", {}).get(save_name, {})
+    my_team_id = int(save_data.get("my_team_id") or 10)
+    my_team_abbr = save_data.get("my_team_abbr") or "???"
+
+    engine = get_engine(save_name)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT name, nickname FROM teams WHERE team_id = :tid LIMIT 1"),
+            {"tid": my_team_id},
+        ).mappings().fetchone()
+        my_team_name = f"{row['name']} {row['nickname']}" if row else my_team_abbr
+
+        print(f"MY_TEAM_ID={my_team_id}")
+        print(f"MY_TEAM_ABBR={my_team_abbr}")
+        print(f"MY_TEAM_NAME={my_team_name}")
+
+        if player_name:
+            parts = player_name.strip().split(None, 1)
+            if len(parts) == 2:
+                first, last = parts[0], parts[1]
+                if mode == "acquiring":
+                    team_filter = (
+                        f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
+                    )
+                else:
+                    team_filter = f"p.team_id = {my_team_id}"
+
+                players = conn.execute(text(
+                    _SELECT + _FROM
+                    + f"WHERE {team_filter} AND p.free_agent = 0 AND p.retired = 0 "
+                    "AND p.first_name = :first AND p.last_name = :last "
+                    "ORDER BY pr.rating_overall DESC LIMIT 5"
+                ), {"first": first, "last": last}).fetchall()
+
+                for r in players:
+                    d = row_to_dict(r)
+                    yrs_rem = get_years_remaining(d)
+                    sal = get_current_salary(d) or 0
+                    print(
+                        f"PLAYER={d['player_id']}|{d['first_name']}|{d['last_name']}|"
+                        f"{d['position']}|{d['age']}|{d['oa']}|{d['pot']}|"
+                        f"{round(float(d['rating_overall'] or 0), 1)}|{d['player_type']}|"
+                        f"{d['wrc_plus']}|{d['war']}|{yrs_rem}|{sal}|"
+                        f"{d['mlb_service_years']}|{d['team_abbr']}"
+                    )
+
+        if mode == "offering":
+            needs = conn.execute(text(
+                "SELECT pr.position, COUNT(*) AS cnt, "
+                "ROUND(AVG(pr.rating_overall), 1) AS avg_rating, "
+                "MAX(pr.rating_overall) AS best_rating "
+                "FROM team_roster tr "
+                "JOIN player_ratings pr ON pr.player_id = tr.player_id "
+                "WHERE tr.team_id = :tid AND tr.list_id IN (1, 2) "
+                "GROUP BY pr.position "
+                "ORDER BY avg_rating ASC"
+            ), {"tid": my_team_id}).fetchall()
+            for r in needs:
+                pos, cnt, avg_r, best_r = r
+                print(f"NEED={pos}|{cnt}|{avg_r}|{best_r}")
+
+
 def _fmt_score_cell(val):
     if val is None:
         return "<td>—</td>"

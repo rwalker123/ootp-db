@@ -34,36 +34,7 @@ Use this as the agent prompt, substituting from $ARGUMENTS:
 
 Find trade targets based on: **"$ARGUMENTS"**.
 
-### Step 0: Detect Direction and Load My Team
-
-Before looking up players, determine trade direction and load team identity:
-
-```bash
-.venv/bin/python3 << 'PYEOF'
-import sys, os
-sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
-from shared_css import load_saves_registry
-load_dotenv(".env")
-registry = load_saves_registry()
-save = registry["active"]
-save_info = registry.get("saves", {}).get(save, {})
-my_team_id = save_info.get("my_team_id") or 10
-my_team_abbr = save_info.get("my_team_abbr") or "???"
-db = save.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(os.getenv("POSTGRES_URL").rstrip("/") + "/" + db)
-with engine.connect() as conn:
-    row = conn.execute(text(
-        "SELECT name, nickname FROM teams WHERE team_id = :tid LIMIT 1"
-    ), dict(tid=my_team_id)).mappings().fetchone()
-my_team_name = f"{row['name']} {row['nickname']}" if row else my_team_abbr
-print(f"save={save}")
-print(f"my_team_id={my_team_id}")
-print(f"my_team_abbr={my_team_abbr}")
-print(f"my_team_name={my_team_name}")
-PYEOF
-```
+### Step 0: Parse Arguments and Run Pre-flight Lookup
 
 **Direction detection** — scan `$ARGUMENTS` for keywords (case-insensitive):
 - `acquiring`, `targeting`, `want to get`, `to get`, `cost to get`, `what would it cost` → **mode = "acquiring"**
@@ -73,57 +44,38 @@ PYEOF
 - `offering`: You're trading away a player on your team. `offered_where` matches your player; `target_where` filters other teams.
 - `acquiring`: You want a player on another team. `offered_where` matches that player; `target_where` filters players on your team you'd give up.
 
-### Step 1: Look Up the Key Player(s)
+**Player name extraction** — parse `$ARGUMENTS` for the key player name(s):
+- Named player (e.g., "Jack Morris", "acquiring Aaron Judge") → extract "First Last"
+- Multiple players (e.g., "Jackson Jobe and Kyle Finnegan") → extract first player name for the primary lookup; build `offered_where` to cover both by name
+- Category only (e.g., "surplus outfielders, need SP") → set player_name to empty string
 
-Query the roster to identify the players in the trade. Team to search depends on mode:
+Then run the pre-flight lookup (substituting the parsed values):
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
-import sys, os
+import sys
 sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
+from trade_targets import lookup_trade_context
 from shared_css import load_saves_registry
-from pathlib import Path
-load_dotenv(Path(".env"))
-registry = load_saves_registry()
-save = registry["active"]
-my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
-db = save.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(f"{os.getenv('POSTGRES_URL')}/{db}")
-with engine.connect() as conn:
-    # For "offering" mode: search your team. For "acquiring": search all MLB teams.
-    result = conn.execute(text("""
-        SELECT p.player_id, p.first_name, p.last_name, pr.position, pr.age,
-               pr.oa, pr.pot, pr.rating_overall, pr.player_type, pr.wrc_plus, pr.war,
-               pc.years, pc.current_year, pc.salary0, prs.mlb_service_years,
-               t.abbr as team_abbr
-        FROM players p
-        JOIN player_ratings pr ON pr.player_id = p.player_id
-        LEFT JOIN players_contract pc ON pc.player_id = p.player_id
-        LEFT JOIN players_roster_status prs ON prs.player_id = p.player_id
-        LEFT JOIN teams t ON t.team_id = p.team_id
-        WHERE p.league_id = 203 AND p.free_agent = 0 AND p.retired = 0
-        ORDER BY pr.rating_overall DESC
-    """)).fetchall()
-    for r in result:
-        print(r)
+save_name = load_saves_registry()["active"]
+lookup_trade_context(save_name, player_name="<PLAYER_NAME_OR_EMPTY>", mode="<MODE>")
 PYEOF
 ```
 
-**Offering mode**: Identify the player(s) on your team (team_id = my_team_id) matching `$ARGUMENTS`. If they described a category (e.g., "surplus outfielders"), pick the lowest-rated at that position on your team.
+Parse the output:
+- `MY_TEAM_ID=<n>` → `my_team_id` (pass to Step 5)
+- `MY_TEAM_ABBR=<abbr>` / `MY_TEAM_NAME=<name>` → used in the callout (Step 6)
+- `PLAYER=<pipe-delimited>` → matched player fields in order:
+  `player_id|first_name|last_name|position|age|oa|pot|rating_overall|player_type|wrc_fip|war|yrs_remaining|salary|svc_years|team_abbr`
+- `NEED=<pos>|<cnt>|<avg_rating>|<best_rating>` → positional needs, ascending by avg_rating (offering mode only)
 
-**Acquiring mode**: Identify the target player on any OTHER team matching the name in `$ARGUMENTS`. That player is what you want; build `offered_where` to match them by name.
+**After parsing:**
 
-**Record for each offered player:**
-- player_id, name, position, age, rating_overall, player_type
-- wrc_plus (displayed as FIP for pitchers), war
-- years_remaining = years - current_year, salary0 as approximate current salary
-- mlb_service_years (controls pre-arb / arb / FA status)
+For a matched `PLAYER` line, record the player data and build `offered_where`:
+- `p.first_name = 'First' AND p.last_name = 'Last'`
+- For multiple players: `(p.last_name = 'Jobe') OR (p.last_name = 'Finnegan')`
 
-Build the `offered_where` SQL fragment to match these players by name, e.g.:
-`p.last_name = 'Keith' AND p.first_name = 'Colt'`
-For multiple players: `(p.last_name = 'Jobe') OR (p.last_name = 'Finnegan')`
+For a category-only query (no PLAYER line), build `offered_where` from the positional criteria in `$ARGUMENTS` targeting your team (e.g., `p.team_id = my_team_id AND pr.position IN (7,8,9) ORDER BY pr.rating_overall ASC LIMIT 1`).
 
 ### Step 2: Assess Trade Value
 
@@ -149,40 +101,8 @@ Adjust the range (max ±4 OA points total, not cumulative):
 
 Skip this step in **acquiring** mode — you already know what you're giving up (players on your team in the target OA range).
 
-If `$ARGUMENTS` specifies a target type (e.g., "need starting pitching", "want a SS"), use that.
-Otherwise, check which positions are thin on your team:
-
-```bash
-.venv/bin/python3 << 'PYEOF'
-import sys, os
-sys.path.insert(0, "src")
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
-from shared_css import load_saves_registry
-from pathlib import Path
-load_dotenv(Path(".env"))
-registry = load_saves_registry()
-save = registry["active"]
-my_team_id = registry.get("saves", {}).get(save, {}).get("my_team_id") or 10
-db = save.lower().replace("-", "_").replace(" ", "_")
-engine = create_engine(f"{os.getenv('POSTGRES_URL')}/{db}")
-with engine.connect() as conn:
-    result = conn.execute(text(f"""
-        SELECT pr.position, count(*) as cnt,
-               round(avg(pr.rating_overall)::numeric, 1) as avg_rating,
-               max(pr.rating_overall) as best_rating
-        FROM team_roster tr
-        JOIN player_ratings pr ON pr.player_id = tr.player_id
-        WHERE tr.team_id = {my_team_id} AND tr.list_id IN (1, 2)
-        GROUP BY pr.position
-        ORDER BY avg_rating ASC
-    """)).fetchall()
-    for r in result:
-        print(r)
-PYEOF
-```
-
-Identify the 2–3 thinnest positions (lowest avg_rating or fewest players). Exclude the offered player's position from the needs list.
+If `$ARGUMENTS` specifies a target type (e.g., "need starting pitching", "want a SS"), use that directly.
+Otherwise use the `NEED=` lines from the Step 0 output — identify the 2–3 thinnest positions (lowest avg_rating or fewest players) and exclude the offered player's position.
 
 ### Step 4: Build the target_where Clause
 
