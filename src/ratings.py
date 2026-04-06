@@ -816,7 +816,7 @@ def fetch_career_trend_stats(engine, first_name, last_name):
     with engine.connect() as conn:
         pid_row = conn.execute(
             text("SELECT player_id FROM players WHERE first_name=:f AND last_name=:l"),
-            {"f": first_name, "l": last_name},
+            dict(f=first_name, l=last_name),
         ).fetchone()
         if not pid_row:
             return ["PLAYER_NOT_FOUND"]
