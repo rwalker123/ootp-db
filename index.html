@@ -1062,6 +1062,7 @@ function _extractReportPath(log) {
       if (abs.includes('/absolute/path/to/')) continue;  // prompt placeholder, not a real path
       // Convert absolute fs path to a server-relative URL
       const rel = abs.replace(/^.*\/reports\//, '/reports/');
+      if (!rel.startsWith('/reports/')) continue;
       return rel;
     }
   }
@@ -1279,11 +1280,12 @@ function renderLlmToggle(llms, active) {
 }
 
 async function setLlm(key) {
-  await fetch('/saves/set-llm', {
+  const r = await fetch('/saves/set-llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ llm: key }),
   });
+  if (!r.ok) return;
   _activeLlm = key;
   const pills = document.querySelectorAll('.llm-pill');
   pills.forEach(p => {
