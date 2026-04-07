@@ -19,7 +19,8 @@ Generate an OOTP player rating report for **$ARGUMENTS**.
 ### Step 1: Generate (or retrieve cached) the rating report
 
 Parse the arguments: first two words are the player name, any remaining words are focus
-modifiers (e.g., "defense", "power, discipline").
+modifiers (e.g., "defense", "power, discipline"). Substitute the **full** `$ARGUMENTS`
+string (name + any focus modifiers) into the placeholder below.
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
@@ -28,7 +29,7 @@ sys.path.insert(0, "src")
 from ratings import generate_rating_report, fetch_career_trend_stats
 from shared_css import load_saves_registry, get_engine
 save_name = load_saves_registry()["active"]
-args = "<FIRST> <LAST>".split()  # substituted from $ARGUMENTS
+args = "<FULL_ARGUMENTS>".split()  # agent substitutes full $ARGUMENTS (e.g. "Roger Clemens defense")
 first, last = args[0], args[1]
 focus = args[2:] if len(args) > 2 else None
 path, data = generate_rating_report(save_name, first, last, focus)

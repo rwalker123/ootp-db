@@ -87,14 +87,14 @@ Adjust the range (max ±4 OA points total, not cumulative):
 - **FA-year** (years_remaining ≤ 1): −4 (rental discount)
 - **Package deal** (2+ players): use the highest-OA player's tier as the anchor
 
-### Step 3: Identify Your Team's Needs (offering mode only)
+### Step 2: Identify Your Team's Needs (offering mode only)
 
 Skip this step in **acquiring** mode — you already know what you're giving up (players on your team in the target OA range).
 
 If `$ARGUMENTS` specifies a target type (e.g., "need starting pitching", "want a SS"), use that directly.
 Otherwise use the `NEED=` lines from the Step 0 output — identify the 2–3 thinnest positions (lowest avg_rating or fewest players) and exclude the offered player's position.
 
-### Step 4: Build the target_where Clause
+### Step 3: Build the target_where Clause
 
 Combine position need, value range, and any explicit user criteria:
 
@@ -137,7 +137,7 @@ move candidates based on:
 - Veteran age (32+) on a rebuilding team
 - Short years_remaining (rental a contender might flip)
 
-### Step 5: Generate the HTML Report
+### Step 4: Generate the HTML Report
 
 ```bash
 .venv/bin/python3 << 'PYEOF'
@@ -145,9 +145,8 @@ import sys
 sys.path.insert(0, "src")
 from trade_targets import generate_trade_targets_report
 from shared_css import load_saves_registry
-registry = load_saves_registry()
-save_name = registry["active"]
-my_team_id = registry.get("saves", {}).get(save_name, {}).get("my_team_id") or 10
+save_name = load_saves_registry()["active"]
+my_team_id = <MY_TEAM_ID>  # substituted from MY_TEAM_ID parsed in Step 0 output
 offered_where = "<AGENT FILLS: SQL WHERE matching offered/targeted player(s)>"
 target_where = "<AGENT FILLS: SQL WHERE for return/give-up targets>"
 target_join = "<AGENT FILLS: JOIN clause for bas/pas, or empty string>"
@@ -171,7 +170,7 @@ If `TARGETS:0` — broaden one filter at a time: widen the OA range by ±5 point
 
 If `OFFERED:0` — the player name wasn't found. Re-check the Step 1 results for near-matches (spelling, hyphenation). Retry with corrected name.
 
-### Step 6: Write the Callout Summary
+### Step 5: Write the Callout Summary
 
 The HTML file has a `<!-- TRADE_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 `<div class="summary">` containing 2–4 sentences:
@@ -194,7 +193,7 @@ Read the file, replace the placeholder, write it back. Then open the report — 
 open <path-from-GENERATED-output>
 ```
 
-### Step 7: Print Terminal Summary
+### Step 6: Print Terminal Summary
 
 ```
 Trade targets: "Lou Whitaker" — 18 return candidates

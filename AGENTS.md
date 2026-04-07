@@ -65,7 +65,7 @@ SELECT t.name, t.nickname, thr.w, thr.l
 FROM team_history th
 JOIN teams t ON t.team_id = th.team_id
 JOIN team_history_record thr ON thr.team_id = th.team_id AND thr.year = th.year
-WHERE th.year = 2027 AND th.won_playoffs = 1 AND th.league_id = 203
+WHERE th.year = 2027 AND th.won_playoffs = 1 AND th.league_id = 203  -- MLB_LEAGUE_ID
 ```
 Playoff teams for a given year:
 ```sql
@@ -74,7 +74,7 @@ FROM team_history th
 JOIN teams t ON t.team_id = th.team_id
 JOIN team_history_record thr ON thr.team_id = th.team_id AND thr.year = th.year
 JOIN divisions d ON d.league_id = th.league_id AND d.sub_league_id = th.sub_league_id AND d.division_id = th.division_id
-WHERE th.year = 2027 AND th.made_playoffs = 1 AND th.league_id = 203
+WHERE th.year = 2027 AND th.made_playoffs = 1 AND th.league_id = 203  -- MLB_LEAGUE_ID
 ORDER BY thr.w DESC
 ```
 Current season division standings (use `dict()` not `{}` for params in heredocs):
