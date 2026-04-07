@@ -163,8 +163,8 @@ where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"
 path, rows = generate_draft_targets_report(save_name, criteria, where, order_by=order_by)
-print(f"GENERATED:{path}")
-print(f"RESULT_COUNT:{len(rows)}")
+print("GENERATED:" + str(path))
+print("RESULT_COUNT:" + str(len(rows)))
 for r in rows:
     print(r)
 PYEOF
@@ -183,8 +183,8 @@ where = "<AGENT_FILLS_IN_SQL_WHERE_CLAUSE>"
 criteria = "<AGENT_FILLS_IN_CRITERIA_LABEL>"
 order_by = "<AGENT_FILLS_IN_ORDER_BY>"
 path, rows = generate_ifa_targets_report(save_name, criteria, where, order_by=order_by)
-print(f"GENERATED:{path}")
-print(f"RESULT_COUNT:{len(rows)}")
+print("GENERATED:" + str(path))
+print("RESULT_COUNT:" + str(len(rows)))
 for r in rows:
     print(r)
 PYEOF

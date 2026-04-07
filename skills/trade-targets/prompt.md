@@ -166,9 +166,9 @@ path, data = generate_trade_targets_report(
     my_team_id=my_team_id, mode=mode,
     target_join=target_join, highlight=highlight
 )
-print(f"GENERATED:{path}")
-print(f"OFFERED:{len(data['offered'])}")
-print(f"TARGETS:{len(data['targets'])}")
+print("GENERATED:" + str(path))
+print("OFFERED:" + str(len(data["offered"])))
+print("TARGETS:" + str(len(data["targets"])))
 for r in data["targets"]:
     print(r)
 PYEOF

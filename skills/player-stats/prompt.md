@@ -33,7 +33,7 @@ save_name = load_saves_registry()["active"]
 path, data = generate_player_report(save_name, "<FIRST>", "<LAST>", raw_args="$ARGUMENTS")
 
 if data is None:
-    print(f"CACHED:{path}")
+    print("CACHED:" + str(path))
 else:
     adv = data.get("advanced")
     padv = data.get("pitching_advanced")
@@ -41,51 +41,51 @@ else:
     br = data.get("batting_ratings")
     pr = data.get("pitching_ratings")
 
-    print(f"GENERATED:{path}")
+    print("GENERATED:" + str(path))
     if val:
-        print(f"OA={val[2]}, POT={val[3]}")
+        print("OA=" + str(val[2]) + ", POT=" + str(val[3]))
     else:
         print("No value ratings (free agent)")
 
     if br:
-        print(f"Contact={br[0]}, Gap={br[1]}, Power={br[2]}, Eye={br[3]}, AvoidK={br[4]}, BABIP={br[5]}")
-        print(f"Speed={br[8]}")
+        print("Contact=" + str(br[0]) + ", Gap=" + str(br[1]) + ", Power=" + str(br[2]) + ", Eye=" + str(br[3]) + ", AvoidK=" + str(br[4]) + ", BABIP=" + str(br[5]))
+        print("Speed=" + str(br[8]))
 
     if pr:
-        print(f"Stuff={pr[0]}, Movement={pr[1]}, Control={pr[2]}")
+        print("Stuff=" + str(pr[0]) + ", Movement=" + str(pr[1]) + ", Control=" + str(pr[2]))
 
     p = data["player"]
     pos = p[4]
-    print(f"Position={pos}")
+    print("Position=" + str(pos))
 
     has_batting = "career_overall" in data and len(data["career_overall"]) > 0
     has_pitching = "career_pitching" in data and len(data["career_pitching"]) > 0
     is_two_way = has_batting and has_pitching
-    print(f"Two-way={is_two_way}, has_batting={has_batting}, has_pitching={has_pitching}")
+    print("Two-way=" + str(is_two_way) + ", has_batting=" + str(has_batting) + ", has_pitching=" + str(has_pitching))
 
     if adv:
         print("\nBATTING ADVANCED:")
         for k, v in adv.items():
-            print(f"  {k}={v}")
+            print("  " + str(k) + "=" + str(v))
 
     if padv:
         print("\nPITCHING ADVANCED:")
         for k, v in padv.items():
-            print(f"  {k}={v}")
+            print("  " + str(k) + "=" + str(v))
 
     if has_batting:
         print("\nBatting Career:")
         for row in data["career_overall"]:
             yr, tid, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa = row
             ba = h/ab if ab > 0 else 0
-            print(f"  {yr}: {g}G {pa}PA .{ba:.3f} {hr}HR {war:.1f}WAR")
+            print("  %s: %dG %dPA .%.3f %dHR %.1fWAR" % (yr, g, pa, ba, hr, war))
 
     if has_pitching:
         print("\nPitching Career:")
         for row in data["career_pitching"]:
             yr, tid, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, qs, cg, sho, gb, fb, war, wpa = row
             era = er/ip*9 if ip > 0 else 0
-            print(f"  {yr}: {g}G {gs}GS {w}-{l} {float(ip):.1f}IP {era:.2f}ERA {war:.1f}WAR")
+            print("  %s: %dG %dGS %d-%d %.1fIP %.2fERA %.1fWAR" % (yr, g, gs, w, l, float(ip), era, war))
 PYEOF
 ```
 

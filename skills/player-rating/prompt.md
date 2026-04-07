@@ -43,11 +43,11 @@ first, last = args[0], args[1]
 focus = args[2:] if len(args) > 2 else None
 path, data = generate_rating_report(save_name, first, last, focus)
 if data is None:
-    print(f"CACHED:{path}")
+    print("CACHED:" + str(path))
 else:
-    print(f"GENERATED:{path}")
+    print("GENERATED:" + str(path))
     for k, v in data.items():
-        print(f"{k}={v}")
+        print(str(k) + "=" + str(v))
     engine = get_engine(save_name)
     career_lines = fetch_career_trend_stats(engine, first, last)
     for line in career_lines:

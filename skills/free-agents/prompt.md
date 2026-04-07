@@ -107,8 +107,8 @@ highlight = <AGENT_FILLS_IN_HIGHLIGHT_OR_NONE>
 save_name = load_saves_registry()["active"]
 path, rows = generate_free_agents_report(save_name, criteria, where, join,
     highlight=highlight)
-print(f"GENERATED:{path}")
-print(f"RESULT_COUNT:{len(rows)}")
+print("GENERATED:" + str(path))
+print("RESULT_COUNT:" + str(len(rows)))
 for r in rows:
     print(r)
 PYEOF

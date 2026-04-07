@@ -44,11 +44,11 @@ path, data = generate_contract_extension_report(save_name, "<FIRST>", "<LAST>", 
 if path is None:
     print("PLAYER_NOT_FOUND")
 elif data is None:
-    print(f"CACHED:{path}")
+    print("CACHED:" + str(path))
 else:
-    print(f"GENERATED:{path}")
+    print("GENERATED:" + str(path))
     for k, v in data.items():
-        print(f"{k}={v}")
+        print(str(k) + "=" + str(v))
 PYEOF
 ```
 

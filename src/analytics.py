@@ -447,13 +447,15 @@ def finalize_batter_stats(career_df, contact_df, player_info):
 
         # xBA = expected_hits / current-season AB (not career AB)
         if "n_ab" in result.columns and "xba_contact" in result.columns:
-            result["xba"] = result["xba_contact"] / result["n_ab"]
-            result["xslg"] = result["xslg_contact"] / result["n_ab"]
+            denom = result["n_ab"].replace(0, float("nan"))
+            result["xba"] = result["xba_contact"] / denom
+            result["xslg"] = result["xslg_contact"] / denom
         for suffix in ["_vs_lhp", "_vs_rhp"]:
             ab_col = f"n_ab{suffix}"
             if ab_col in result.columns and f"xba_contact{suffix}" in result.columns:
-                result[f"xba{suffix}"] = result[f"xba_contact{suffix}"] / result[ab_col]
-                result[f"xslg{suffix}"] = result[f"xslg_contact{suffix}"] / result[ab_col]
+                denom = result[ab_col].replace(0, float("nan"))
+                result[f"xba{suffix}"] = result[f"xba_contact{suffix}"] / denom
+                result[f"xslg{suffix}"] = result[f"xslg_contact{suffix}"] / denom
 
     # Drop intermediate columns
     drop_cols = [c for c in result.columns if c.startswith("xba_contact") or
