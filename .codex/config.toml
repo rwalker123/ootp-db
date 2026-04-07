@@ -1,0 +1,8 @@
+# Codex CLI project configuration
+# https://developers.openai.com/codex/concepts/customization
+
+# Never pause for approval when running from the web app
+approval_policy = "never"
+
+# Restrict file writes to the project directory
+sandbox_mode = "workspace-write"

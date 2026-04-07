@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -e
 
 cd "$(dirname "$0")"
 
@@ -20,12 +19,28 @@ if [ ! -f .env ]; then
 fi
 
 python src/import.py "$@"
+IMPORT_EXIT=$?
 
 if [ "$1" = "list" ]; then
     exit 0
 fi
 
-python src/analytics.py "$@"
-python src/ratings.py "$@"
-python src/draft_ratings.py "$@"
-python src/ifa_ratings.py "$@"
+SAVE_NAME="$1"
+
+if [ $IMPORT_EXIT -ne 0 ]; then
+    python src/update_status.py "$SAVE_NAME" failed import
+    exit $IMPORT_EXIT
+fi
+
+FAILED_STEPS=()
+
+python src/analytics.py "$@"    || FAILED_STEPS+=("analytics")
+python src/ratings.py "$@"      || FAILED_STEPS+=("ratings")
+python src/draft_ratings.py "$@" || FAILED_STEPS+=("draft_ratings")
+python src/ifa_ratings.py "$@"  || FAILED_STEPS+=("ifa_ratings")
+
+if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
+    python src/update_status.py "$SAVE_NAME" ok
+else
+    python src/update_status.py "$SAVE_NAME" partial "${FAILED_STEPS[@]}"
+fi

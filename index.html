@@ -34,6 +34,9 @@
   .db-status { font-size: 11px; margin-right: 4px; cursor: default; }
   .db-status-ok { color: #2a7a2a; }
   .db-status-stale { color: #cc7700; }
+  .db-status-partial { color: #cc7700; }
+  .db-status-failed { color: #cc2200; }
+  .ts-success { font-size: 10px; color: #2a7a2a; display: block; margin-top: 1px; }
   .ts { color: #888; }
   .empty { color: #aaa; font-style: italic; }
 
@@ -136,6 +139,15 @@
                        border-radius: 4px; font-size: 12px; color: #222; }
   .gen-fields input:focus { outline: none; border-color: #2266cc; }
 
+  /* LLM toggle pills */
+  .llm-toggle { display: flex; gap: 4px; align-items: center; }
+  .llm-pill { padding: 4px 10px; border-radius: 12px; border: 1px solid #ccc;
+              font-size: 11px; font-weight: 600; cursor: pointer; background: #f5f5f5;
+              color: #555; transition: all 0.15s; }
+  .llm-pill:hover:not(.disabled) { border-color: #2266cc; color: #2266cc; }
+  .llm-pill.active { background: #2266cc; color: #fff; border-color: #2266cc; }
+  .llm-pill.disabled { opacity: 0.38; cursor: not-allowed; }
+
   /* Discovered saves collapsible */
   .discovered-details { margin-top: 10px; }
   .discovered-details summary { font-size: 11px; color: #2266cc; cursor: pointer;
@@ -183,6 +195,10 @@
   <div id="saves-section" class="section"></div>
   <div class="section" id="generate-section">
     <div class="section-title">Generate Report</div>
+    <div class="generate-bar" style="margin-bottom:6px">
+      <span style="font-size:11px;color:#888;font-weight:600">LLM:</span>
+      <div class="llm-toggle" id="llm-toggle"></div>
+    </div>
     <div class="generate-bar">
       <select id="gen-skill" onchange="updateGenFields()">
         <option value="player-stats">Player Stats</option>
@@ -197,6 +213,9 @@
       </select>
       <div id="gen-fields" class="gen-fields"></div>
       <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
+      <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
+        <input type="checkbox" id="launch-when-done" onchange="saveLaunchPref()"> Launch when done
+      </label>
     </div>
     <div id="job-logs"></div>
   </div>
@@ -247,7 +266,7 @@ function unescHtml(s) {
 
 function extractMeta(html) {
   const title  = (html.match(/<title>(.*?)<\/title>/) || [])[1] || null;
-  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated" content="([\d\-T:]+)"/) || [])[1] || null;
+  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated["'] content=["']([\d\-T:]+)["']/) || [])[1] || null;
   const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
   const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
   const skill       = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
@@ -337,14 +356,26 @@ function renderSaves(data) {
       : esc(name);
     const csvNewer = info.csv_mtime && info.last_import && info.csv_mtime > info.last_import;
     const hasCsvInfo = info.csv_mtime && info.last_import;
-    const dbStatus = hasCsvInfo
-      ? (csvNewer
-          ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
-          : `<span class="db-status db-status-ok" title="Database is up to date">✓</span>`)
-      : '';
+    const importStatus = info.import_status; // ok | partial | failed | undefined (legacy)
+    const failedSteps = (info.failed_steps || []).join(', ');
+    let dbStatus = '';
+    if (importStatus === 'failed') {
+      dbStatus = `<span class="db-status db-status-failed" title="Import failed: ${esc(failedSteps)}">✗</span>`;
+    } else if (importStatus === 'partial') {
+      dbStatus = `<span class="db-status db-status-partial" title="Partial import — failed steps: ${esc(failedSteps)}">⚠</span>`;
+    } else if (hasCsvInfo) {
+      dbStatus = csvNewer
+        ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
+        : `<span class="db-status db-status-ok" title="Database is up to date">✓</span>`;
+    }
+    const lastImportCell = info.last_import
+      ? (info.last_successful_import && info.last_successful_import !== info.last_import
+          ? `${esc(info.last_import)}<span class="ts-success" title="Last successful import">✓ ${esc(info.last_successful_import)}</span>`
+          : esc(info.last_import))
+      : '—';
     const actions = isRunning
       ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
-      : buildImportBtn(name, isActive, csvNewer);
+      : buildImportBtn(name, isActive, csvNewer, importStatus);
     const cellId = `my-team-cell-${name.replace(/[^a-z0-9]/gi, '_')}`;
     const myTeamCell = info.my_team_id
       ? `<span class="badge-team">${esc(info.my_team_abbr || '')}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(name)})" title="Change team">✎</button>`
@@ -352,7 +383,7 @@ function renderSaves(data) {
     return `<tr>
       <td class="left">${nameCell}</td>
       <td>${dbStatus}${esc(info.db_name)}</td>
-      <td class="ts">${info.last_import || '—'}</td>
+      <td class="ts">${lastImportCell}</td>
       <td id="${esc(cellId)}">${myTeamCell}</td>
       <td>${actions}</td>
     </tr>`;
@@ -421,7 +452,7 @@ function renderSaves(data) {
           <button onclick="logClose('${id}', ${jsStr(name)})" title="Close"${running.includes(name) ? ' disabled' : ''}>✕</button>
         </span>
       </div>
-      <div class="import-log-body" id="${id}">${logText}</div>
+      <div class="import-log-body minimized" id="${id}">${logText}</div>
     </div>`;
   }).join('');
 
@@ -443,11 +474,13 @@ function renderSaves(data) {
   el.querySelectorAll('.import-log-body').forEach(el => { el.scrollTop = el.scrollHeight; });
 }
 
-function buildImportBtn(name, isActive, csvNewer) {
+function buildImportBtn(name, isActive, csvNewer, importStatus) {
   const setActiveBtn = `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>`;
-  const refreshBtn = `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`;
-  if (!csvNewer) return isActive ? '' : setActiveBtn;
-  return isActive ? refreshBtn : setActiveBtn + refreshBtn;
+  const needsAttention = csvNewer || importStatus === 'partial' || importStatus === 'failed';
+  const refreshBtn = needsAttention
+    ? `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`
+    : `<button class="btn-action secondary" onclick="importSave(${jsStr(name)})" title="Re-import (data is current)">↻</button>`;
+  return isActive ? refreshBtn : setActiveBtn + ' ' + refreshBtn;
 }
 
 // ---------------------------------------------------------------------------
@@ -930,8 +963,9 @@ function buildArgs(skill) {
   return vals.map(v => v.trim()).filter(Boolean).join(' ');
 }
 
-const _activeStreams = {};  // job_id -> EventSource
-const _jobData = {};        // job_id -> { skill, args, log[], running }
+const _activeStreams = {};   // job_id -> EventSource
+const _jobData = {};         // job_id -> { skill, args, log[], running }
+const _openedReports = new Set();  // guard against double-open
 
 function _jobPanelId(jobId) {
   return 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
@@ -956,7 +990,7 @@ function _renderJobPanelContent(jobId) {
         <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''} id="close-${id}">✕</button>
       </span>
     </div>
-    <div class="import-log-body rendered" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
+    <div class="import-log-body rendered minimized" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
 }
 
 function _renderJobPanel(jobId) {
@@ -1011,6 +1045,30 @@ function _openJobPanel(jobId) {
   if (body) body.scrollTop = body.scrollHeight;
 }
 
+function saveLaunchPref() {
+  localStorage.setItem('launchWhenDone', document.getElementById('launch-when-done').checked ? '1' : '0');
+}
+
+function getLaunchPref() {
+  return localStorage.getItem('launchWhenDone') !== '0';  // default on
+}
+
+function _extractReportPath(log) {
+  // Scan log lines for CACHED:/path or GENERATED:/path, return the server-relative URL
+  for (const line of log) {
+    const m = line.match(/^(?:CACHED|GENERATED):(.+\.html)/);
+    if (m) {
+      const abs = m[1].trim();
+      if (abs.includes('/absolute/path/to/')) continue;  // prompt placeholder, not a real path
+      // Convert absolute fs path to a server-relative URL
+      const rel = abs.replace(/^.*\/reports\//, '/reports/');
+      if (!rel.startsWith('/reports/')) continue;
+      return rel;
+    }
+  }
+  return null;
+}
+
 function listenToJob(jobId, onDone) {
   if (_activeStreams[jobId]) return;
   _openJobPanel(jobId);
@@ -1023,7 +1081,18 @@ function listenToJob(jobId, onDone) {
       es.close();
       delete _activeStreams[jobId];
       _markJobDone(jobId);
-      if (onDone) onDone(); else reloadReports();
+      if (onDone) {
+        onDone();
+      } else {
+        reloadReports();
+        if (getLaunchPref()) {
+          const path = _extractReportPath(_jobData[jobId]?.log || []);
+          if (path && !_openedReports.has(path)) {
+            _openedReports.add(path);
+            window.open(path, '_blank');
+          }
+        }
+      }
       return;
     }
     try {
@@ -1062,6 +1131,10 @@ async function generateReport() {
 
   const { job_id } = await r.json();
   _jobData[job_id] = { skill, args, log: [], running: true };
+  ['gen-name', 'gen-focus', 'gen-criteria'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   listenToJob(job_id);
 }
 
@@ -1150,7 +1223,9 @@ async function reloadReports() {
   const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
   const listing = await tryFetch(reportsBase);
   const subdirs = listing ? parseSubdirs(listing) : [];
-  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const saveSections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const adhocSection = await buildSection('reports/', 'adhoc/', null);
+  const sections = [...saveSections, adhocSection];
   const html = sections.filter(Boolean).join('');
   document.getElementById('content').innerHTML =
     html || '<div class="section"><span class="empty">No reports yet.</span></div>';
@@ -1175,9 +1250,54 @@ async function checkUpdates() {
   banner.style.display = '';
 }
 
+let _activeLlm = 'claude';
+
+async function loadLlms() {
+  try {
+    const data = await fetch('/llms').then(r => r.json());
+    _activeLlm = data.active || 'claude';
+    renderLlmToggle(data.llms, _activeLlm);
+  } catch (e) { /* server may not support yet */ }
+}
+
+function renderLlmToggle(llms, active) {
+  const container = document.getElementById('llm-toggle');
+  if (!container) return;
+  // Only render if more than one LLM is available
+  const available = llms.filter(l => l.available);
+  if (available.length <= 1) {
+    container.innerHTML = available.length === 1
+      ? `<span class="llm-pill active">${available[0].name}</span>` : '';
+    return;
+  }
+  container.innerHTML = llms.map(l => `
+    <button class="llm-pill${l.key === active ? ' active' : ''}${!l.available ? ' disabled' : ''}"
+      data-llm-key="${esc(l.key)}"
+      title="${esc(l.detail)}"
+      onclick="${l.available ? `setLlm('${l.key}')` : ''}">
+      ${esc(l.name)}
+    </button>`).join('');
+}
+
+async function setLlm(key) {
+  const r = await fetch('/saves/set-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ llm: key }),
+  });
+  if (!r.ok) return;
+  _activeLlm = key;
+  const pills = document.querySelectorAll('.llm-pill');
+  pills.forEach(p => {
+    p.classList.toggle('active', p.dataset.llmKey === key);
+  });
+}
+
 async function main() {
   checkUpdates();     // fire and forget — shows banner if .update-status says so
   updateGenFields();  // populate initial skill fields
+  loadLlms();         // detect & render LLM toggle
+  document.getElementById('launch-when-done').checked = getLaunchPref();
   loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
   loadStatus();   // fire and forget
 
@@ -1188,7 +1308,9 @@ async function main() {
   const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
   const reportsListing = await tryFetch(reportsBase);
   const subdirs = reportsListing ? parseSubdirs(reportsListing) : [];
-  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const saveSections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const adhocSection = await buildSection('reports/', 'adhoc/', null);
+  const sections = [...saveSections, adhocSection];
   const html = sections.filter(Boolean).join('');
 
   document.getElementById('content').innerHTML =

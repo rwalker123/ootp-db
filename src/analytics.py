@@ -357,11 +357,14 @@ def compute_contact_stats(df, xba_lookup, xslg_lookup, xwoba_lookup):
 
     # Also need K/BB/HBP counts for xwOBA (non-batted-ball events)
     def agg_pa_events(group, suffix=""):
+        n_bb = (group["result"] == RESULT_BB).sum()
+        n_hbp = (group["result"] == RESULT_HBP).sum()
         return {
             f"total_pa{suffix}": len(group),
             f"n_k{suffix}": (group["result"] == RESULT_K).sum(),
-            f"n_bb{suffix}": (group["result"] == RESULT_BB).sum(),
-            f"n_hbp{suffix}": (group["result"] == RESULT_HBP).sum(),
+            f"n_bb{suffix}": n_bb,
+            f"n_hbp{suffix}": n_hbp,
+            f"n_ab{suffix}": len(group) - n_bb - n_hbp,  # current-season AB (excl BB, HBP)
         }
 
     results = []
@@ -431,31 +434,34 @@ def finalize_batter_stats(career_df, contact_df, player_info):
                     contact_cols.append(full)
         result = result.merge(contact_df[contact_cols], on="player_id", how="left")
 
-    # Compute traditional xBA and xSLG from contact data + career AB
+    # Compute traditional xBA and xSLG from contact data + current-season AB
     if "xba_contact" in contact_df.columns:
-        xba_merge = contact_df[["player_id", "xba_contact", "xslg_contact"]].copy()
+        xba_cols = ["player_id", "xba_contact", "xslg_contact", "n_ab"]
         for suffix in ["_vs_lhp", "_vs_rhp"]:
-            for col in ["xba_contact", "xslg_contact"]:
+            for col in ["xba_contact", "xslg_contact", "n_ab"]:
                 full = f"{col}{suffix}"
                 if full in contact_df.columns:
-                    xba_merge[full] = contact_df[full]
+                    xba_cols.append(full)
+        xba_merge = contact_df[[c for c in xba_cols if c in contact_df.columns]].copy()
         result = result.merge(xba_merge, on="player_id", how="left")
 
-        # xBA = expected_hits / AB
-        if "ab" in result.columns and "xba_contact" in result.columns:
-            result["xba"] = result["xba_contact"] / result["ab"]
-            result["xslg"] = result["xslg_contact"] / result["ab"]
+        # xBA = expected_hits / current-season AB (not career AB)
+        if "n_ab" in result.columns and "xba_contact" in result.columns:
+            denom = result["n_ab"].replace(0, float("nan"))
+            result["xba"] = result["xba_contact"] / denom
+            result["xslg"] = result["xslg_contact"] / denom
         for suffix in ["_vs_lhp", "_vs_rhp"]:
-            ab_col = f"ab{suffix}"
+            ab_col = f"n_ab{suffix}"
             if ab_col in result.columns and f"xba_contact{suffix}" in result.columns:
-                result[f"xba{suffix}"] = result[f"xba_contact{suffix}"] / result[ab_col]
-                result[f"xslg{suffix}"] = result[f"xslg_contact{suffix}"] / result[ab_col]
+                denom = result[ab_col].replace(0, float("nan"))
+                result[f"xba{suffix}"] = result[f"xba_contact{suffix}"] / denom
+                result[f"xslg{suffix}"] = result[f"xslg_contact{suffix}"] / denom
 
     # Drop intermediate columns
     drop_cols = [c for c in result.columns if c.startswith("xba_contact") or
                  c.startswith("xslg_contact") or c.startswith("xwoba_bb") or
                  c.startswith("n_k") or c.startswith("n_bb") or c.startswith("n_hbp") or
-                 c.startswith("total_pa")]
+                 c.startswith("n_ab") or c.startswith("total_pa")]
     result = result.drop(columns=[c for c in drop_cols if c in result.columns], errors="ignore")
 
     # Reorder: identity first, then overall career, then contact, then splits

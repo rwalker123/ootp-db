@@ -2,4 +2,3 @@ pandas
 sqlalchemy
 python-dotenv
 pre-commit
-mcp

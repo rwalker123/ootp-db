@@ -47,6 +47,66 @@ def _stream_output(proc, log):
         pass
 
 
+def _stream_claude_json(proc, log):
+    """Parse Claude --output-format stream-json NDJSON into human-readable log lines."""
+    import json as _json
+    try:
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
+            try:
+                ev = _json.loads(line)
+            except _json.JSONDecodeError:
+                log.append(line)  # pass through non-JSON lines verbatim
+                continue
+
+            ev_type = ev.get("type")
+
+            if ev_type == "assistant":
+                for block in ev.get("message", {}).get("content", []):
+                    btype = block.get("type")
+                    if btype == "text":
+                        text = block.get("text", "").strip()
+                        if text:
+                            log.append(text)
+                    elif btype == "tool_use":
+                        name = block.get("name", "tool")
+                        inp = block.get("input", {})
+                        if name == "Bash":
+                            cmd = inp.get("command", "").strip()
+                            # Show only the first line of long commands
+                            first_line = cmd.splitlines()[0] if cmd else ""
+                            log.append(f"[Bash] {first_line}")
+                        elif name in ("Read", "Write", "Edit"):
+                            path = inp.get("file_path", inp.get("path", ""))
+                            log.append(f"[{name}] {path}")
+                        else:
+                            log.append(f"[{name}]")
+
+            elif ev_type == "user":
+                for block in ev.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_result":
+                        parts = block.get("content", [])
+                        text = ""
+                        if isinstance(parts, list):
+                            text = "\n".join(
+                                p.get("text", "") for p in parts
+                                if isinstance(p, dict) and p.get("type") == "text"
+                            ).strip()
+                        elif isinstance(parts, str):
+                            text = parts.strip()
+                        if text:
+                            for tline in text.splitlines():
+                                log.append(tline)
+
+            elif ev_type == "result":
+                pass  # result.result repeats last assistant block; cost display removed
+
+    except Exception:
+        pass
+
+
 def _find_saves_dirs():
     for root, pattern in _OOTP_SEARCH:
         if root.is_dir():
@@ -245,6 +305,75 @@ def check_claude():
     return _check("Claude CLI", True, f"{version}  ({path})")
 
 
+def check_codex():
+    path = shutil.which("codex")
+    if not path:
+        for candidate in [
+            Path.home() / ".local/bin/codex",
+            Path("/usr/local/bin/codex"),
+        ]:
+            if candidate.exists():
+                path = str(candidate)
+                break
+    if not path:
+        return _check("Codex CLI", False, "Not found in PATH",
+                      "npm install -g @openai/codex  "
+                      "# or see openai.com/codex")
+    result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+    version = result.stdout.strip() or result.stderr.strip() or "found"
+    return _check("Codex CLI", True, f"{version}  ({path})")
+
+
+def detect_llms():
+    """Return list of available LLM runners with metadata."""
+    llms = []
+    for name, key, check_fn in [
+        ("Claude", "claude", check_claude),
+        ("Codex", "codex", check_codex),
+    ]:
+        result = check_fn()
+        llms.append({"name": name, "key": key, "available": result["ok"], "detail": result["detail"]})
+    return llms
+
+
+_AVAILABLE_LLMS = None  # populated at first call, cached for startup perf
+
+
+def get_available_llms():
+    global _AVAILABLE_LLMS
+    if _AVAILABLE_LLMS is None:
+        _AVAILABLE_LLMS = detect_llms()
+    return _AVAILABLE_LLMS
+
+
+def _subprocess_env():
+    """OS env + PYTHONUNBUFFERED, with any missing API keys loaded from .env."""
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    env_path = ROOT / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if key.endswith("_API_KEY") and key not in env:
+                env[key] = val.strip()
+    return env
+
+
+def build_command(llm_key, skill, args):
+    """Return (argv, stream_fn) for the given LLM, skill, and args."""
+    if llm_key == "codex":
+        # All skills (including adhoc) invoked via $skill-name convention
+        prompt = f"${skill} {args}".strip()
+        return ["codex", "exec", "--full-auto", prompt], _stream_output
+    else:
+        # Claude: all skills invoked via /skill-name so the adapter shim is loaded
+        prompt = f"/{skill} {args}".strip()
+        return ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"], _stream_claude_json
+
+
 def check_env_file():
     env_path = ROOT / ".env"
     if not env_path.exists():
@@ -338,6 +467,7 @@ def run_all_checks():
         checks.append(check_postgres())
     checks += [
         check_claude(),
+        check_codex(),
         check_env_file(),
         check_saves(),
         check_database(),
@@ -518,6 +648,11 @@ class Handler(SimpleHTTPRequestHandler):
             qs = parse_qs(urlparse(self.path).query)
             save_name = (qs.get("save") or [""])[0].strip()
             self._handle_my_team_candidates(save_name)
+        elif self.path == "/llms":
+            _json_response(self, {
+                "llms": get_available_llms(),
+                "active": _load_saves_registry().get("active_llm", "claude"),
+            })
         elif self.path == "/git-status":
             status_file = ROOT / ".update-status"
             result = {"updates_available": False}
@@ -581,6 +716,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_generate(body)
         elif self.path == "/reports/clear-job":
             self._handle_clear_job(body)
+        elif self.path == "/saves/set-llm":
+            self._handle_set_llm(body)
         else:
             self.send_error(404)
 
@@ -597,7 +734,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         log = []
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        env = _subprocess_env()
         proc = subprocess.Popen(
             ["bash", str(ROOT / "import.sh"), save_name],
             cwd=str(ROOT),
@@ -609,6 +746,17 @@ class Handler(SimpleHTTPRequestHandler):
         _running_imports[save_name] = {"proc": proc, "log": log}
         self._respond(202, "started")
 
+    def _handle_set_llm(self, body):
+        llm_key = body.get("llm", "").strip()
+        valid_keys = {llm["key"] for llm in get_available_llms() if llm["available"]}
+        if llm_key not in valid_keys:
+            self._respond(400, f"Invalid or unavailable LLM: {llm_key}")
+            return
+        registry = _load_saves_registry()
+        registry["active_llm"] = llm_key
+        _save_registry(registry)
+        self._respond(200, "ok")
+
     def _handle_generate(self, body):
         skill = body.get("skill", "").strip()
         args = body.get("args", "").strip()
@@ -617,26 +765,25 @@ class Handler(SimpleHTTPRequestHandler):
         if not skill or (not args and not args_optional):
             self._respond(400, "Missing skill or args")
             return
+        registry = _load_saves_registry()
+        llm_key = registry.get("active_llm", "claude")
         job_id = f"{skill}-{int(time.time())}"
         log = []
+        build_args = args
         if skill == "adhoc":
-            cost_footer = (
-                "\n\nAfter answering, print this line on its own: "
-                "`~ Model: claude-sonnet-4-6 | est. X–Y¢` "
-                "replacing X–Y with your best cost estimate "
-                "(2–4¢ for a simple lookup, 5–10¢ for moderate analysis, 10–20¢ for complex multi-table work)."
-            )
-            cmd_arg = args + cost_footer
-        else:
-            cmd_arg = f"/{skill} {args}".strip()
+            report_dir = ROOT / "reports" / "adhoc"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = str(report_dir / f"{job_id}.html")
+            build_args = f"{args}\n\nReport path: {report_path}"
+        cmd, stream_fn = build_command(llm_key, skill, build_args)
         proc = subprocess.Popen(
-            ["claude", "-p", cmd_arg],
+            cmd,
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env=_subprocess_env(),
         )
-        threading.Thread(target=_stream_output, args=(proc, log), daemon=True).start()
+        threading.Thread(target=stream_fn, args=(proc, log), daemon=True).start()
         with _jobs_lock:
             _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
         _json_response(self, {"job_id": job_id}, 202)
@@ -798,23 +945,31 @@ class Handler(SimpleHTTPRequestHandler):
             _running_jobs[job_id] = entry
 
         if mode == "full":
-            # Back up the report; restore it if Claude fails so the file isn't lost
+            # Back up the report; restore it if the LLM job fails so the file isn't lost
+            registry = _load_saves_registry()
+            llm_key = registry.get("active_llm", "claude")
             backup = target.with_suffix(".bak")
             shutil.copy2(target, backup)
             target.unlink()  # force cache miss so the skill regenerates
-            cmd = ["claude", "-p", f"/{skill} {args}"]
+            build_args = args
+            if skill == "adhoc":
+                report_dir = ROOT / "reports" / "adhoc"
+                report_dir.mkdir(parents=True, exist_ok=True)
+                report_path = str(report_dir / f"{job_id}.html")
+                build_args = f"{args}\n\nReport path: {report_path}"
+            cmd, stream_fn = build_command(llm_key, skill, build_args)
             proc = subprocess.Popen(
                 cmd, cwd=str(ROOT),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env=_subprocess_env(),
             )
             entry["proc"] = proc
 
             def _restore_on_failure():
-                _stream_output(proc, log)
+                stream_fn(proc, log)
                 if proc.returncode != 0 and not target.exists() and backup.exists():
                     shutil.move(str(backup), str(target))
-                    log.append("Error: Claude job failed — original report restored.")
+                    log.append("Error: LLM job failed — original report restored.")
                 else:
                     backup.unlink(missing_ok=True)
 
