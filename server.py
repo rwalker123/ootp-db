@@ -620,13 +620,7 @@ class Handler(SimpleHTTPRequestHandler):
         job_id = f"{skill}-{int(time.time())}"
         log = []
         if skill == "adhoc":
-            cost_footer = (
-                "\n\nAfter answering, print this line on its own: "
-                "`~ Model: claude-sonnet-4-6 | est. X–Y¢` "
-                "replacing X–Y with your best cost estimate "
-                "(2–4¢ for a simple lookup, 5–10¢ for moderate analysis, 10–20¢ for complex multi-table work)."
-            )
-            cmd_arg = args + cost_footer
+            cmd_arg = args
         else:
             cmd_arg = f"/{skill} {args}".strip()
         proc = subprocess.Popen(
