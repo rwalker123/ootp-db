@@ -9,6 +9,8 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
 `$ARGUMENTS` is the full text of the user's invocation message (e.g. "Riley Greene" or "acquiring Aaron Judge").
@@ -193,10 +195,10 @@ The HTML file has a `<!-- TRADE_CALLOUT_SUMMARY -->` placeholder. Replace it wit
 - Flag concerns: giving up too much, whether it's the right time to buy
 - If filters were relaxed: note which one and what that means for the market
 
-Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
+Read the file, replace the placeholder, write it back. Then print the report path:
 
 ```bash
-open <path-from-GENERATED-output>
+echo "file://<path-from-GENERATED-output>"
 ```
 
 ### Step 6: Print Terminal Summary

@@ -9,6 +9,8 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
 `$ARGUMENTS` is the full text of the user's invocation message (e.g. "Roger Clemens" or "Barry Bonds power, discipline").
@@ -56,7 +58,7 @@ PYEOF
 If the output starts with `CACHED:` — extract the path (everything after `CACHED:`), then run:
 
 ```bash
-open <extracted_path>
+echo "file://<extracted_path>"
 ```
 
 Then print:
@@ -94,10 +96,10 @@ Wrap in `<div class="summary"><ul>...</ul></div>`.
 
 Read the HTML file, replace `<!-- RATING_SUMMARY -->` with the summary, write it back.
 
-Then open the report — use the exact path that was printed after `GENERATED:` above:
+Then print the report path:
 
 ```bash
-open <path-from-GENERATED-output>
+echo "file://<path-from-GENERATED-output>"
 ```
 
 ### Step 3: Print terminal summary

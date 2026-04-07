@@ -31,6 +31,10 @@ PYEOF
 - **Always** use heredoc (`<< 'PYEOF'`) syntax, never `-c` with inline strings
 - **Never** use Python dicts (`{"key": val}`) or f-strings with braces in heredocs — 
   the shell flags curly braces as suspicious. Use `dict(key=val)` instead of `{"key": val}`.
+- **Never read `.env` directly** — it contains API keys. All DB config is accessed via
+  `get_engine(save_name)` and `load_saves_registry()`. Never `cat .env`, never open it.
+- **`players_contract` salary columns** are named `salary0` through `salary14` (one per contract
+  year). There is **no** bare `salary` column. Use `salary0` for the current year's salary.
 - The active save and database name are tracked in `saves.postgresql.json` or `saves.sqlite.json`
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.

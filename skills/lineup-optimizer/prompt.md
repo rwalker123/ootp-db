@@ -11,6 +11,8 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
 `$ARGUMENTS` is the full text of the user's invocation message (e.g. "modern vs LHP" or "traditional without Greene").
@@ -135,7 +137,7 @@ Retry with the correct team name or nickname from the list.
 If `CACHED:` — extract the path (everything after `CACHED:`), run:
 
 ```bash
-open <extracted_path>
+echo "file://<extracted_path>"
 ```
 
 Print: `[team_name] lineup — [phil_label] | [hand_label] — cached (current). See browser.`
@@ -234,10 +236,10 @@ Format as:
 ```
 
 Read the HTML file, replace `<!-- LINEUP_ANALYSIS -->` with the callout div, write it back.
-Then open — use the exact path printed after `GENERATED:`:
+Then print the report path:
 
 ```bash
-open <path_from_GENERATED>
+echo "file://<path_from_GENERATED>"
 ```
 
 ### Step 4: Print terminal summary

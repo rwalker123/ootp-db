@@ -136,6 +136,15 @@
                        border-radius: 4px; font-size: 12px; color: #222; }
   .gen-fields input:focus { outline: none; border-color: #2266cc; }
 
+  /* LLM toggle pills */
+  .llm-toggle { display: flex; gap: 4px; align-items: center; }
+  .llm-pill { padding: 4px 10px; border-radius: 12px; border: 1px solid #ccc;
+              font-size: 11px; font-weight: 600; cursor: pointer; background: #f5f5f5;
+              color: #555; transition: all 0.15s; }
+  .llm-pill:hover:not(.disabled) { border-color: #2266cc; color: #2266cc; }
+  .llm-pill.active { background: #2266cc; color: #fff; border-color: #2266cc; }
+  .llm-pill.disabled { opacity: 0.38; cursor: not-allowed; }
+
   /* Discovered saves collapsible */
   .discovered-details { margin-top: 10px; }
   .discovered-details summary { font-size: 11px; color: #2266cc; cursor: pointer;
@@ -183,6 +192,10 @@
   <div id="saves-section" class="section"></div>
   <div class="section" id="generate-section">
     <div class="section-title">Generate Report</div>
+    <div class="generate-bar" style="margin-bottom:6px">
+      <span style="font-size:11px;color:#888;font-weight:600">LLM:</span>
+      <div class="llm-toggle" id="llm-toggle"></div>
+    </div>
     <div class="generate-bar">
       <select id="gen-skill" onchange="updateGenFields()">
         <option value="player-stats">Player Stats</option>
@@ -197,6 +210,9 @@
       </select>
       <div id="gen-fields" class="gen-fields"></div>
       <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
+      <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
+        <input type="checkbox" id="launch-when-done" onchange="saveLaunchPref()"> Launch when done
+      </label>
     </div>
     <div id="job-logs"></div>
   </div>
@@ -930,8 +946,9 @@ function buildArgs(skill) {
   return vals.map(v => v.trim()).filter(Boolean).join(' ');
 }
 
-const _activeStreams = {};  // job_id -> EventSource
-const _jobData = {};        // job_id -> { skill, args, log[], running }
+const _activeStreams = {};   // job_id -> EventSource
+const _jobData = {};         // job_id -> { skill, args, log[], running }
+const _openedReports = new Set();  // guard against double-open
 
 function _jobPanelId(jobId) {
   return 'job-' + jobId.replace(/[^a-z0-9]/gi, '_');
@@ -1011,6 +1028,28 @@ function _openJobPanel(jobId) {
   if (body) body.scrollTop = body.scrollHeight;
 }
 
+function saveLaunchPref() {
+  localStorage.setItem('launchWhenDone', document.getElementById('launch-when-done').checked ? '1' : '0');
+}
+
+function getLaunchPref() {
+  return localStorage.getItem('launchWhenDone') !== '0';  // default on
+}
+
+function _extractReportPath(log) {
+  // Scan log lines for CACHED:/path or GENERATED:/path, return the server-relative URL
+  for (const line of log) {
+    const m = line.match(/^(?:CACHED|GENERATED):(.+\.html)/);
+    if (m) {
+      // Convert absolute fs path to a server-relative URL
+      const abs = m[1].trim();
+      const rel = abs.replace(/^.*\/reports\//, '/reports/');
+      return rel;
+    }
+  }
+  return null;
+}
+
 function listenToJob(jobId, onDone) {
   if (_activeStreams[jobId]) return;
   _openJobPanel(jobId);
@@ -1023,7 +1062,18 @@ function listenToJob(jobId, onDone) {
       es.close();
       delete _activeStreams[jobId];
       _markJobDone(jobId);
-      if (onDone) onDone(); else reloadReports();
+      if (onDone) {
+        onDone();
+      } else {
+        reloadReports();
+        if (getLaunchPref()) {
+          const path = _extractReportPath(_jobData[jobId]?.log || []);
+          if (path && !_openedReports.has(path)) {
+            _openedReports.add(path);
+            window.open(path, '_blank');
+          }
+        }
+      }
       return;
     }
     try {
@@ -1175,9 +1225,52 @@ async function checkUpdates() {
   banner.style.display = '';
 }
 
+let _activeLlm = 'claude';
+
+async function loadLlms() {
+  try {
+    const data = await fetch('/llms').then(r => r.json());
+    _activeLlm = data.active || 'claude';
+    renderLlmToggle(data.llms, _activeLlm);
+  } catch (e) { /* server may not support yet */ }
+}
+
+function renderLlmToggle(llms, active) {
+  const container = document.getElementById('llm-toggle');
+  if (!container) return;
+  // Only render if more than one LLM is available
+  const available = llms.filter(l => l.available);
+  if (available.length <= 1) {
+    container.innerHTML = available.length === 1
+      ? `<span class="llm-pill active">${available[0].name}</span>` : '';
+    return;
+  }
+  container.innerHTML = llms.map(l => `
+    <button class="llm-pill${l.key === active ? ' active' : ''}${!l.available ? ' disabled' : ''}"
+      title="${esc(l.detail)}"
+      onclick="${l.available ? `setLlm('${l.key}')` : ''}">
+      ${esc(l.name)}
+    </button>`).join('');
+}
+
+async function setLlm(key) {
+  await fetch('/saves/set-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ llm: key }),
+  });
+  _activeLlm = key;
+  const pills = document.querySelectorAll('.llm-pill');
+  pills.forEach(p => {
+    p.classList.toggle('active', p.textContent.trim().toLowerCase() === key);
+  });
+}
+
 async function main() {
   checkUpdates();     // fire and forget — shows banner if .update-status says so
   updateGenFields();  // populate initial skill fields
+  loadLlms();         // detect & render LLM toggle
+  document.getElementById('launch-when-done').checked = getLaunchPref();
   loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
   loadStatus();   // fire and forget
 

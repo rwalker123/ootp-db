@@ -9,6 +9,8 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
 `$ARGUMENTS` is the full text of the user's invocation message (e.g. "high ceiling SS under 20").
@@ -204,11 +206,10 @@ The HTML file has a `<!-- FA_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 - For IFA: note nation composition and signing-window timing
 - If filters were relaxed, note which ones
 
-Read the file, replace the placeholder, write it back. Then open the report — use the
-exact path printed after `GENERATED:` above:
+Read the file, replace the placeholder, write it back. Then print the report path:
 
 ```bash
-open <path printed after GENERATED:>
+echo "file://<path printed after GENERATED:>"
 ```
 
 ### Step 4: Print Terminal Summary

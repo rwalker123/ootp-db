@@ -9,6 +9,8 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
 `$ARGUMENTS` is the full text of the user's invocation message (e.g. "lefty SP under 28 with low injury risk").
@@ -124,10 +126,10 @@ The HTML file has a `<!-- FA_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 - Lead with the top recommendation (or "no clear fit" if market is thin)
 - Note market depth/quality and any caveats (filters relaxed, positional mismatch)
 
-Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
+Read the file, replace the placeholder, write it back. Then print the report path:
 
 ```bash
-open <path-from-GENERATED-output>
+echo "file://<path-from-GENERATED-output>"
 ```
 
 ### Step 4: Print Terminal Summary
