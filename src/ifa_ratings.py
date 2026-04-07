@@ -83,11 +83,11 @@ def load_ifa_data(engine):
         WHERE p.draft_eligible = 0
           AND p.team_id = 0
           AND p.age <= 20
-          AND p.nation_id != {NATION_USA}
+          AND p.nation_id != :nation_usa
           AND p.retired = 0
     """
     with engine.connect() as conn:
-        rows = conn.execute(text(sql)).fetchall()
+        rows = conn.execute(text(sql), dict(nation_usa=NATION_USA)).fetchall()
 
     cols = [
         "player_id", "first_name", "last_name", "position",

@@ -34,6 +34,9 @@
   .db-status { font-size: 11px; margin-right: 4px; cursor: default; }
   .db-status-ok { color: #2a7a2a; }
   .db-status-stale { color: #cc7700; }
+  .db-status-partial { color: #cc7700; }
+  .db-status-failed { color: #cc2200; }
+  .ts-success { font-size: 10px; color: #2a7a2a; display: block; margin-top: 1px; }
   .ts { color: #888; }
   .empty { color: #aaa; font-style: italic; }
 
@@ -353,14 +356,26 @@ function renderSaves(data) {
       : esc(name);
     const csvNewer = info.csv_mtime && info.last_import && info.csv_mtime > info.last_import;
     const hasCsvInfo = info.csv_mtime && info.last_import;
-    const dbStatus = hasCsvInfo
-      ? (csvNewer
-          ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
-          : `<span class="db-status db-status-ok" title="Database is up to date">✓</span>`)
-      : '';
+    const importStatus = info.import_status; // ok | partial | failed | undefined (legacy)
+    const failedSteps = (info.failed_steps || []).join(', ');
+    let dbStatus = '';
+    if (importStatus === 'failed') {
+      dbStatus = `<span class="db-status db-status-failed" title="Import failed: ${esc(failedSteps)}">✗</span>`;
+    } else if (importStatus === 'partial') {
+      dbStatus = `<span class="db-status db-status-partial" title="Partial import — failed steps: ${esc(failedSteps)}">⚠</span>`;
+    } else if (hasCsvInfo) {
+      dbStatus = csvNewer
+        ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
+        : `<span class="db-status db-status-ok" title="Database is up to date">✓</span>`;
+    }
+    const lastImportCell = info.last_import
+      ? (info.last_successful_import && info.last_successful_import !== info.last_import
+          ? `${esc(info.last_import)}<span class="ts-success" title="Last successful import">✓ ${esc(info.last_successful_import)}</span>`
+          : esc(info.last_import))
+      : '—';
     const actions = isRunning
       ? `<button class="btn-action" disabled><span class="spinner"></span>Importing…</button>`
-      : buildImportBtn(name, isActive, csvNewer);
+      : buildImportBtn(name, isActive, csvNewer, importStatus);
     const cellId = `my-team-cell-${name.replace(/[^a-z0-9]/gi, '_')}`;
     const myTeamCell = info.my_team_id
       ? `<span class="badge-team">${esc(info.my_team_abbr || '')}</span><button class="btn-team-edit" onclick="pickMyTeam(${jsStr(name)})" title="Change team">✎</button>`
@@ -368,7 +383,7 @@ function renderSaves(data) {
     return `<tr>
       <td class="left">${nameCell}</td>
       <td>${dbStatus}${esc(info.db_name)}</td>
-      <td class="ts">${info.last_import || '—'}</td>
+      <td class="ts">${lastImportCell}</td>
       <td id="${esc(cellId)}">${myTeamCell}</td>
       <td>${actions}</td>
     </tr>`;
@@ -459,11 +474,13 @@ function renderSaves(data) {
   el.querySelectorAll('.import-log-body').forEach(el => { el.scrollTop = el.scrollHeight; });
 }
 
-function buildImportBtn(name, isActive, csvNewer) {
+function buildImportBtn(name, isActive, csvNewer, importStatus) {
   const setActiveBtn = `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>`;
-  const refreshBtn = `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`;
-  if (!csvNewer) return isActive ? '' : setActiveBtn;
-  return isActive ? refreshBtn : setActiveBtn + refreshBtn;
+  const needsAttention = csvNewer || importStatus === 'partial' || importStatus === 'failed';
+  const refreshBtn = needsAttention
+    ? `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`
+    : `<button class="btn-action secondary" onclick="importSave(${jsStr(name)})" title="Re-import (data is current)">↻</button>`;
+  return isActive ? refreshBtn : setActiveBtn + ' ' + refreshBtn;
 }
 
 // ---------------------------------------------------------------------------
