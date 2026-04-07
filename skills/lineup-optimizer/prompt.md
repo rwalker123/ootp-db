@@ -86,7 +86,7 @@ path, data = generate_lineup_report(
     opponent_hand=None,       # replace None with "L" or "R" if handedness was specified
     excluded_names=[],        # replace with list of excluded name strings
     primary_only=False,       # replace with True if "primary" keyword present
-    forced_starts=[],         # replace with list of dicts: [{"name": "Torkelson", "pos": 3}]
+    forced_starts=[],         # replace with list of dicts: [dict(name="Torkelson", pos=3)]
                               # pos: C=2,1B=3,2B=4,3B=5,SS=6,LF=7,CF=8,RF=9,DH=0; None if unspecified
     forced_bench=[],          # replace with list of name strings to sit
     fatigue_threshold=None,   # replace with int (0-100) to auto-bench fatigued players

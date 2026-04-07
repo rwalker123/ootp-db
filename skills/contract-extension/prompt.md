@@ -164,7 +164,7 @@ Read the HTML file, replace `<!-- CONTRACT_EXTENSION_SUMMARY -->` with the summa
 write it back. Then open the report — use the exact path printed after `GENERATED:`:
 
 ```bash
-open reports/<save_name>/contract_extensions/<slug>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 3: Print terminal summary

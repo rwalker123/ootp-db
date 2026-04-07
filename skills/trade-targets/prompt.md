@@ -67,7 +67,7 @@ For a matched `PLAYER` line, record the player data and build `offered_where`:
 
 For a category-only query (no PLAYER line), build `offered_where` from the positional criteria in `$ARGUMENTS` targeting your team (e.g., `p.team_id = my_team_id AND pr.position IN (7,8,9) ORDER BY pr.rating_overall ASC LIMIT 1`).
 
-### Step 2: Assess Trade Value
+### Step 1: Assess Trade Value
 
 Use the offered player's **OA** (OOTP's own 20-80 rating) as the trade value currency — not
 `rating_overall`. The OOTP AI evaluates trades using OA, not composite analytical scores.
@@ -191,7 +191,7 @@ The HTML file has a `<!-- TRADE_CALLOUT_SUMMARY -->` placeholder. Replace it wit
 Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
 
 ```bash
-open reports/<save_name>/trade_targets/<slug>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 7: Print Terminal Summary

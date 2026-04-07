@@ -130,7 +130,7 @@ Read the HTML file, replace `<!-- SCOUTING_SUMMARY -->` with the summary, write 
 Then open the report — use the exact path that was printed after `GENERATED:` above:
 
 ```bash
-open reports/players/<filename>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 3: Print a 2-3 line terminal summary

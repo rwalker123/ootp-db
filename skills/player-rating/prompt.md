@@ -89,7 +89,7 @@ Read the HTML file, replace `<!-- RATING_SUMMARY -->` with the summary, write it
 Then open the report — use the exact path that was printed after `GENERATED:` above:
 
 ```bash
-open reports/ratings/<filename>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 3: Print terminal summary

@@ -121,7 +121,7 @@ The HTML file has a `<!-- FA_CALLOUT_SUMMARY -->` placeholder. Replace it with a
 Read the file, replace the placeholder, write it back. Then open the report — use the exact path printed after `GENERATED:` above:
 
 ```bash
-open reports/free_agents/<filename>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 4: Print Terminal Summary

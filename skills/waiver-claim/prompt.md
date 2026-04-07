@@ -98,7 +98,7 @@ Use this decision logic:
   and contract cost is manageable (salary ≤ incumbent salary or fills a genuine gap)
 - **PASS** if: candidate is worse than best incumbent, has a concerning contract (high salary +
   multiple years remaining for a backup-level player), or has `flag_injury_risk` + `prone_label`
-  of Fragile/Wrecked with the your team already carrying injury-prone players at the position
+  of Fragile/Wrecked with your team already carrying injury-prone players at the position
 - **MONITOR** if: candidate is comparable to incumbents but the timing isn't urgent (no open
   40-man spot, or `days_waivers_left` = 3 — can wait to see if they clear), or if the player
   could be claimed for depth but isn't an upgrade
@@ -117,19 +117,19 @@ State the verdict clearly and give the one-sentence primary reason:
   - `adv_hard_hit_pct` < 32% or `adv_xwoba` < .300 → "Soft contact — production may be unsustainable"
   - Platoon flag: if `adv_wrc_plus_vs_lhp` and `adv_wrc_plus_vs_rhp` differ by ≥ 30 points
     (and sample is meaningful, `adv_pa_vs_lhp`/`adv_pa_vs_rhp` ≥ 50), call out the platoon split
-    and note whether it fits the your team' needs (e.g. lineup has LHP or RHP gaps)
+    and note whether it fits your team's needs (e.g. lineup has LHP or RHP gaps)
 - **Pitchers** — cite `adv_fip`, `adv_xfip`, `adv_k_bb_pct`, `adv_hard_hit_pct_against`,
   `adv_barrel_pct_against`, `adv_xwoba_against`:
   - `adv_hard_hit_pct_against` < 34% + `adv_xwoba_against` < .290 → "Contact suppressor — ERA/FIP likely to hold"
   - `adv_hard_hit_pct_against` > 42% or `adv_xwoba_against` > .340 → "Hittable — ERA may regress upward"
   - Platoon flag: if `adv_era_vs_lhb` and `adv_era_vs_rhb` differ by ≥ 1.50 (and
-    `adv_bf_vs_lhb`/`adv_bf_vs_rhb` ≥ 30), note the split and how it fits the your team' bullpen usage
+    `adv_bf_vs_lhb`/`adv_bf_vs_rhb` ≥ 30), note the split and how it fits your team's bullpen usage
 - Note whether the candidate brings unique positional value: if `positional_flexibility` list
   is non-empty, that flexibility adds roster utility beyond the direct comparison
 
 **3. Contract & Roster Cost** — Evaluate what claiming this player costs:
 - Cite `current_salary` and `years_remaining` explicitly
-- If `needs_dfa_to_claim` is True: identify who on the your team' roster the agent would DFA —
+- If `needs_dfa_to_claim` is True: identify who on your team's roster the agent would DFA —
   the weakest incumbent at the position with options remaining or FA-eligible status
 - If `no_trade` is True: flag that the player cannot be traded after claiming — this limits
   future flexibility
@@ -168,7 +168,7 @@ Read the HTML file, replace `<!-- WAIVER_RECOMMENDATION -->` with the recommenda
 write it back. Then open — use the exact path printed after `GENERATED:`:
 
 ```bash
-open reports/<save_name>/waiver_claims/<slug>.html
+open <path-from-GENERATED-output>
 ```
 
 ### Step 3: Print terminal summary

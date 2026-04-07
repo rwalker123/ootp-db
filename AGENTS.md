@@ -35,8 +35,16 @@ PYEOF
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.
   Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_")`.
-- The MLB league_id is **203** — always filter by `league_id = 203` unless the user 
-  specifically asks about minor leagues. Other league_ids are minor league levels.
+- **Never use magic numbers for OOTP enum values.** All fixed OOTP game schema constants
+  (league IDs, level IDs, position codes, split IDs, role codes, result codes, etc.) are
+  defined in `src/ootp_db_constants.py`. Import from there:
+  ```python
+  from ootp_db_constants import MLB_LEAGUE_ID, MLB_LEVEL_ID, SPLIT_CAREER_OVERALL
+  ```
+  Always filter by `league_id = MLB_LEAGUE_ID` unless the user specifically asks about
+  minor leagues. Other league_ids are minor league levels.
+  Application-level thresholds (grade cutoffs, rating weights, injury tiers) live in
+  `src/config.py` — see the Analytics Engine section.
 - Current-season data is in the main tables (e.g. `team_record`, `team_batting_stats`).
   Prior seasons are in `_history` tables.
 - Refer to the Database Schema Overview below for table structures, primary keys, 
@@ -71,7 +79,7 @@ ORDER BY thr.w DESC
 ```
 Current season division standings (use `dict()` not `{}` for params in heredocs):
 ```sql
--- Python: conn.execute(text("..."), dict(lid=203, slid=0, did=1))
+-- Python: conn.execute(text("..."), dict(lid=MLB_LEAGUE_ID, slid=0, did=1))
 SELECT t.name, t.nickname, tr.w, tr.l, tr.pct, tr.pos, tr.gb
 FROM team_relations rel
 JOIN teams t ON t.team_id = rel.team_id
