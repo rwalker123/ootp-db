@@ -769,7 +769,13 @@ class Handler(SimpleHTTPRequestHandler):
         llm_key = registry.get("active_llm", "claude")
         job_id = f"{skill}-{int(time.time())}"
         log = []
-        cmd, stream_fn = build_command(llm_key, skill, args)
+        build_args = args
+        if skill == "adhoc":
+            report_dir = ROOT / "reports" / "adhoc"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = str(report_dir / f"{job_id}.html")
+            build_args = f"{args}\n\nReport path: {report_path}"
+        cmd, stream_fn = build_command(llm_key, skill, build_args)
         proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
@@ -945,7 +951,13 @@ class Handler(SimpleHTTPRequestHandler):
             backup = target.with_suffix(".bak")
             shutil.copy2(target, backup)
             target.unlink()  # force cache miss so the skill regenerates
-            cmd, stream_fn = build_command(llm_key, skill, args)
+            build_args = args
+            if skill == "adhoc":
+                report_dir = ROOT / "reports" / "adhoc"
+                report_dir.mkdir(parents=True, exist_ok=True)
+                report_path = str(report_dir / f"{job_id}.html")
+                build_args = f"{args}\n\nReport path: {report_path}"
+            cmd, stream_fn = build_command(llm_key, skill, build_args)
             proc = subprocess.Popen(
                 cmd, cwd=str(ROOT),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

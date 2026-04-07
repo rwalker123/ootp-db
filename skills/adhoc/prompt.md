@@ -1,6 +1,7 @@
 # Ad-hoc OOTP Database Query
 
-Answer an ad-hoc question about the OOTP Baseball database expressed in plain English.
+Answer an ad-hoc question about the OOTP Baseball database expressed in plain English,
+then write the answer as an HTML report.
 
 ## Context isolation
 
@@ -9,20 +10,26 @@ these full instructions and the question to it. Otherwise, treat this as an isol
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+**Never use `open` to launch the report.** Print the `file://` path instead and stop.
+
 ## Argument substitution
 
-`$ARGUMENTS` is the full text of the user's question (e.g. "who leads the league in home runs?").
-Answer the question as stated — do not rephrase, reframe, or extend it.
+`$ARGUMENTS` contains two parts separated by `\n\nReport path:`:
+- **Question** — everything before `\n\nReport path:` (e.g. "who leads the league in home runs?")
+- **Report path** — the absolute file path after `Report path:` (e.g. `/Users/.../reports/adhoc/adhoc-1234567890.html`)
+
+Use the question as the focus of your analysis. Use the report path exactly as given — do not
+alter, sanitize, or derive a different path.
 
 ## Usage
 
 ```
 /adhoc who leads the league in home runs?
-/adhoc what is the Tigers' current record?
-/adhoc which pitcher has the lowest ERA this season?
+/adhoc what is the Tigers' current record and how does it compare to last year?
+/adhoc which pitchers have improved the most this season?
 ```
 
-Answer: **"$ARGUMENTS"**
+Answer: **"$ARGUMENTS"** (question portion only)
 
 ---
 
@@ -49,14 +56,17 @@ The `.env` file contains API keys. Never `cat` it, never open it, never read it.
 All DB access goes through `get_engine()` and `load_saves_registry()` — they handle config internally.
 
 ### 3. No `{}` or f-strings in heredocs
-The shell flags curly braces as suspicious. Use `dict(key=val)` for query parameters,
-never `{"key": val}` or f-strings with `{variable}`:
+The shell flags curly braces as suspicious. Use `dict(key=val)` for query parameters
+and string concatenation (`+`) for building HTML — never `{"key": val}`, f-strings with
+`{variable}`, or `.format()` calls inside a heredoc:
 ```python
-# CORRECT
+# CORRECT — dict() for params, + for string building
 rows = conn.execute(text("SELECT ... WHERE league_id = :lid"), dict(lid=MLB_LEAGUE_ID)).fetchall()
+row_html = row_html + "<tr><td>" + str(r[0]) + "</td></tr>"
 
 # WRONG — curly braces blocked in heredoc
 rows = conn.execute(text("SELECT ..."), {"lid": 203}).fetchall()
+html = f"<td>{name}</td>"
 ```
 
 ### 4. Use `ootp_db_constants.py` for all OOTP enum values
@@ -97,6 +107,14 @@ When listing or ranking players by quality, use `player_ratings.rating_overall`
 Do not `ls`, `find`, `glob`, or otherwise explore directories to answer the question.
 All relevant code entry points are in `src/`. The schema is in `AGENTS.md`.
 
+### 11. Print `GENERATED:` as a bare line — no markdown, no prose
+After writing the HTML file, print exactly this (and nothing else on that line):
+```
+GENERATED:/absolute/path/to/file.html
+```
+No markdown links, no `[text](url)`, no "The report is at ...", no surrounding text.
+The line must start with `GENERATED:` — the server scans for this prefix exactly.
+
 ---
 
 ## Step 1: Identify the relevant tables
@@ -118,11 +136,87 @@ From the question, determine which tables are needed. Common mappings:
 
 For current-season stats, use the main stats tables. For historical data, use `_history` tables.
 
-## Step 2: Write and run the query
+## Step 2: Query and generate the HTML report
 
-Write the query following the hard rules above. Run it via the heredoc pattern.
+Run one Python heredoc that queries the database, builds the HTML, and writes the file.
+Load CSS from `shared_css` — do not inline your own styles.
 
-## Step 3: Print the answer
+Use the **report path from $ARGUMENTS** exactly as given for `Path(...)`.
 
-Present the results as a clean, readable table or summary. Include relevant context
-(e.g., "as of the 2026 season", "MLB only"). Do not pad the output with disclaimers.
+```bash
+.venv/bin/python3 << 'PYEOF'
+import sys
+sys.path.insert(0, "src")
+from sqlalchemy import text
+from shared_css import get_engine, load_saves_registry, get_report_css
+from ootp_db_constants import MLB_LEAGUE_ID
+from pathlib import Path
+from datetime import datetime
+ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+save = load_saves_registry()["active"]
+engine = get_engine(save)
+with engine.connect() as conn:
+    rows = conn.execute(text(
+        "SELECT <AGENT_FILLS_IN_COLUMNS> FROM <AGENT_FILLS_IN_TABLES> "
+        "WHERE league_id = :lid <AGENT_FILLS_IN_MORE_WHERE> "
+        "ORDER BY <AGENT_FILLS_IN_ORDER> LIMIT <AGENT_FILLS_IN_LIMIT>"
+    ), dict(lid=MLB_LEAGUE_ID)).fetchall()
+
+css = get_report_css()
+title = "<AGENT_FILLS_IN_TITLE>"
+
+# Build table rows — string concatenation only, no f-strings or {} in this heredoc
+thead = "<tr>" + "".join("<th>" + h + "</th>" for h in [<AGENT_FILLS_IN_HEADER_LIST>]) + "</tr>"
+tbody = ""
+for r in rows:
+    tbody = tbody + "<tr>" + "".join("<td>" + str(c) + "</td>" for c in r) + "</tr>"
+
+# Build full HTML — commentary paragraph(s) written by you as the analyst
+commentary = (
+    "<p><AGENT_FILLS_IN_COMMENTARY_SENTENCE_1></p>"
+    "<p><AGENT_FILLS_IN_COMMENTARY_SENTENCE_2_IF_NEEDED></p>"
+)
+
+html = (
+    "<!DOCTYPE html><html><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='ootp-generated' content='" + ts + "'>"
+    "<title>" + title + "</title>"
+    "<style>" + css + "</style>"
+    "</head><body><div class='container'>"
+    "<div class='page-header'>"
+    "<div class='header-top'><div>"
+    "<div class='player-name'>" + title + "</div>"
+    "<div class='player-meta'>Ad-hoc &bull; <AGENT_FILLS_IN_SUBTITLE e.g. 'MLB &bull; 2026 Season'></div>"
+    "</div></div></div>"
+    "<div class='section'>"
+    + commentary +
+    "<table><thead>" + thead + "</thead><tbody>" + tbody + "</tbody></table>"
+    "<p style='color:#888;font-size:0.85em;margin-top:1.5em'>"
+    "Ad-hoc reports are not cached — generated fresh each run.</p>"
+    "</div></div>"
+    "</body></html>"
+)
+
+Path("<AGENT_FILLS_IN_REPORT_PATH_FROM_ARGUMENTS>").write_text(html)
+print("GENERATED:<AGENT_FILLS_IN_REPORT_PATH_FROM_ARGUMENTS>")
+PYEOF
+```
+
+**Multiple tables:** If the question requires multiple datasets (e.g. AL leaders + NL leaders,
+or batting + pitching), run one query per dataset and concatenate multiple `<table>` blocks
+in the HTML before the note paragraph. Add `<h2>` headings to separate sections.
+
+**Commentary:** Write 2–4 sentences of analysis — lead with the key finding, add context
+(team, season year, relevant comparisons). Do not pad with disclaimers.
+
+## Step 3: Print the report path
+
+```bash
+echo "file://<AGENT_FILLS_IN_REPORT_PATH_FROM_ARGUMENTS>"
+```
+
+### Position code reference
+1=P, 2=C, 3=1B, 4=2B, 5=3B, 6=SS, 7=LF, 8=CF, 9=RF
+bats: 1=R, 2=L, 3=S  |  throws: 1=R, 2=L

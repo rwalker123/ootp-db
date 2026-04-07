@@ -263,7 +263,7 @@ function unescHtml(s) {
 
 function extractMeta(html) {
   const title  = (html.match(/<title>(.*?)<\/title>/) || [])[1] || null;
-  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated" content="([\d\-T:]+)"/) || [])[1] || null;
+  const ts     = (html.match(/Generated: ([\d\-T:]+)/) || html.match(/ootp-generated["'] content=["']([\d\-T:]+)["']/) || [])[1] || null;
   const oa     = (html.match(/\bOA (\d+)/) || [])[1] || null;
   const pot    = (html.match(/\bPOT (\d+)/) || [])[1] || null;
   const skill       = (html.match(/<meta name="ootp-skill" content="([^"]+)"/) || [])[1] || null;
@@ -437,7 +437,7 @@ function renderSaves(data) {
           <button onclick="logClose('${id}', ${jsStr(name)})" title="Close"${running.includes(name) ? ' disabled' : ''}>✕</button>
         </span>
       </div>
-      <div class="import-log-body" id="${id}">${logText}</div>
+      <div class="import-log-body minimized" id="${id}">${logText}</div>
     </div>`;
   }).join('');
 
@@ -973,7 +973,7 @@ function _renderJobPanelContent(jobId) {
         <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''} id="close-${id}">✕</button>
       </span>
     </div>
-    <div class="import-log-body rendered" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
+    <div class="import-log-body rendered minimized" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
 }
 
 function _renderJobPanel(jobId) {
@@ -1041,8 +1041,9 @@ function _extractReportPath(log) {
   for (const line of log) {
     const m = line.match(/^(?:CACHED|GENERATED):(.+\.html)/);
     if (m) {
-      // Convert absolute fs path to a server-relative URL
       const abs = m[1].trim();
+      if (abs.includes('/absolute/path/to/')) continue;  // prompt placeholder, not a real path
+      // Convert absolute fs path to a server-relative URL
       const rel = abs.replace(/^.*\/reports\//, '/reports/');
       return rel;
     }
@@ -1112,6 +1113,10 @@ async function generateReport() {
 
   const { job_id } = await r.json();
   _jobData[job_id] = { skill, args, log: [], running: true };
+  ['gen-name', 'gen-focus', 'gen-criteria'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   listenToJob(job_id);
 }
 
@@ -1200,7 +1205,9 @@ async function reloadReports() {
   const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
   const listing = await tryFetch(reportsBase);
   const subdirs = listing ? parseSubdirs(listing) : [];
-  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const saveSections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const adhocSection = await buildSection('reports/', 'adhoc/', null);
+  const sections = [...saveSections, adhocSection];
   const html = sections.filter(Boolean).join('');
   document.getElementById('content').innerHTML =
     html || '<div class="section"><span class="empty">No reports yet.</span></div>';
@@ -1281,7 +1288,9 @@ async function main() {
   const reportsBase = active ? `reports/${encodeURIComponent(active)}/` : 'reports/';
   const reportsListing = await tryFetch(reportsBase);
   const subdirs = reportsListing ? parseSubdirs(reportsListing) : [];
-  const sections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const saveSections = await Promise.all(subdirs.map(d => buildSection(reportsBase, d, lastImport)));
+  const adhocSection = await buildSection('reports/', 'adhoc/', null);
+  const sections = [...saveSections, adhocSection];
   const html = sections.filter(Boolean).join('');
 
   document.getElementById('content').innerHTML =
