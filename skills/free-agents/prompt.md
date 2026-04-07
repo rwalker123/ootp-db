@@ -9,6 +9,12 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+## Argument substitution
+
+`$ARGUMENTS` is the full text of the user's invocation message (e.g. "lefty SP under 28 with low injury risk").
+Wherever these instructions reference `$ARGUMENTS`, use the user's full input verbatim as the search criteria.
+The `<AGENT_FILLS_IN_...>` placeholders in code blocks are filled by you based on your analysis of the criteria — they are not substituted from the user's message directly.
+
 ## Usage
 
 ```

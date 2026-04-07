@@ -9,6 +9,13 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+## Argument substitution
+
+`$ARGUMENTS` is the full text of the user's invocation message (e.g. "Roger Clemens" or "Barry Bonds power, discipline").
+Before running any code block, replace all placeholders with the parsed values:
+- `<FULL_ARGUMENTS>` → the user's full input verbatim (name + any focus modifiers)
+- `$ARGUMENTS` inside string literals → the user's full input verbatim
+
 ## Usage
 - `/player-rating Roger Clemens` — default weights
 - `/player-rating Ozzie Smith defense` — boost defense weight

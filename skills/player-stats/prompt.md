@@ -9,6 +9,14 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+## Argument substitution
+
+`$ARGUMENTS` is the full text of the user's invocation message (e.g. "Roger Clemens").
+Before running any code block, replace all placeholders with the parsed values:
+- `<FIRST>` → player's first name
+- `<LAST>` → player's last name
+- `$ARGUMENTS` inside string literals (e.g. `raw_args="$ARGUMENTS"`) → the user's full input verbatim
+
 Generate an OOTP player report for **$ARGUMENTS** using `src/report.py`.
 
 ### Step 1: Generate (or retrieve cached) the report

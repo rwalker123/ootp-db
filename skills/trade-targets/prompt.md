@@ -9,6 +9,12 @@ these full instructions and the arguments to it. Otherwise, treat this as an iso
 do not reference or carry over any player names, stats, analysis, or conclusions from
 earlier in this conversation.
 
+## Argument substitution
+
+`$ARGUMENTS` is the full text of the user's invocation message (e.g. "Riley Greene" or "acquiring Aaron Judge").
+Wherever these instructions reference `$ARGUMENTS`, use the user's full input verbatim.
+The `<AGENT FILLS: ...>` and `<PLAYER_NAME_OR_EMPTY>` / `<MODE>` placeholders in code blocks are derived by you from the query — they are not direct substitutions from the user's message.
+
 ## Usage
 
 ```
