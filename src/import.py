@@ -23,6 +23,14 @@ if platform.system() == "Windows":
             Path.home() / "Documents" / "Out of the Park Developments",
             "OOTP Baseball */saved_games",
         ),
+        (
+            Path("C:/Program Files (x86)/Steam/steamapps/common"),
+            "Out of the Park Baseball */saved_games",
+        ),
+        (
+            Path("C:/Program Files/Steam/steamapps/common"),
+            "Out of the Park Baseball */saved_games",
+        ),
     ]
 else:
     # macOS (and Linux fallback)
