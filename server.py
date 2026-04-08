@@ -776,7 +776,10 @@ class Handler(SimpleHTTPRequestHandler):
             parsed = urlparse(self.path)
             if parsed.path.endswith("/stream"):
                 job_id = parsed.path[len("/reports/jobs/"):-len("/stream")]
-                offset = int((parse_qs(parsed.query).get("offset") or ["0"])[0])
+                try:
+                    offset = max(0, int((parse_qs(parsed.query).get("offset") or ["0"])[0]))
+                except (TypeError, ValueError):
+                    offset = 0
                 self._handle_job_stream(job_id, offset)
             else:
                 super().do_GET()
