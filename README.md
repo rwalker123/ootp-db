@@ -65,7 +65,7 @@ SQLite works well for most uses. If you want PostgreSQL (better performance for 
 DATABASE_URL=postgresql://postgres@localhost:5432
 ```
 
-Then install the PostgreSQL driver:
+Then install the PostgreSQL driver (run `./web-server.sh` once first to create the virtual environment, or create it manually with `python3 -m venv .venv`):
 ```bash
 .venv/bin/pip install -r requirements-postgres.txt
 ```
@@ -101,14 +101,9 @@ Download and unzip: `https://github.com/rwalker123/ootp-db/archive/refs/heads/ma
 ```bash
 # Enter the unzipped directory
 cd ootp-db-main
-
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
 ```
+
+The web UI script (`./web-server.sh`) handles virtual environment creation and dependency installation automatically — no manual `pip install` needed.
 
 No `.env` file is needed for the default SQLite setup. If you want to use PostgreSQL or override the OOTP save discovery path, copy `.env.example` to `.env` and edit it:
 
@@ -186,6 +181,13 @@ Reports are saved as HTML files on disk, so they persist across sessions. When y
 ## Manual Usage
 
 These are the scripts the web UI runs behind the scenes. If you're using the web interface, you don't need to run these directly.
+
+If this is your first time running scripts manually (without having launched the web UI first), create the virtual environment once:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
 
 ### Import Save
 
@@ -571,7 +573,7 @@ Contributions are welcome. Only the repo owner can merge PRs.
    git clone https://github.com/<your-username>/ootp-db.git
    cd ootp-db
    ```
-3. Complete the [Setup](#setup) steps above (venv, pip install, .env), then also activate git hooks:
+3. Create the virtual environment and install dependencies (see [Manual Usage](#manual-usage)), copy `.env.example` to `.env` if needed, then activate git hooks:
    ```bash
    pre-commit install
    ```
