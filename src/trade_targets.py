@@ -121,7 +121,7 @@ _SELECT = """
            pc.salary0, pc.salary1, pc.salary2, pc.salary3, pc.salary4,
            pc.salary5, pc.salary6, pc.salary7, pc.salary8, pc.salary9,
            prs.mlb_service_years,
-           pr.rating_now, pr.rating_ceiling
+           pr.confidence
 """
 
 _FROM = """
@@ -147,7 +147,7 @@ _KEYS = [
     "salary0", "salary1", "salary2", "salary3", "salary4",
     "salary5", "salary6", "salary7", "salary8", "salary9",
     "mlb_service_years",
-    "rating_now", "rating_ceiling",
+    "confidence",
 ]
 
 
@@ -261,7 +261,7 @@ def build_table_header(show_team, key_header, highlight):
     extra = "".join(f"<th>{label}</th>" for _, label in (highlight or []))
     return (
         f"<tr><th>#</th><th class='left'>Name</th><th>Pos</th><th>Age</th>"
-        f"{team_col}<th>Now</th><th>Ceiling</th><th>Rating</th>{extra}"
+        f"{team_col}<th>Rating</th><th>Conf</th>{extra}"
         f"<th>{key_header}</th><th>WAR</th><th>Salary</th><th>Yrs Left</th>"
         f"<th>Injury</th><th>Flags</th></tr>"
     )
@@ -280,8 +280,6 @@ def build_table_rows(results, show_team, highlight):
             key_stat = str(int(wrc_fip)) if wrc_fip is not None else "—"
 
         war_disp = f"{float(r['war']):.1f}" if r["war"] is not None else "—"
-        rating_now = float(r["rating_now"] or 0) if r.get("rating_now") is not None else None
-        rating_ceiling = float(r["rating_ceiling"] or 0) if r.get("rating_ceiling") is not None else None
         rating = float(r["rating_overall"] or 0)
 
         sal_str = fmt_salary(get_current_salary(r))
@@ -292,18 +290,20 @@ def build_table_rows(results, show_team, highlight):
 
         flags = ""
         if r.get("flag_leader"):
-            flags += "🏆 "
+            flags += '<span title="Leader — positive clubhouse presence">🏆</span> '
         if r.get("flag_high_ceiling"):
-            flags += "📈 "
+            flags += '<span title="High Ceiling — significant upside remaining">📈</span> '
         if no_trade:
-            flags += "🔒 "
+            flags += '<span title="No-Trade Clause — requires player consent">🔒</span> '
         if we_v > 160:
-            flags += "⚡ "
+            flags += '<span title="Elite Work Ethic — likely to develop and maintain skills">⚡</span> '
         if iq_v > 160:
-            flags += "🧠"
+            flags += '<span title="High Baseball IQ — reads the game well, adjusts quickly">🧠</span>'
 
         extra_cells = "".join(_fmt_score_cell(r.get(col)) for col, _ in (highlight or []))
         team_cell = f"<td>{r.get('team_abbr', '')}</td>" if show_team else ""
+        conf = float(r.get("confidence") or 0.0)
+        conf_color = "#1a7a1a" if conf >= 0.9 else "#cc7700" if conf >= 0.5 else "#cc2222"
         bg = row_bg(rating)
 
         html += (
@@ -313,9 +313,8 @@ def build_table_rows(results, show_team, highlight):
             f"<td>{pos_name}</td>"
             f"<td>{int(r['age']) if r['age'] else '?'}</td>"
             f"{team_cell}"
-            f"{_fmt_score_cell(rating_now)}"
-            f"{_fmt_score_cell(rating_ceiling)}"
             f"<td>{grade_badge(rating)}</td>"
+            f'<td style="font-weight:bold;color:{conf_color}">{conf:.0%}</td>'
             f"{extra_cells}"
             f"<td>{key_stat}</td>"
             f"<td>{war_disp}</td>"
@@ -538,6 +537,15 @@ def generate_trade_targets_report(
 </div>
 
 {spotlight}
+
+<div style="font-size:12px;color:#888;margin:8px 16px 16px;line-height:1.8">
+  <b>Flag legend:</b>&nbsp;
+  🏆 Leader &nbsp;&bull;&nbsp;
+  📈 High Ceiling &nbsp;&bull;&nbsp;
+  🔒 No-Trade Clause &nbsp;&bull;&nbsp;
+  ⚡ Elite Work Ethic &nbsp;&bull;&nbsp;
+  🧠 High Baseball IQ
+</div>
 
 </div>
 </body></html>"""

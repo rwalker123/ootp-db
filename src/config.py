@@ -59,9 +59,25 @@ REGRESSION_EXPONENT = 0.88
 # ---------------------------------------------------------------------------
 
 # wRC+ and xwOBA weights in score_offense (must sum to 1.0).
-# wRC+ captures accumulated value; xwOBA captures contact quality / luck-neutral hitting.
-OFFENSE_WRC_WEIGHT = 0.7
-OFFENSE_XWOBA_WEIGHT = 0.3
+# xwOBA is the primary single-number offensive snapshot; wRC+ is supporting evidence.
+OFFENSE_WRC_WEIGHT = 0.3
+OFFENSE_XWOBA_WEIGHT = 0.7
+
+# wRC+ scale anchors for score_offense.
+# LEAGUE_AVG_WRC: baseline — a player at this level scores at the midpoint.
+# ELITE_WRC: ceiling — maps to a perfect score of 100; 150+ is considered elite.
+# WRC_SCORE_FLOOR: floor — below this wRC+, score approaches 0.
+LEAGUE_AVG_WRC = 100
+ELITE_WRC = 170
+WRC_SCORE_FLOOR = 50
+WRC_UNKNOWN_DEFAULT = 95  # assumed wRC+ for players with no track record (95% of league average)
+
+# General scoring scale constants.
+# SCORE_MAX: upper bound of all 0–100 composite scores.
+# PERCENTILE_AVG: league average percentile — used as the regression target for
+#                 thin-sample players (regress toward average, not toward zero).
+SCORE_MAX = 100
+PERCENTILE_AVG = 50
 
 # ---------------------------------------------------------------------------
 # Pitcher OOTP blend (thin-sample IP)
@@ -153,9 +169,9 @@ GREED_HIGH_MAX = 160
 # Batter dimension weights  (must sum to 1.0)
 # ---------------------------------------------------------------------------
 BATTER_WEIGHT_OFFENSE     = 0.30
-BATTER_WEIGHT_CONTACT     = 0.15
-BATTER_WEIGHT_DISCIPLINE  = 0.10
-BATTER_WEIGHT_DEFENSE     = 0.15
+BATTER_WEIGHT_CONTACT     = 0.18
+BATTER_WEIGHT_DISCIPLINE  = 0.08
+BATTER_WEIGHT_DEFENSE     = 0.14
 BATTER_WEIGHT_POTENTIAL   = 0.15
 BATTER_WEIGHT_DURABILITY  = 0.05   # injury risk only
 BATTER_WEIGHT_DEVELOPMENT = 0.03   # work ethic + intelligence
@@ -201,6 +217,57 @@ DEVELOPMENT_EXPONENT = 0.75
 # wOBA linear weights (FanGraphs-style, used across analytics, report, lineup)
 # Canonical source: analytics.py values at project inception.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# OOTP rating scale
+# ---------------------------------------------------------------------------
+# The min/max of the scale chosen in Game Settings → Global Settings →
+# Player Rating Scales. Default is 20-80. If you change this in OOTP,
+# update these values to match — all (val - min) / range conversions use them.
+OOTP_RATING_SCALE_MIN = 20
+OOTP_RATING_SCALE_MAX = 80
+
+# ---------------------------------------------------------------------------
+# Hitter archetype classification thresholds
+# Applied in ratings.py classify_batter_archetype(); requires pa >= ARCHETYPE_MIN_PA.
+# ---------------------------------------------------------------------------
+ARCHETYPE_MIN_PA = 50           # minimum PA before an archetype is assigned
+
+# Speedster / Table-Setter
+ARCHETYPE_SPEED_SB        = 15   # sb >= this
+ARCHETYPE_SPEED_XSLG_MAX  = 0.420
+ARCHETYPE_SPEED_XBA_MIN   = 0.250
+ARCHETYPE_SPEED_K_MAX     = 0.22  # either xba OR k_pct qualifies
+
+# Patient Slugger
+ARCHETYPE_PATIENT_BB_MIN   = 0.10
+ARCHETYPE_PATIENT_XWOBA_MIN = 0.360
+ARCHETYPE_PATIENT_XSLG_MIN  = 0.480
+
+# All-or-Nothing Masher
+ARCHETYPE_MASHER_BARREL_MIN = 0.10
+ARCHETYPE_MASHER_XSLG_MIN   = 0.480
+ARCHETYPE_MASHER_K_MIN      = 0.28
+
+# Contact Hitter
+ARCHETYPE_CONTACT_K_MAX   = 0.18
+ARCHETYPE_CONTACT_XBA_MIN = 0.270
+ARCHETYPE_CONTACT_XSLG_MAX = 0.460  # not a power hitter
+
+# Empty Average Bat
+ARCHETYPE_EMPTY_XBA_MIN    = 0.250
+ARCHETYPE_EMPTY_XSLG_MAX   = 0.380
+ARCHETYPE_EMPTY_BARREL_MAX = 0.05
+
+# ---------------------------------------------------------------------------
+# Platoon split PA thresholds
+# ---------------------------------------------------------------------------
+# Minimum PA vs a handedness to give full trust to split stats.
+# LHP threshold is lower because batters face fewer LHP (~27% of PAs).
+# At PA=0 → fully regressed to WRC_UNKNOWN_DEFAULT / PERCENTILE_AVG.
+# At PA=threshold → full trust (pa_trust = 1.0).
+PLATOON_LHP_PA_THRESHOLD = 140
+PLATOON_RHP_PA_THRESHOLD = 360
+
 WOBA_BB = 0.69
 WOBA_HBP = 0.72
 WOBA_1B = 0.87

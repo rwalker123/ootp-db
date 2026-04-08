@@ -162,6 +162,8 @@
                        justify-content: space-between; align-items: center; gap: 8px; }
   .import-log-header .log-title { color: #7ec8e3; flex: 1; }
   .import-log-header .log-status { color: #aaa; }
+  .import-log-header .log-status.needs-input { color: #f0a030; }
+  .import-log-header .log-status.failed { color: #f47c7c; }
   .import-log-header .log-controls { display: flex; gap: 6px; }
   .import-log-header .log-controls button {
     background: none; border: 1px solid #555; border-radius: 3px; color: #ccc;
@@ -181,6 +183,24 @@
   .log-table td { padding: 3px 10px; color: #d4d4d4; border: 1px solid #333; text-align: left; white-space: nowrap; }
   .log-table tr:nth-child(even) td { background: #252530; }
   .log-table tr:hover td { background: #3a3a50; color: #fff; }
+
+  /* Interactive mode footer */
+  .interactive-footer { background: #252535; border-top: 1px solid #444;
+                         padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .interactive-input-row { display: flex; gap: 6px; align-items: center; }
+  .interactive-input { flex: 1; background: #1e1e1e; color: #d4d4d4; border: 1px solid #555;
+                        border-radius: 3px; font-family: monospace; font-size: 11px;
+                        padding: 5px 8px; resize: none; height: 32px; line-height: 1.4;
+                        overflow: hidden; }
+  .interactive-input:focus { outline: none; border-color: #7ec8e3; }
+  .interactive-input:disabled { opacity: 0.4; cursor: not-allowed; }
+  .interactive-btn { background: #2c3e50; color: #d4d4d4; border: 1px solid #555;
+                     border-radius: 3px; font-size: 11px; padding: 5px 10px;
+                     cursor: pointer; white-space: nowrap; line-height: 1.4; }
+  .interactive-btn:hover:not(:disabled) { border-color: #7ec8e3; color: #7ec8e3; }
+  .interactive-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .interactive-btn.generate { border-color: #5a9a5a; color: #7ec87e; }
+  .interactive-btn.generate:hover:not(:disabled) { background: #1e3a1e; }
 </style>
 </head>
 <body>
@@ -199,7 +219,7 @@
       <span style="font-size:11px;color:#888;font-weight:600">LLM:</span>
       <div class="llm-toggle" id="llm-toggle"></div>
     </div>
-    <div class="generate-bar">
+    <div class="generate-bar" style="align-items:flex-start">
       <select id="gen-skill" onchange="updateGenFields()">
         <option value="player-stats">Player Stats</option>
         <option value="player-rating">Player Rating</option>
@@ -211,11 +231,20 @@
         <option value="lineup-optimizer">Lineup Optimizer</option>
         <option value="adhoc">Ad-hoc Query</option>
       </select>
-      <div id="gen-fields" class="gen-fields"></div>
-      <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
-      <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
-        <input type="checkbox" id="launch-when-done" onchange="saveLaunchPref()"> Launch when done
-      </label>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="gen-fields" class="gen-fields" style="flex:1"></div>
+          <button id="gen-btn" class="btn-action" onclick="generateReport()">▶ Run</button>
+        </div>
+        <div style="display:flex;gap:16px;align-items:center">
+          <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
+            <input type="radio" name="run-mode" id="launch-when-done" value="launch" onchange="saveLaunchPref()"> Launch when done
+          </label>
+          <label style="font-size:11px;color:#666;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">
+            <input type="radio" name="run-mode" id="interactive-mode" value="interactive" onchange="saveLaunchPref()"> Interactive
+          </label>
+        </div>
+      </div>
     </div>
     <div id="job-logs"></div>
   </div>
@@ -975,11 +1004,29 @@ function _renderJobPanelContent(jobId) {
   const job = _jobData[jobId];
   if (!job) return '';
   const id = _jobPanelId(jobId);
-  const status = job.running ? 'Running…' : 'Done';
+  const status = job.running ? 'Running…' : (job.interactive && !job.reportReady ? 'Waiting…' : 'Done');
   const logText = renderMarkdownLog(job.log);
   const label = job.skill === 'refresh'
     ? `↻ ${esc(job.args)}`
     : `${GEN_SKILLS[job.skill]?.label || job.skill}: ${esc(job.args)}`;
+  // Interactive jobs start expanded; normal jobs start minimized
+  const bodyClass = job.interactive ? 'import-log-body rendered' : 'import-log-body rendered minimized';
+  const interactiveFooter = job.interactive ? `
+    <div class="interactive-footer" id="ifooter-${id}">
+      <div class="interactive-input-row">
+        <input class="interactive-input" id="iinput-${id}" type="text"
+          placeholder="Ask a follow-up question…"
+          data-job-id="${esc(jobId)}"
+          ${job.running ? 'disabled' : ''}
+        >
+        <button type="button" class="interactive-btn" id="isend-${id}"
+          data-action="send" data-job-id="${esc(jobId)}"
+          ${job.running ? 'disabled' : ''}>Send</button>
+        <button type="button" class="interactive-btn generate" id="igenerate-${id}"
+          data-action="generate" data-job-id="${esc(jobId)}"
+          ${job.running || job.reportReady ? 'disabled' : ''}>Generate Report</button>
+      </div>
+    </div>` : '';
   return `<div class="import-log-header">
       <span class="log-title">${label}</span>
       <span class="log-status" id="status-${id}">${status}</span>
@@ -990,7 +1037,8 @@ function _renderJobPanelContent(jobId) {
         <button onclick="clearJob('${id}', ${jsStr(jobId)})" title="Close"${job.running ? ' disabled' : ''} id="close-${id}">✕</button>
       </span>
     </div>
-    <div class="import-log-body rendered minimized" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>`;
+    <div class="${bodyClass}" id="${id}">${logText || '<span style="color:#666">Starting…</span>'}</div>
+    ${interactiveFooter}`;
 }
 
 function _renderJobPanel(jobId) {
@@ -1008,12 +1056,54 @@ function _appendJobLine(jobId, line) {
 }
 
 function _markJobDone(jobId) {
-  if (_jobData[jobId]) _jobData[jobId].running = false;
+  const job = _jobData[jobId];
+  if (job) job.running = false;
   const id = _jobPanelId(jobId);
   const statusEl = document.getElementById('status-' + id);
-  if (statusEl) statusEl.textContent = 'Done';
+
+  let status = 'Done';
+  if (job) {
+    if (job.interactive && !job.reportReady) {
+      status = 'Waiting…';
+    } else if (!job.interactive) {
+      const log = job.log || [];
+      const hasReport = log.some(l => /^(GENERATED|CACHED):/.test(l));
+      const needsInput = log.some(l => /NEEDS_INPUT:/.test(l));
+      if (!hasReport) status = needsInput ? 'Needs Input' : 'Failed';
+    }
+  }
+
+  if (statusEl) {
+    statusEl.textContent = status;
+    statusEl.className = 'log-status';
+    if (status === 'Needs Input') statusEl.classList.add('needs-input');
+    else if (status === 'Failed') statusEl.classList.add('failed');
+  }
+
+  // Auto-expand log on non-success exits so the user can see what happened
+  if (status === 'Needs Input' || status === 'Failed') {
+    const body = document.getElementById(id);
+    if (body) body.classList.remove('minimized');
+  }
   const closeBtn = document.getElementById('close-' + id);
   if (closeBtn) closeBtn.disabled = false;
+  // Enable interactive controls when agent finishes a turn
+  if (job && job.interactive && !job.reportReady) {
+    const input = document.getElementById('iinput-' + id);
+    const sendBtn = document.getElementById('isend-' + id);
+    const genBtn = document.getElementById('igenerate-' + id);
+    if (sendBtn) sendBtn.disabled = false;
+    if (genBtn) genBtn.disabled = false;
+    if (input) {
+      input.disabled = false;
+      input.focus();
+      input.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // Brief highlight so it's obvious where to type
+      input.style.borderColor = '#7ec8e3';
+      input.style.boxShadow = '0 0 0 2px rgba(126,200,227,0.4)';
+      setTimeout(() => { input.style.borderColor = ''; input.style.boxShadow = ''; }, 1500);
+    }
+  }
 }
 
 function _openJobPanel(jobId) {
@@ -1046,11 +1136,12 @@ function _openJobPanel(jobId) {
 }
 
 function saveLaunchPref() {
-  localStorage.setItem('launchWhenDone', document.getElementById('launch-when-done').checked ? '1' : '0');
+  const val = document.querySelector('input[name="run-mode"]:checked')?.value || 'launch';
+  localStorage.setItem('runMode', val);
 }
 
 function getLaunchPref() {
-  return localStorage.getItem('launchWhenDone') !== '0';  // default on
+  return (localStorage.getItem('runMode') || 'launch') === 'launch';
 }
 
 function _extractReportPath(log) {
@@ -1069,11 +1160,13 @@ function _extractReportPath(log) {
   return null;
 }
 
-function listenToJob(jobId, onDone) {
+function listenToJob(jobId, onDone, offset) {
   if (_activeStreams[jobId]) return;
   _openJobPanel(jobId);
 
-  const es = new EventSource(`/reports/jobs/${encodeURIComponent(jobId)}/stream`);
+  const off = offset || 0;
+  const url = `/reports/jobs/${encodeURIComponent(jobId)}/stream` + (off > 0 ? `?offset=${off}` : '');
+  const es = new EventSource(url);
   _activeStreams[jobId] = es;
 
   es.onmessage = (e) => {
@@ -1084,12 +1177,17 @@ function listenToJob(jobId, onDone) {
       if (onDone) {
         onDone();
       } else {
-        reloadReports();
-        if (getLaunchPref()) {
-          const path = _extractReportPath(_jobData[jobId]?.log || []);
-          if (path && !_openedReports.has(path)) {
-            _openedReports.add(path);
-            window.open(path, '_blank');
+        const job = _jobData[jobId];
+        if (job && job.interactive) {
+          // Interactive: don't auto-open — wait for user to click Generate Report
+        } else {
+          reloadReports();
+          if (getLaunchPref()) {
+            const path = _extractReportPath(_jobData[jobId]?.log || []);
+            if (path && !_openedReports.has(path)) {
+              _openedReports.add(path);
+              window.open(path, '_blank');
+            }
           }
         }
       }
@@ -1112,10 +1210,95 @@ function listenToJob(jobId, onDone) {
   };
 }
 
+async function sendFollowup(jobId) {
+  const id = _jobPanelId(jobId);
+  const input = document.getElementById('iinput-' + id);
+  const sendBtn = document.getElementById('isend-' + id);
+  const genBtn = document.getElementById('igenerate-' + id);
+  if (!input) return;
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.disabled = true;
+  sendBtn.disabled = true;
+  genBtn.disabled = true;
+  input.value = '';
+
+  const offset = (_jobData[jobId]?.log || []).length;
+  if (_jobData[jobId]) _jobData[jobId].running = true;
+  const statusEl = document.getElementById('status-' + id);
+  if (statusEl) statusEl.textContent = 'Running…';
+
+  const r = await fetch(`/reports/jobs/${encodeURIComponent(jobId)}/followup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  if (!r.ok) {
+    const errText = await r.text();
+    if (_jobData[jobId]) _jobData[jobId].log.push(`Error: ${errText}`);
+    _appendJobLine(jobId, `Error: ${errText}`);
+    _markJobDone(jobId);
+    return;
+  }
+  listenToJob(jobId, null, offset);
+}
+
+async function finishInteractive(jobId) {
+  const id = _jobPanelId(jobId);
+  const input = document.getElementById('iinput-' + id);
+  const sendBtn = document.getElementById('isend-' + id);
+  const genBtn = document.getElementById('igenerate-' + id);
+  if (input) input.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
+  if (genBtn) genBtn.disabled = true;
+
+  const offset = (_jobData[jobId]?.log || []).length;
+  if (_jobData[jobId]) _jobData[jobId].running = true;
+  const statusEl = document.getElementById('status-' + id);
+  if (statusEl) statusEl.textContent = 'Generating…';
+
+  const r = await fetch(`/reports/jobs/${encodeURIComponent(jobId)}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!r.ok) {
+    const errText = await r.text();
+    if (_jobData[jobId]) _jobData[jobId].log.push(`Error: ${errText}`);
+    _appendJobLine(jobId, `Error: ${errText}`);
+    _markJobDone(jobId);
+    return;
+  }
+
+  listenToJob(jobId, () => {
+    // After GENERATE_REPORT turn completes, open the report
+    if (_jobData[jobId]) {
+      _jobData[jobId].running = false;
+      _jobData[jobId].reportReady = true;
+    }
+    const statusEl2 = document.getElementById('status-' + id);
+    if (statusEl2) statusEl2.textContent = 'Done';
+    const closeBtn = document.getElementById('close-' + id);
+    if (closeBtn) closeBtn.disabled = false;
+    reloadReports();
+    const path = _extractReportPath(_jobData[jobId]?.log || []);
+    if (path && !_openedReports.has(path)) {
+      _openedReports.add(path);
+      window.open(path, '_blank');
+    }
+  }, offset);
+}
+
 async function generateReport() {
+  // Block if an interactive session is currently waiting for user input
+  const waitingInteractive = Object.values(_jobData).find(j => j.interactive && !j.running && !j.reportReady);
+  if (waitingInteractive) { alert('An interactive report is waiting for your input. Please respond before starting another report.'); return; }
+
   const skill = document.getElementById('gen-skill').value;
   const args = buildArgs(skill);
   if (args === null) { alert('Please fill in the required fields.'); return; }
+  const interactive = document.getElementById('interactive-mode').checked;
 
   const btn = document.getElementById('gen-btn');
   btn.disabled = true;
@@ -1123,18 +1306,19 @@ async function generateReport() {
   const r = await fetch('/reports/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ skill, args }),
+    body: JSON.stringify({ skill, args, interactive }),
   });
 
   btn.disabled = false;
   if (!r.ok) { alert('Failed to start: ' + await r.text()); return; }
 
   const { job_id } = await r.json();
-  _jobData[job_id] = { skill, args, log: [], running: true };
-  ['gen-name', 'gen-focus', 'gen-criteria'].forEach(id => {
+  _jobData[job_id] = { skill, args, log: [], running: true, interactive };
+  ['gen-name', 'gen-focus', 'gen-criteria', 'gen-prompt'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.value = '';
+    if (el) { el.value = ''; if (interactive) el.blur(); }
   });
+  if (interactive) document.getElementById('gen-btn')?.blur();
   listenToJob(job_id);
 }
 
@@ -1142,7 +1326,7 @@ async function startJobPolling() {
   // On page load: fetch existing jobs once, attach SSE to any still running
   const jobs = await fetch('/reports/jobs').then(r => r.ok ? r.json() : {});
   for (const [jobId, job] of Object.entries(jobs)) {
-    _jobData[jobId] = { ...job };
+    _jobData[jobId] = { ...job, reportReady: !!(job.interactive && job.file_path) };
     if (job.running) {
       listenToJob(jobId);
     } else {
@@ -1297,7 +1481,9 @@ async function main() {
   checkUpdates();     // fire and forget — shows banner if .update-status says so
   updateGenFields();  // populate initial skill fields
   loadLlms();         // detect & render LLM toggle
-  document.getElementById('launch-when-done').checked = getLaunchPref();
+  const savedMode = localStorage.getItem('runMode') || 'launch';
+  const modeEl = document.querySelector(`input[name="run-mode"][value="${savedMode}"]`);
+  if (modeEl) modeEl.checked = true;
   loadSaves();    // fire and forget — updates header + saves section, starts poll if needed
   loadStatus();   // fire and forget
 
@@ -1317,6 +1503,25 @@ async function main() {
     html || '<div class="section"><span class="empty">No reports yet.</span></div>';
 
   startJobPolling();  // pick up any jobs left from a previous page load — must run after rows exist
+
+  // Delegated event handlers for interactive footer — avoids inline onclick encoding issues
+  document.getElementById('job-logs').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn || btn.disabled) return;
+    const action = btn.dataset.action;
+    const jobId = btn.dataset.jobId;
+    if (action === 'send') sendFollowup(jobId);
+    else if (action === 'generate') finishInteractive(jobId);
+  });
+
+  document.getElementById('job-logs').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    const input = e.target.closest('input.interactive-input');
+    if (!input || input.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sendFollowup(input.dataset.jobId);
+  });
 }
 
 main();

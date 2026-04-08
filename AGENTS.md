@@ -34,7 +34,8 @@ PYEOF
 - **Never read `.env` directly** — it contains API keys. All DB config is accessed via
   `get_engine(save_name)` and `load_saves_registry()`. Never `cat .env`, never open it.
 - **`players_contract` salary columns** are named `salary0` through `salary14` (one per contract
-  year). There is **no** bare `salary` column. Use `salary0` for the current year's salary.
+  year). There is **no** bare `salary` column and **no** `length` column. Use `salary0` for the
+  current year's salary. Contract length is stored as `years`; current year position is `current_year`.
 - The active save and database name are tracked in `saves.postgresql.json` or `saves.sqlite.json`
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.
@@ -269,7 +270,7 @@ The OOTP CSV export produces 71 tables. Below is the structure organized by doma
 | `players_value` (14K) | `player_id` | team_id, league_id | Computed player values (offensive, pitching, overall, by position) |
 | `players_contract` (14K) | `player_id` | team_id, league_id | Current contract details and salary by year |
 | `players_contract_extension` (14K) | `player_id` | team_id, league_id | Extension offer details |
-| `players_roster_status` (14K) | `player_id` | team_id, league_id, claimed_team_id | Service time, active/DL/waivers/DFA status |
+| `players_roster_status` (14K) | `player_id` | team_id, league_id, claimed_team_id | Service time, active/DL/waivers/DFA status. Key waiver/DFA columns: `is_on_waivers`, `designated_for_assignment` (not `is_dfa`), `days_on_waivers`, `days_on_waivers_left` (not `days_waivers_left`), `days_on_dfa_left`, `irrevocable_waivers`, `claimed_team_id` |
 | `players_salary_history` (144K) | `player_id, team_id, year` | | Historical salary by year |
 | `players_injury_history` (42K) | — | player_id | Injury log with dates, lengths, body parts |
 | `players_awards` (14K) | — | player_id, league_id, team_id, award_id, year | Award history |
@@ -286,26 +287,33 @@ view but may differ by 5 points on individual ratings.
 
 **`players_batting`** — Batting & running ratings:
 - `batting_ratings_overall_*` — Current ability (overall). **Exported as zeros by default.**
-  When "Additional complete scouted ratings" is enabled in OOTP export settings, these have
-  real values — but prefer `players_scouted_ratings` (scouting_team_id=0) as the authoritative
-  source, as `players_batting` may reflect a slightly scout-adjusted view.
+  Two OOTP settings must both be active for real values to appear: (1) "Additional complete
+  scouted ratings" in the CSV export config, AND (2) **Current Ratings Scale** must not be
+  set to "None" in Game Settings → Global Settings → Player Rating Scales. If either is off, these columns
+  export as zeros. Prefer `players_scouted_ratings` (scouting_team_id=0) as the authoritative
+  source. In reports, zero values render as N/A.
 - `batting_ratings_vsr_*` / `batting_ratings_vsl_*` — Current vs RHP/LHP. Same as above.
-- `batting_ratings_talent_*` — Potential/talent ceiling. **Always have real values.**
+- `batting_ratings_talent_*` — Potential/talent ceiling. Requires **Potential Ratings Scale**
+  not set to "None" in Game Settings → Global Settings → Player Rating Scales; zeros otherwise. In reports,
+  zero values render as N/A.
 - Rating categories: `contact`, `gap`, `eye`, `strikeouts` (avoid K), `hp` (HBP tendency), 
   `power`, `babip`
 - `batting_ratings_misc_*` — `bunt`, `bunt_for_hit`, `gb_hitter_type`, `fb_hitter_type`
 - `running_ratings_*` — `speed`, `stealing_rate` (aggressiveness), `stealing`, `baserunning`
 - All ratings are on the 20-80 scouting scale
 
-**`players_pitching`** — Pitching ratings (stuff/movement/control) and pitch repertoire. 
-  Same four tiers (overall/vsR/vsL/talent); overall/vsR/vsL are zeros by default but have
-  real values when "Additional complete scouted ratings" is enabled. Prefer
-  `players_scouted_ratings` (scouting_team_id=0) as the authoritative source for current ratings.
+**`players_pitching`** — Pitching ratings (stuff/movement/control) and pitch repertoire.
+  Same four tiers (overall/vsR/vsL/talent); overall/vsR/vsL are zeros by default. Same two
+  conditions apply as batting: "Additional complete scouted ratings" enabled AND Current/Potential
+  Ratings Scale not set to "None". Prefer `players_scouted_ratings` (scouting_team_id=0) as
+  the authoritative source for current ratings. Zero values render as N/A in reports.
 
 **`players_fielding`** — Fielding ratings:
-- General: `infield_range`, `infield_arm`, `turn_doubleplay`, `infield_error`, 
-  `outfield_range`, `outfield_arm`, `outfield_error`, `catcher_arm`, `catcher_ability`, 
-  `catcher_framing`
+- General (note the `fielding_ratings_` prefix on all general columns):
+  `fielding_ratings_infield_range`, `fielding_ratings_infield_arm`, `fielding_ratings_turn_doubleplay`,
+  `fielding_ratings_infield_error`, `fielding_ratings_outfield_range`, `fielding_ratings_outfield_arm`,
+  `fielding_ratings_outfield_error`, `fielding_ratings_catcher_arm`, `fielding_ratings_catcher_ability`,
+  `fielding_ratings_catcher_framing`
 - Per-position current: `fielding_rating_pos1` through `pos9` (1=P through 9=RF)
 - Per-position potential: `fielding_rating_pos1_pot` through `pos9_pot`
 - Fielding ratings ARE exported with real values (not zeroed like batting)
@@ -325,6 +333,11 @@ view but may differ by 5 points on individual ratings.
 | `players_career_batting_stats` | 729K | Career batting by year/team/league/level/split |
 | `players_career_pitching_stats` | 416K | Career pitching by year/team/league/level/split |
 | `players_career_fielding_stats` | 210K | Career fielding by year/team/league/level/split/position |
+
+**`players_career_fielding_stats` columns:** `player_id`, `year`, `team_id`, `league_id`, `level_id`,
+`split_id`, `position`, `g`, `gs`, `ip` (innings played — NOT `inn`), `tc`, `po`, `a`, `e`, `er`,
+`dp`, `tp`, `pb`, `sba`, `rto`, `ipf`, `plays`, `plays_base`, `roe`, `framing`, `arm`, `zr`
+— Note: there is **no** `fpct` column; compute it as `(po + a - e) / (po + a)` if needed.
 
 ### Player Stats — Current Season Game-Level
 
@@ -623,6 +636,11 @@ or comparing players.**
 - `rating_clubhouse` — personality/leadership
 - `rating_baserunning` — speed and baserunning
 
+**Confidence:** `confidence` (float, 0.0–1.0) — how much statistical backing the rating has.
+- `1.0` when CUR scouted ratings were available (Player Rating Scales → Current Ratings Scale not None). Score is anchored to current ability.
+- `< 1.0` when CUR was unavailable: uses the PA/IP regression ramp (`(career_pa / 500) ** 0.88` for batters, `(career_ip / 100) ** 0.88` for pitchers). Score is stats-only; low-sample players will be noisy.
+- Filter or rank: `WHERE confidence >= 0.7`, or `ORDER BY rating_overall * confidence DESC`.
+
 **Flags:** `flag_injury_risk` (bool), `flag_leader` (bool), `flag_high_ceiling` (bool)
 
 **Carried-over stats:** `wrc_plus`, `war`, `prone_overall`
@@ -645,7 +663,10 @@ Produces two tables with overall + vs LHP/RHP splits:
 - **Contact quality (current season at-bat data):** batted_balls, avg_ev, max_ev, 
   hard_hit_pct, barrel_pct, sweet_spot_pct, gb_pct, ld_pct, fb_pct, 
   xba, xslg, xwoba, xbacon
-- **L/R splits:** all career + contact stats with `_vs_lhp` / `_vs_rhp` suffixes
+- **L/R splits:** pa, ab, ba, obp, slg, iso, k_pct, bb_pct, woba, wrc_plus with `_vs_lhp` / `_vs_rhp`
+  suffixes; contact quality columns (batted_balls, avg_ev, max_ev, avg_la, hard_hit_pct, barrel_pct,
+  sweet_spot_pct, gb_pct, ld_pct, fb_pct, xbacon, xwoba, xba, xslg) also with `_vs_lhp` / `_vs_rhp`
+  — Note: the batting average split column is `ba_vs_lhp` / `ba_vs_rhp`, NOT `avg_vs_lhp`
 
 ### `pitcher_advanced_stats` (one row per MLB pitcher)
 - **Identity:** player_id, first_name, last_name, team_abbr, position

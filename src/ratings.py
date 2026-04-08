@@ -50,6 +50,8 @@ from config import (
     OFFENSE_WRC_WEIGHT,
     OFFENSE_XWOBA_WEIGHT,
     OOTP_MAX_BLEND_WEIGHT,
+    OOTP_RATING_SCALE_MAX,
+    OOTP_RATING_SCALE_MIN,
     PA_REGRESSION_THRESHOLD,
     PITCHER_WEIGHT_CLUBHOUSE,
     PITCHER_WEIGHT_COMMAND,
@@ -69,6 +71,20 @@ from config import (
     TRAIT_GOOD_MAX,
     TRAIT_POOR_MAX,
     WRC_CAP_HEADROOM,
+    LEAGUE_AVG_WRC,
+    ELITE_WRC,
+    WRC_SCORE_FLOOR,
+    WRC_UNKNOWN_DEFAULT,
+    SCORE_MAX,
+    PERCENTILE_AVG,
+    PLATOON_LHP_PA_THRESHOLD,
+    PLATOON_RHP_PA_THRESHOLD,
+    ARCHETYPE_MIN_PA,
+    ARCHETYPE_SPEED_SB, ARCHETYPE_SPEED_XSLG_MAX, ARCHETYPE_SPEED_XBA_MIN, ARCHETYPE_SPEED_K_MAX,
+    ARCHETYPE_PATIENT_BB_MIN, ARCHETYPE_PATIENT_XWOBA_MIN, ARCHETYPE_PATIENT_XSLG_MIN,
+    ARCHETYPE_MASHER_BARREL_MIN, ARCHETYPE_MASHER_XSLG_MIN, ARCHETYPE_MASHER_K_MIN,
+    ARCHETYPE_CONTACT_K_MAX, ARCHETYPE_CONTACT_XBA_MIN, ARCHETYPE_CONTACT_XSLG_MAX,
+    ARCHETYPE_EMPTY_XBA_MIN, ARCHETYPE_EMPTY_XSLG_MAX, ARCHETYPE_EMPTY_BARREL_MAX,
 )
 from ootp_db_constants import (
     MLB_LEAGUE_ID, MLB_LEVEL_ID,
@@ -85,6 +101,9 @@ from ootp_db_constants import (
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
 from sqlalchemy import text
+
+# Pre-computed scale range for (val - min) / range conversions.
+_SCALE_RANGE = OOTP_RATING_SCALE_MAX - OOTP_RATING_SCALE_MIN
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
@@ -139,6 +158,71 @@ def get_last_import_time():
     return None
 
 
+def classify_batter_archetype(adv):
+    """Classify a batter into one of five archetypes based on advanced stats.
+
+    Returns (label, color, description) or (None, None, None) if insufficient data.
+
+    Priority order (first match wins):
+      1. Speedster    — speed-first profile
+      2. Patient Slugger  — walks + real power
+      3. All-or-Nothing   — big power, high strikeouts
+      4. Contact Hitter   — contact-first, low K
+      5. Empty Average Bat — average without damage
+    """
+    if not adv:
+        return None, None, None
+    pa = adv.get("pa") or 0
+    if pa < ARCHETYPE_MIN_PA:
+        return None, None, None
+
+    xwoba   = adv.get("xwoba") or 0
+    xslg    = adv.get("xslg") or 0
+    xba     = adv.get("xba") or 0
+    xbacon  = adv.get("xbacon") or 0
+    barrel  = adv.get("barrel_pct") or 0
+    bb_pct  = adv.get("bb_pct") or 0
+    k_pct   = adv.get("k_pct") or 0
+    sb      = adv.get("sb") or 0
+
+    # 1. Speedster / Table-Setter
+    if (sb >= ARCHETYPE_SPEED_SB
+            and xslg < ARCHETYPE_SPEED_XSLG_MAX
+            and (xba >= ARCHETYPE_SPEED_XBA_MIN or k_pct < ARCHETYPE_SPEED_K_MAX)):
+        return ("Speedster", "#1a6b8a",
+                f"Speed-first profile: {int(sb)} SB, low power (xSLG {xslg:.3f})")
+
+    # 2. Patient Slugger
+    if (bb_pct >= ARCHETYPE_PATIENT_BB_MIN
+            and xwoba >= ARCHETYPE_PATIENT_XWOBA_MIN
+            and xslg >= ARCHETYPE_PATIENT_XSLG_MIN):
+        return ("Patient Slugger", "#1a7a1a",
+                f"High BB% ({bb_pct*100:.1f}%), elite xwOBA ({xwoba:.3f}), strong xSLG ({xslg:.3f})")
+
+    # 3. All-or-Nothing Masher
+    if (barrel >= ARCHETYPE_MASHER_BARREL_MIN
+            and xslg >= ARCHETYPE_MASHER_XSLG_MIN
+            and k_pct >= ARCHETYPE_MASHER_K_MIN):
+        return ("All-or-Nothing", "#8a4a1a",
+                f"Big power (Barrel {barrel*100:.1f}%, xSLG {xslg:.3f}) but high K% ({k_pct*100:.1f}%)")
+
+    # 4. Contact Hitter
+    if (k_pct < ARCHETYPE_CONTACT_K_MAX
+            and xba >= ARCHETYPE_CONTACT_XBA_MIN
+            and xslg < ARCHETYPE_CONTACT_XSLG_MAX):
+        return ("Contact Hitter", "#2266cc",
+                f"Low K% ({k_pct*100:.1f}%), strong xBA ({xba:.3f}), contact-first approach")
+
+    # 5. Empty Average Bat
+    if (xba >= ARCHETYPE_EMPTY_XBA_MIN
+            and xslg < ARCHETYPE_EMPTY_XSLG_MAX
+            and barrel < ARCHETYPE_EMPTY_BARREL_MAX):
+        return ("Empty Average", "#888888",
+                f"Decent xBA ({xba:.3f}) but weak xSLG ({xslg:.3f}), little damage on contact")
+
+    return None, None, None
+
+
 def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     """Query and compute all data needed for a player rating report.
 
@@ -159,7 +243,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
             "pr.rating_development, pr.rating_clubhouse, pr.rating_baserunning, "
             "pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling, "
             "pr.wrc_plus, pr.war, pr.prone_overall, "
-            "pr.rating_now, pr.rating_ceiling, "
+            "pr.rating_now, pr.rating_ceiling, pr.confidence, "
             "p.bats, p.throws, "
             "p.prone_leg, p.prone_back, p.prone_arm, "
             "p.personality_work_ethic, p.personality_intelligence, p.personality_leader, "
@@ -177,19 +261,35 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
          r_durability, r_development, r_clubhouse, r_baserunning,
          flag_injury, flag_leader_val, flag_ceiling,
          wrc_plus_or_fip, war, prone_overall,
-         rating_now, rating_ceiling,
+         rating_now, rating_ceiling, confidence,
          bats, throws, prone_leg, prone_back, prone_arm,
          work_ethic, intelligence, leader, greed, loyalty, play_for_winner) = row
 
-        # Position rank
+        # Position rank by Performance Rating (rating_now)
         rank_row = conn.execute(sa_text(
-            "SELECT COUNT(*)+1 FROM player_ratings WHERE position = :pos AND rating_overall > :r"
-        ), dict(pos=position, r=rating_overall)).fetchone()
+            "SELECT COUNT(*)+1 FROM player_ratings WHERE position = :pos AND rating_now > :r"
+        ), dict(pos=position, r=rating_now)).fetchone()
         total_row = conn.execute(sa_text(
             "SELECT COUNT(*) FROM player_ratings WHERE position = :pos"
         ), dict(pos=position)).fetchone()
         rank = int(rank_row[0])
         rank_total = int(total_row[0])
+
+        # Advanced stats for archetype classification (batters only)
+        adv_row = conn.execute(sa_text(
+            "SELECT pa, xwoba, xslg, xba, xbacon, barrel_pct, bb_pct, k_pct, sb "
+            "FROM batter_advanced_stats WHERE player_id = :pid"
+        ), dict(pid=player_id)).fetchone()
+        adv_for_archetype = dict(zip(
+            ("pa", "xwoba", "xslg", "xba", "xbacon", "barrel_pct", "bb_pct", "k_pct", "sb"),
+            adv_row
+        )) if adv_row else None
+
+    is_pitcher = (player_type == "pitcher")
+    archetype_label, archetype_color, archetype_desc = (
+        (None, None, None) if is_pitcher
+        else classify_batter_archetype(adv_for_archetype)
+    )
 
     # Determine weights
     pos_map = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
@@ -277,7 +377,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
                     pos_col = POS_FIELD_COL.get(target_pos)
                     if pos_col and pos_col in field_dict:
                         field_rating = field_dict.get(pos_col) or 0
-                        raw_score = min(100.0, max(0.0, (field_rating - 20) / 60 * 100)) if field_rating > 0 else 50.0
+                        raw_score = min(100.0, max(0.0, (field_rating - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)) if field_rating > 0 else 50.0
                         scores["defense"] = raw_score
                         # Shift positional multiplier into the weight
                         if target_pos in PREMIUM_DEFENSE_POS:
@@ -458,6 +558,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         rating_overall=rating_overall,
         rating_now=float(rating_now) if rating_now is not None else 0.0,
         rating_ceiling=float(rating_ceiling) if rating_ceiling is not None else 0.0,
+        confidence=float(confidence) if confidence is not None else 0.0,
         scores=scores,
         weights=weights,
         component_labels=component_labels,
@@ -491,6 +592,9 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         fip=wrc_plus_or_fip if is_pitcher else None,
         war=war,
         focus_modifiers=focus_modifiers,
+        archetype_label=archetype_label,
+        archetype_color=archetype_color,
+        archetype_desc=archetype_desc,
     )
 
 
@@ -529,6 +633,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     rating_overall = data["rating_overall"]
     rating_now = data["rating_now"]
     rating_ceiling = data["rating_ceiling"]
+    confidence = data["confidence"]
     scores = data["scores"]
     weights = data["weights"]
     component_labels = data["component_labels"]
@@ -555,6 +660,9 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     key_stat_label = data["key_stat_label"]
     key_stat_val = data["key_stat_val"]
     war_val = data["war_val"]
+    archetype_label = data.get("archetype_label")
+    archetype_color = data.get("archetype_color")
+    archetype_desc = data.get("archetype_desc")
 
     def lg(score):
         return letter_grade(score)
@@ -628,6 +736,11 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
                     f'Adjusted: {adj_rating:.1f} ({lg(adj_rating)})</div></div>')
 
     flag_pills = ""
+    if archetype_label:
+        title = f' title="{archetype_desc}"' if archetype_desc else ""
+        flag_pills += (f'<span class="flag"{title} style="background:{archetype_color}20;'
+                       f'color:{archetype_color};border:1px solid {archetype_color}60">'
+                       f'{archetype_label}</span>')
     if flag_injury:
         flag_pills += '<span class="flag flag-red">⚠ Injury Risk</span>'
     if flag_leader_val:
@@ -702,18 +815,18 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
       </div>
       {flags_html}
     </div>
-    <div class="grade-badge">{lg(final_rating)}</div>
+    <div class="grade-badge">{lg(rating_now)}</div>
   </div>
   <div class="rating-bar-wrap">
-    <span class="rating-label">Now</span>
+    <span class="rating-label">Performance Rating</span>
     <span class="rating-val">{rating_now:.1f}</span>
-    <span style="font-size:12px;color:#aaa;margin:0 8px">&bull;</span>
-    <span class="rating-label">Overall</span>
-    <span class="rating-val">{final_rating:.1f}</span>
-    <span style="font-size:12px;color:#aaa;margin:0 8px">&bull;</span>
-    <span class="rating-label">Ceiling</span>
-    <span class="rating-val">{rating_ceiling:.1f}</span>
+    {'&nbsp;<span style="color:#cc7700;font-size:12px" title="Limited statistical sample — Performance Rating may not reflect true ability">⚠ Limited sample</span>' if confidence < 0.8 else ''}
     <span class="oa-pot">&nbsp;&bull;&nbsp;#{rank} of {rank_total} {pos_name}</span>
+  </div>
+  <div class="rating-bar-wrap" style="margin-top:4px">
+    <span style="font-size:12px;color:#888">Trade/Contract Rating:&nbsp;</span>
+    <span style="font-size:14px;color:#aaa;font-weight:600">{final_rating:.1f}</span>
+    <span style="font-size:12px;color:#666;margin-left:4px">(age-adjusted)</span>
   </div>
   <div class="import-ts">Generated: {generated_at} &bull; Last DB import: {last_import or "unknown"}</div>
 </div>
@@ -731,7 +844,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
   <tr><th class="left">Component</th><th>Weight</th><th>Score</th><th>Bar</th></tr>
   {sub_rows}
   <tr style="border-top:2px solid #2c2c3e">
-  <td class="left"><b>Overall</b></td><td></td>
+  <td class="left"><b>Trade/Contract Rating</b></td><td></td>
   <td class="score-num">{final_rating:.1f}</td>
   <td>{bar_html(final_rating)}</td>
   </tr>
@@ -1128,7 +1241,7 @@ def load_pitcher_data(engine):
 # ---------------------------------------------------------------------------
 # Sub-score calculations: Batters
 # ---------------------------------------------------------------------------
-def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0):
+def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0, pa_threshold=None):
     """Offensive production score from wRC+ and xwOBA.
 
     Blends in an OOTP-based talent anchor for players with thin MLB career
@@ -1136,28 +1249,32 @@ def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0):
     Sqrt matches how statistical confidence actually builds (consistent with
     the platoon score convention in this codebase).
 
-    Anchor priority:
-      1. players_scouted_ratings (scouting_team_id=0) — ground-truth current ratings.
-         Only available when "Additional complete scouted ratings" is enabled in OOTP.
-      2. batting_ratings_talent_* — potential/ceiling ratings, always exported.
-         Batting-specific: a pitcher's talent ratings are 20s, a hitter's are meaningful.
-         This ensures pitchers with thin PA samples anchor near 0, not at their pitching oa.
+    Anchor: players_scouted_ratings (scouting_team_id=0) — ground-truth current ratings.
+    Only available when CUR scale is enabled in OOTP (Game Settings → Global Settings →
+    Player Rating Scales). When unavailable, stats drive the score with no anchor;
+    confidence in player_ratings reflects how much PA backs that score.
 
     Without this anchor, a player with 13 PA and an inflated wOBA would get a
     near-perfect rating_offense, corrupting the blended_woba talent anchor.
     """
-    wrc = row.get("wrc_plus", 100)
-    if career_pa < PA_REGRESSION_THRESHOLD:
-        pa_trust = min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0)
-        wrc_cap = 100 + pa_trust * WRC_CAP_HEADROOM
-        wrc = min(wrc, wrc_cap) if wrc is not None else 100
-    wrc_score = clamp((wrc - 50) * (100 / 120))
-    xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else 50
+    threshold = pa_threshold if pa_threshold is not None else PA_REGRESSION_THRESHOLD
+    wrc = row.get("wrc_plus", WRC_UNKNOWN_DEFAULT)
+    if wrc is None or pd.isna(wrc):
+        wrc = WRC_UNKNOWN_DEFAULT
+    if career_pa < threshold:
+        pa_trust = min((career_pa / threshold) ** REGRESSION_EXPONENT, 1.0)
+        wrc_cap = WRC_UNKNOWN_DEFAULT + pa_trust * WRC_CAP_HEADROOM
+        wrc = min(wrc, wrc_cap)
+    wrc_score = clamp((wrc - WRC_SCORE_FLOOR) * (SCORE_MAX / (ELITE_WRC - WRC_SCORE_FLOOR)))
+    xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else PERCENTILE_AVG
+    if career_pa < threshold:
+        pa_trust = min((career_pa / threshold) ** REGRESSION_EXPONENT, 1.0)
+        xwoba_score = xwoba_score * pa_trust + PERCENTILE_AVG * (1.0 - pa_trust)
     stats_score = wrc_score * OFFENSE_WRC_WEIGHT + xwoba_score * OFFENSE_XWOBA_WEIGHT
 
-    if career_pa < PA_REGRESSION_THRESHOLD:
-        anchor = ootp_bat_score if ootp_bat_score is not None else 50.0
-        return stats_score * pa_trust + anchor * (1.0 - pa_trust)
+    if career_pa < threshold and ootp_bat_score is not None:
+        pa_trust = min((career_pa / threshold) ** REGRESSION_EXPONENT, 1.0)
+        return stats_score * pa_trust + ootp_bat_score * (1.0 - pa_trust)
 
     return stats_score
 
@@ -1220,7 +1337,7 @@ def score_defense(row, fielding_row, position):
     if pos_col and fielding_row is not None and pos_col in fielding_row:
         field_rating = fielding_row[pos_col]
         if pd.notna(field_rating) and field_rating > 0:
-            rating_score = clamp((field_rating - 20) / 60 * 100)
+            rating_score = clamp((field_rating - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
         else:
             rating_score = 50.0
     else:
@@ -1308,7 +1425,7 @@ def score_baserunning(batting_row):
                 "running_ratings_baserunning"]:
         v = batting_row.get(col)
         if pd.notna(v) and v > 0:
-            vals.append(clamp((v - 20) / 60 * 100))
+            vals.append(clamp((v - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100))
     return np.mean(vals) if vals else 50.0
 
 
@@ -1540,6 +1657,11 @@ def compute_batter_ratings(engine):
         if col in df.columns:
             pctiles[col] = percentile_rank(df[col])
 
+    # Split xwOBA percentiles for LHP/RHP offense scores
+    for col in ("xwoba_vs_lhp", "xwoba_vs_rhp"):
+        if col in df.columns:
+            pctiles[col] = percentile_rank(df[col])
+
     # Career trends
     trend_data = get_trend_metrics_batting(trend)
 
@@ -1557,26 +1679,32 @@ def compute_batter_ratings(engine):
 
         # Get per-player percentiles
         player_pctiles = {}
-        for col in contact_pctile_cols:
+        for col in contact_pctile_cols + ["xwoba_vs_lhp", "xwoba_vs_rhp"]:
             if col in pctiles:
                 player_pctiles[col] = pctiles[col].iloc[idx]
 
         # Trend
         trend_current, trend_prev = trend_data.get(pid, (None, None))
 
-        # OOTP batting anchor for thin-stat blend (20-80 → 0-100).
-        # Priority: scouted current ratings (ground-truth, only when export enabled)
-        #           → talent ratings (always exported, batting-specific, reflects ceiling)
-        # Never falls back to players_value.oa, which for pitchers reflects pitching skill.
+        # OOTP batting anchor for thin-stat blend (scale → 0-100).
+        # Only uses CUR scouted ratings — talent/POT is the ceiling, not current ability,
+        # and oa blends pitching skill for two-way players. If CUR is unavailable (setting
+        # off or < 500 career PA), confidence < 1.0 and the score is stats-only.
         sr_vals = [row.get(c) for c in ("sr_contact", "sr_power", "sr_eye", "sr_gap")]
         sr_vals = [v for v in sr_vals if v is not None and not pd.isna(v) and v > 0]
         if sr_vals:
-            ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - 20) / 60 * 100)
+            ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
+            cur_available = True
         else:
-            talent_vals = [row.get(c) for c in ("talent_contact", "talent_power", "talent_eye", "talent_gap")]
-            talent_vals = [v for v in talent_vals if v is not None and not pd.isna(v) and v > 0]
-            ootp_bat_score = clamp((sum(talent_vals) / len(talent_vals) - 20) / 60 * 100) if talent_vals else None
+            ootp_bat_score = None
+            cur_available = False
         career_pa = int(career_pa_totals.get(pid, 0))
+
+        # Confidence: 1.0 when CUR ratings available; PA-based ramp otherwise.
+        if cur_available:
+            confidence = 1.0
+        else:
+            confidence = round(min((career_pa / PA_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0), 3)
 
         # Sub-scores
         s_offense = score_offense(row, player_pctiles.get("xwoba", 50), ootp_bat_score, career_pa)
@@ -1588,6 +1716,33 @@ def compute_batter_ratings(engine):
         s_durability = score_durability(row)
         s_development = score_development(row)
         s_clubhouse = score_clubhouse(row)
+
+        # Split offense scores (vs LHP / vs RHP)
+        # Use a split-specific wRC+ row and split xwOBA percentile with narrower PA thresholds.
+        pa_vs_lhp = int(row.get("pa_vs_lhp") or 0) if not pd.isna(row.get("pa_vs_lhp") or 0) else 0
+        pa_vs_rhp = int(row.get("pa_vs_rhp") or 0) if not pd.isna(row.get("pa_vs_rhp") or 0) else 0
+        lhp_row = dict(row)
+        lhp_row["wrc_plus"] = row.get("wrc_plus_vs_lhp") or WRC_UNKNOWN_DEFAULT
+        rhp_row = dict(row)
+        rhp_row["wrc_plus"] = row.get("wrc_plus_vs_rhp") or WRC_UNKNOWN_DEFAULT
+        s_offense_lhp = score_offense(
+            lhp_row,
+            player_pctiles.get("xwoba_vs_lhp", PERCENTILE_AVG),
+            ootp_bat_score,
+            pa_vs_lhp,
+            pa_threshold=PLATOON_LHP_PA_THRESHOLD,
+        )
+        s_offense_rhp = score_offense(
+            rhp_row,
+            player_pctiles.get("xwoba_vs_rhp", PERCENTILE_AVG),
+            ootp_bat_score,
+            pa_vs_rhp,
+            pa_threshold=PLATOON_RHP_PA_THRESHOLD,
+        )
+
+        # confidence_lhp / confidence_rhp: split-specific PA ramp
+        confidence_lhp = round(min((pa_vs_lhp / PLATOON_LHP_PA_THRESHOLD) ** REGRESSION_EXPONENT, 1.0), 3)
+        confidence_rhp = round(min((pa_vs_rhp / PLATOON_RHP_PA_THRESHOLD) ** REGRESSION_EXPONENT, 1.0), 3)
 
         # Ceiling score (raw, age-independent) stored as rating_ceiling
         ceiling_score = compute_ceiling_score(row)
@@ -1607,6 +1762,28 @@ def compute_batter_ratings(engine):
             s_durability * BATTER_WEIGHT_DURABILITY   +
             s_development * BATTER_WEIGHT_DEVELOPMENT +
             s_clubhouse  * BATTER_WEIGHT_CLUBHOUSE    +
+            s_baserunning * BATTER_WEIGHT_BASERUNNING
+        ) / now_total_weight)
+
+        # rating_now_lhp / rating_now_rhp: same as rating_now but with split offense score.
+        rating_now_lhp = clamp((
+            s_offense_lhp * BATTER_WEIGHT_OFFENSE     +
+            s_contact     * BATTER_WEIGHT_CONTACT      +
+            s_discipline  * BATTER_WEIGHT_DISCIPLINE   +
+            s_defense     * BATTER_WEIGHT_DEFENSE      +
+            s_durability  * BATTER_WEIGHT_DURABILITY   +
+            s_development * BATTER_WEIGHT_DEVELOPMENT  +
+            s_clubhouse   * BATTER_WEIGHT_CLUBHOUSE    +
+            s_baserunning * BATTER_WEIGHT_BASERUNNING
+        ) / now_total_weight)
+        rating_now_rhp = clamp((
+            s_offense_rhp * BATTER_WEIGHT_OFFENSE     +
+            s_contact     * BATTER_WEIGHT_CONTACT      +
+            s_discipline  * BATTER_WEIGHT_DISCIPLINE   +
+            s_defense     * BATTER_WEIGHT_DEFENSE      +
+            s_durability  * BATTER_WEIGHT_DURABILITY   +
+            s_development * BATTER_WEIGHT_DEVELOPMENT  +
+            s_clubhouse   * BATTER_WEIGHT_CLUBHOUSE    +
             s_baserunning * BATTER_WEIGHT_BASERUNNING
         ) / now_total_weight)
 
@@ -1673,6 +1850,11 @@ def compute_batter_ratings(engine):
             rating_development=round(s_development, 1),
             rating_clubhouse=round(s_clubhouse, 1),
             rating_baserunning=round(s_baserunning, 1),
+            confidence=confidence,
+            rating_now_lhp=round(rating_now_lhp, 1),
+            rating_now_rhp=round(rating_now_rhp, 1),
+            confidence_lhp=confidence_lhp,
+            confidence_rhp=confidence_rhp,
             flag_injury_risk=flag_injury,
             flag_leader=flag_leader,
             flag_high_ceiling=flag_ceiling,
@@ -1750,13 +1932,22 @@ def compute_pitcher_ratings(engine):
         # Uses the same REGRESSION_EXPONENT curve as the batter PA ramp.
         sr_pit_vals = [row.get(c) for c in ("sr_stuff", "sr_movement", "sr_control")]
         sr_pit_vals = [v for v in sr_pit_vals if v is not None and not pd.isna(v) and v > 0]
+        career_ip = float(career_ip_totals.get(pid, 0))
         if sr_pit_vals:
-            ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - 20) / 60 * 100)
-            career_ip = float(career_ip_totals.get(pid, 0))
+            ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
+            pit_cur_available = True
             if career_ip < IP_REGRESSION_THRESHOLD:
                 ip_trust = min(career_ip / IP_REGRESSION_THRESHOLD, 1.0) ** REGRESSION_EXPONENT
                 ootp_weight = (1.0 - ip_trust) * OOTP_MAX_BLEND_WEIGHT
                 s_run_prev = s_run_prev * (1 - ootp_weight) + ootp_pit_score * ootp_weight
+        else:
+            pit_cur_available = False
+
+        # Confidence: 1.0 when CUR ratings available; IP-based ramp otherwise.
+        if pit_cur_available:
+            pit_confidence = 1.0
+        else:
+            pit_confidence = round(min((career_ip / IP_REGRESSION_THRESHOLD) ** REGRESSION_EXPONENT, 1.0), 3)
 
         s_dominance = score_dominance(row)
         s_suppress = score_contact_suppression(player_pctiles)
@@ -1841,6 +2032,7 @@ def compute_pitcher_ratings(engine):
             rating_development=round(s_development, 1),
             rating_clubhouse=round(s_clubhouse, 1),
             rating_baserunning=round(s_role, 1),  # means "role value"
+            confidence=pit_confidence,
             flag_injury_risk=flag_injury,
             flag_leader=flag_leader,
             flag_high_ceiling=flag_ceiling,
