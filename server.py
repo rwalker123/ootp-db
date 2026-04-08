@@ -194,11 +194,11 @@ def _stream_codex_json(proc, log, job_entry=None):
                         for tline in text.splitlines():
                             log.append(tline)
                             _check_line_for_report(tline, job_entry)
-                        # Codex emits the report path as a file:// URL in agent messages
-                        # rather than via a GENERATED: tool-result line (Claude's pattern).
-                        # Synthesize a GENERATED: entry so the frontend detects success
-                        # and auto-launches the report.
-                        fm = re.search(r'file://(/[^\s`\'"]+\.html)', text)
+                        # Codex emits the report path in agent messages (as a file:// URL,
+                        # a Markdown link, or a bare path) rather than via a GENERATED:
+                        # tool-result line (Claude's pattern). Synthesize a GENERATED: entry
+                        # so the frontend detects success and auto-launches the report.
+                        fm = re.search(r'(?:file://)?(/[^\s`\'"()\[\]]+\.html)', text)
                         if fm:
                             synth = f"GENERATED:{fm.group(1)}"
                             log.append(synth)
@@ -998,6 +998,10 @@ class Handler(SimpleHTTPRequestHandler):
                     sent += 1
 
                 if not _job_is_running(entry):
+                    # Brief wait so the stream-parsing thread can finish appending
+                    # any final log lines (e.g. the synthetic GENERATED: entry)
+                    # before we drain and send [DONE].
+                    time.sleep(0.3)
                     # Job finished — drain any remaining lines, then signal done
                     log = entry["log"]
                     while sent < len(log):
