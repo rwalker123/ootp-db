@@ -363,6 +363,17 @@ def query_trade_targets(save_name, offer_label, offered_where, target_base_where
 
     Returns dict(offered=list, tier1=list, tier2=list).
     """
+    oa_floor = int(oa_floor)
+    oa_ceil = int(oa_ceil)
+    limit = int(limit)
+    _ALLOWED_ORDER_BY = {
+        "pr.rating_overall DESC",
+        "pr.rating_overall ASC",
+        "pr.oa DESC",
+        "pr.oa ASC",
+    }
+    if order_by not in _ALLOWED_ORDER_BY:
+        order_by = "pr.rating_overall DESC"
     engine = get_engine(save_name)
     tier2_ceil = oa_ceil + TRADE_TIER2_OA_ABOVE
 
