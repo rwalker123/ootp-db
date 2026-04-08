@@ -79,6 +79,12 @@ from config import (
     PERCENTILE_AVG,
     PLATOON_LHP_PA_THRESHOLD,
     PLATOON_RHP_PA_THRESHOLD,
+    ARCHETYPE_MIN_PA,
+    ARCHETYPE_SPEED_SB, ARCHETYPE_SPEED_XSLG_MAX, ARCHETYPE_SPEED_XBA_MIN, ARCHETYPE_SPEED_K_MAX,
+    ARCHETYPE_PATIENT_BB_MIN, ARCHETYPE_PATIENT_XWOBA_MIN, ARCHETYPE_PATIENT_XSLG_MIN,
+    ARCHETYPE_MASHER_BARREL_MIN, ARCHETYPE_MASHER_XSLG_MIN, ARCHETYPE_MASHER_K_MIN,
+    ARCHETYPE_CONTACT_K_MAX, ARCHETYPE_CONTACT_XBA_MIN, ARCHETYPE_CONTACT_XSLG_MAX,
+    ARCHETYPE_EMPTY_XBA_MIN, ARCHETYPE_EMPTY_XSLG_MAX, ARCHETYPE_EMPTY_BARREL_MAX,
 )
 from ootp_db_constants import (
     MLB_LEAGUE_ID, MLB_LEVEL_ID,
@@ -152,6 +158,71 @@ def get_last_import_time():
     return None
 
 
+def classify_batter_archetype(adv):
+    """Classify a batter into one of five archetypes based on advanced stats.
+
+    Returns (label, color, description) or (None, None, None) if insufficient data.
+
+    Priority order (first match wins):
+      1. Speedster    — speed-first profile
+      2. Patient Slugger  — walks + real power
+      3. All-or-Nothing   — big power, high strikeouts
+      4. Contact Hitter   — contact-first, low K
+      5. Empty Average Bat — average without damage
+    """
+    if not adv:
+        return None, None, None
+    pa = adv.get("pa") or 0
+    if pa < ARCHETYPE_MIN_PA:
+        return None, None, None
+
+    xwoba   = adv.get("xwoba") or 0
+    xslg    = adv.get("xslg") or 0
+    xba     = adv.get("xba") or 0
+    xbacon  = adv.get("xbacon") or 0
+    barrel  = adv.get("barrel_pct") or 0
+    bb_pct  = adv.get("bb_pct") or 0
+    k_pct   = adv.get("k_pct") or 0
+    sb      = adv.get("sb") or 0
+
+    # 1. Speedster / Table-Setter
+    if (sb >= ARCHETYPE_SPEED_SB
+            and xslg < ARCHETYPE_SPEED_XSLG_MAX
+            and (xba >= ARCHETYPE_SPEED_XBA_MIN or k_pct < ARCHETYPE_SPEED_K_MAX)):
+        return ("Speedster", "#1a6b8a",
+                f"Speed-first profile: {int(sb)} SB, low power (xSLG {xslg:.3f})")
+
+    # 2. Patient Slugger
+    if (bb_pct >= ARCHETYPE_PATIENT_BB_MIN
+            and xwoba >= ARCHETYPE_PATIENT_XWOBA_MIN
+            and xslg >= ARCHETYPE_PATIENT_XSLG_MIN):
+        return ("Patient Slugger", "#1a7a1a",
+                f"High BB% ({bb_pct*100:.1f}%), elite xwOBA ({xwoba:.3f}), strong xSLG ({xslg:.3f})")
+
+    # 3. All-or-Nothing Masher
+    if (barrel >= ARCHETYPE_MASHER_BARREL_MIN
+            and xslg >= ARCHETYPE_MASHER_XSLG_MIN
+            and k_pct >= ARCHETYPE_MASHER_K_MIN):
+        return ("All-or-Nothing", "#8a4a1a",
+                f"Big power (Barrel {barrel*100:.1f}%, xSLG {xslg:.3f}) but high K% ({k_pct*100:.1f}%)")
+
+    # 4. Contact Hitter
+    if (k_pct < ARCHETYPE_CONTACT_K_MAX
+            and xba >= ARCHETYPE_CONTACT_XBA_MIN
+            and xslg < ARCHETYPE_CONTACT_XSLG_MAX):
+        return ("Contact Hitter", "#2266cc",
+                f"Low K% ({k_pct*100:.1f}%), strong xBA ({xba:.3f}), contact-first approach")
+
+    # 5. Empty Average Bat
+    if (xba >= ARCHETYPE_EMPTY_XBA_MIN
+            and xslg < ARCHETYPE_EMPTY_XSLG_MAX
+            and barrel < ARCHETYPE_EMPTY_BARREL_MAX):
+        return ("Empty Average", "#888888",
+                f"Decent xBA ({xba:.3f}) but weak xSLG ({xslg:.3f}), little damage on contact")
+
+    return None, None, None
+
+
 def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     """Query and compute all data needed for a player rating report.
 
@@ -203,6 +274,22 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         ), dict(pos=position)).fetchone()
         rank = int(rank_row[0])
         rank_total = int(total_row[0])
+
+        # Advanced stats for archetype classification (batters only)
+        adv_row = conn.execute(sa_text(
+            "SELECT pa, xwoba, xslg, xba, xbacon, barrel_pct, bb_pct, k_pct, sb "
+            "FROM batter_advanced_stats WHERE player_id = :pid"
+        ), dict(pid=player_id)).fetchone()
+        adv_for_archetype = dict(zip(
+            ("pa", "xwoba", "xslg", "xba", "xbacon", "barrel_pct", "bb_pct", "k_pct", "sb"),
+            adv_row
+        )) if adv_row else None
+
+    is_pitcher = (player_type == "pitcher")
+    archetype_label, archetype_color, archetype_desc = (
+        (None, None, None) if is_pitcher
+        else classify_batter_archetype(adv_for_archetype)
+    )
 
     # Determine weights
     pos_map = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
@@ -505,6 +592,9 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         fip=wrc_plus_or_fip if is_pitcher else None,
         war=war,
         focus_modifiers=focus_modifiers,
+        archetype_label=archetype_label,
+        archetype_color=archetype_color,
+        archetype_desc=archetype_desc,
     )
 
 
@@ -570,6 +660,9 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     key_stat_label = data["key_stat_label"]
     key_stat_val = data["key_stat_val"]
     war_val = data["war_val"]
+    archetype_label = data.get("archetype_label")
+    archetype_color = data.get("archetype_color")
+    archetype_desc = data.get("archetype_desc")
 
     def lg(score):
         return letter_grade(score)
@@ -643,6 +736,11 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
                     f'Adjusted: {adj_rating:.1f} ({lg(adj_rating)})</div></div>')
 
     flag_pills = ""
+    if archetype_label:
+        title = f' title="{archetype_desc}"' if archetype_desc else ""
+        flag_pills += (f'<span class="flag"{title} style="background:{archetype_color}20;'
+                       f'color:{archetype_color};border:1px solid {archetype_color}60">'
+                       f'{archetype_label}</span>')
     if flag_injury:
         flag_pills += '<span class="flag flag-red">⚠ Injury Risk</span>'
     if flag_leader_val:

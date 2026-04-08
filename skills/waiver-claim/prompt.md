@@ -37,7 +37,7 @@ Position groups — "infielders", "outfielders", "pitchers", "catchers", "reliev
 "closers", "shortstops", "second basemen", etc. — are **not** player names.
 
 If $ARGUMENTS is not a player name:
-1. Print exactly: `NEEDS_INPUT: "$ARGUMENTS" is not a player name — the skill expects a specific player (e.g. /waiver-claim Jordan Montgomery).`
+1. Print exactly as a plain line (no backticks, no code block): `NEEDS_INPUT: "$ARGUMENTS" is not a player name — the skill expects a specific player (e.g. /waiver-claim Jordan Montgomery).`
 2. Then look up available players at that position group and list them (use the DB query pattern from AGENTS.md)
 3. **STOP** — do not proceed to Step 1
 
@@ -78,7 +78,7 @@ engine = get_engine(save)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT first_name, last_name, team_id, position, age FROM players "
-        "WHERE last_name LIKE :n AND retired=0 LIMIT 10"
+        "WHERE LOWER(last_name) LIKE LOWER(:n) AND retired=0 LIMIT 10"
     ), dict(n="%<LAST>%")).fetchall()
     for r in rows:
         print(r)

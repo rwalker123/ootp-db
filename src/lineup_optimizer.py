@@ -424,10 +424,15 @@ def platoon_score(player, hand):
     6 PA vs LHP gets near-zero confidence and won't beat an established hitter.
     """
     if hand == "L":
-        return (player.get("rating_now_lhp") or 50.0) * (player.get("confidence_lhp") or 0.5)
+        rating = player.get("rating_now_lhp")
+        conf = player.get("confidence_lhp")
+        return (50.0 if rating is None else rating) * (0.5 if conf is None else conf)
     elif hand == "R":
-        return (player.get("rating_now_rhp") or 50.0) * (player.get("confidence_rhp") or 0.5)
-    return player.get("sort_score") or 0.0
+        rating = player.get("rating_now_rhp")
+        conf = player.get("confidence_rhp")
+        return (50.0 if rating is None else rating) * (0.5 if conf is None else conf)
+    ss = player.get("sort_score")
+    return 0.0 if ss is None else ss
 
 
 def hot_hand_sort_score(player):
@@ -1234,7 +1239,9 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
     # Sort score: rating_now × confidence from player_ratings.
     # Precomputed in ratings.py — no regression needed here.
     for p in batters:
-        p["sort_score"] = (p.get("rating_now") or 50.0) * (p.get("confidence") or 0.5)
+        rating_now = p.get("rating_now")
+        confidence = p.get("confidence")
+        p["sort_score"] = (50.0 if rating_now is None else rating_now) * (0.5 if confidence is None else confidence)
 
     # Apply fatigue auto-bench
     fatigue_benched = []

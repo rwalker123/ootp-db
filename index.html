@@ -1068,7 +1068,7 @@ function _markJobDone(jobId) {
     } else if (!job.interactive) {
       const log = job.log || [];
       const hasReport = log.some(l => /^(GENERATED|CACHED):/.test(l));
-      const needsInput = log.some(l => /^NEEDS_INPUT:/.test(l));
+      const needsInput = log.some(l => /NEEDS_INPUT:/.test(l));
       if (!hasReport) status = needsInput ? 'Needs Input' : 'Failed';
     }
   }
