@@ -137,7 +137,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
                pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
                pr.prone_overall, pr.work_ethic, pr.intelligence, pr.greed, pr.loyalty,
                p.bats, p.throws,
-               pr.rating_now, pr.rating_ceiling, pr.confidence
+               pr.confidence
         FROM player_ratings pr
         JOIN players p ON p.player_id = pr.player_id
         {join_clause}
@@ -162,7 +162,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
             flag_injury_risk=r[19], flag_leader=r[20], flag_high_ceiling=r[21],
             prone_overall=r[22], work_ethic=r[23], intelligence=r[24],
             greed=r[25], loyalty=r[26], bats=r[27], throws=r[28],
-            rating_now=r[29], rating_ceiling=r[30], confidence=r[31],
+            confidence=r[29],
         ))
     return results
 

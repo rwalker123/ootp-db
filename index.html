@@ -1293,7 +1293,7 @@ async function finishInteractive(jobId) {
 async function generateReport() {
   // Block if an interactive session is currently waiting for user input
   const waitingInteractive = Object.values(_jobData).find(j => j.interactive && !j.running && !j.reportReady);
-  if (waitingInteractive) return;
+  if (waitingInteractive) { alert('An interactive report is waiting for your input. Please respond before starting another report.'); return; }
 
   const skill = document.getElementById('gen-skill').value;
   const args = buildArgs(skill);

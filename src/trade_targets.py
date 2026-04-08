@@ -121,7 +121,7 @@ _SELECT = """
            pc.salary0, pc.salary1, pc.salary2, pc.salary3, pc.salary4,
            pc.salary5, pc.salary6, pc.salary7, pc.salary8, pc.salary9,
            prs.mlb_service_years,
-           pr.rating_now, pr.rating_ceiling, pr.confidence
+           pr.confidence
 """
 
 _FROM = """
@@ -147,7 +147,7 @@ _KEYS = [
     "salary0", "salary1", "salary2", "salary3", "salary4",
     "salary5", "salary6", "salary7", "salary8", "salary9",
     "mlb_service_years",
-    "rating_now", "rating_ceiling", "confidence",
+    "confidence",
 ]
 
 

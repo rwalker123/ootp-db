@@ -122,7 +122,8 @@ def _stream_claude_json(proc, log, job_entry=None):
                         text = block.get("text", "").strip()
                         if text:
                             log.append(text)
-                            _check_line_for_report(text, job_entry)
+                            for tline in text.splitlines():
+                                _check_line_for_report(tline, job_entry)
                     elif btype == "tool_use":
                         name = block.get("name", "tool")
                         inp = block.get("input", {})

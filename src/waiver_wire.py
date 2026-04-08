@@ -400,13 +400,13 @@ def _build_candidate_header(p, adv):
     has_ratings = rating_now is not None
     rating_now = float(rating_now) if has_ratings else None
     rating_ceiling = float(rating_ceiling) if rating_ceiling is not None else None
-    rating = float(p.get("rating_overall") or 0)
-    grade = letter_grade(rating)
+    rating = float(p.get("rating_overall")) if has_ratings else None
+    grade = letter_grade(rating) if rating is not None else "N/A"
     team_disp = p.get("team_abbr") or "FA"
 
     grade_color = (
-        "#1a7a1a" if rating >= 70
-        else "#cc7700" if rating >= 40
+        "#1a7a1a" if rating is not None and rating >= 70
+        else "#cc7700" if rating is not None and rating >= 40
         else "#cc2222"
     )
 
@@ -491,14 +491,14 @@ def _build_candidate_header(p, adv):
         {bats}/{throws} &bull;
         <span class="badge badge-oa">NOW {f"{rating_now:.1f}" if rating_now is not None else "N/A"}</span>&nbsp;
         <span class="badge badge-pot">CEIL {f"{rating_ceiling:.1f}" if rating_ceiling is not None else "N/A"}</span>&nbsp;
-        <span class="badge" style="background:#333;color:{'#1a7a1a' if (p.get('confidence') or 0) >= 0.9 else '#cc7700' if (p.get('confidence') or 0) >= 0.5 else '#cc2222'}">CONF {(p.get('confidence') or 0):.0%}</span>
+        <span class="badge" style="background:#333;color:{'#1a7a1a' if (p.get('confidence') or 0) >= 0.9 else '#cc7700' if (p.get('confidence') or 0) >= 0.5 else '#cc2222'}">CONF {"N/A" if not has_ratings else f"{p.get('confidence') or 0:.0%}"}</span>
       </div>
       <div style="margin-top:8px">{status_html}</div>
       {flags_html}
     </div>
     <div style="text-align:right">
       <div class="grade-badge" style="color:{grade_color}">{grade}</div>
-      <div style="font-size:20px;font-weight:700;color:#f0c040;margin-top:4px">{rating:.1f}</div>
+      <div style="font-size:20px;font-weight:700;color:#f0c040;margin-top:4px">{f"{rating:.1f}" if rating is not None else "N/A"}</div>
       <div style="font-size:12px;color:#aaa">Composite Rating</div>
     </div>
   </div>
