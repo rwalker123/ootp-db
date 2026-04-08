@@ -5,6 +5,7 @@ import html as _html
 import importlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -21,17 +22,33 @@ SRC = ROOT / "src"
 # Save discovery & registry
 # ---------------------------------------------------------------------------
 
-_OOTP_SEARCH = [
-    (
-        Path.home() / "Library/Containers",
-        "com.ootpdevelopments.ootp*/Data/Application Support/"
-        "Out of the Park Developments/OOTP Baseball */saved_games",
-    ),
-    (
-        Path.home() / "Library/Application Support",
-        "Out of the Park Developments/OOTP Baseball */saved_games",
-    ),
-]
+if platform.system() == "Windows":
+    _OOTP_SEARCH = [
+        (
+            Path.home() / "Documents" / "Out of the Park Developments",
+            "OOTP Baseball */saved_games",
+        ),
+        (
+            Path("C:/Program Files (x86)/Steam/steamapps/common"),
+            "Out of the Park Baseball */saved_games",
+        ),
+        (
+            Path("C:/Program Files/Steam/steamapps/common"),
+            "Out of the Park Baseball */saved_games",
+        ),
+    ]
+else:
+    _OOTP_SEARCH = [
+        (
+            Path.home() / "Library/Containers",
+            "com.ootpdevelopments.ootp*/Data/Application Support/"
+            "Out of the Park Developments/OOTP Baseball */saved_games",
+        ),
+        (
+            Path.home() / "Library/Application Support",
+            "Out of the Park Developments/OOTP Baseball */saved_games",
+        ),
+    ]
 
 _running_imports: dict = {}  # save_name -> {"proc": Popen, "log": [str]}
 _running_jobs: dict = {}    # job_id -> {"proc": Popen, "log": [str], "skill": str, "args": str}
@@ -887,8 +904,12 @@ class Handler(SimpleHTTPRequestHandler):
 
         log = []
         env = _subprocess_env()
+        if platform.system() == "Windows":
+            cmd = ["cmd", "/c", str(ROOT / "import.bat"), save_name]
+        else:
+            cmd = ["bash", str(ROOT / "import.sh"), save_name]
         proc = subprocess.Popen(
-            ["bash", str(ROOT / "import.sh"), save_name],
+            cmd,
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

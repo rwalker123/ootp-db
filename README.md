@@ -10,7 +10,10 @@ OOTP CSV export → importer → SQLite/PostgreSQL → analytics engine → Clau
 ```
 OOTP exports your save as CSV files, which the importer loads into a local database. **SQLite is the default** — no server setup required. Each import runs an analytics pipeline on top of the raw data — computing advanced stats like wRC+, FIP, and xFIP, along with composite player ratings. Because advanced stats accumulate across imports rather than being overwritten, you build up a multi-year picture of your players over time. Claude Code skills query that database to generate scouting reports, free agent searches, and draft analyses. A lightweight web UI ties it all together for triggering imports and browsing reports without touching the terminal.
 
-OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. It has not been tested with the Steam version or on Windows. Pull requests adding support for either are very welcome.
+** Disclaimer **
+- OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. 
+- An attempt to add Windows support via PowerShell scripts (`web-server.bat` / `import.bat`) exists but is not tested. 
+- The Steam version has not been tested — if you use Steam and auto-discovery doesn't find your saves, set `OOTP_CSV_PATH` in `.env`.
 
 ## Table of Contents
 
@@ -65,9 +68,12 @@ SQLite works well for most uses. If you want PostgreSQL (better performance for 
 DATABASE_URL=postgresql://postgres@localhost:5432
 ```
 
-Then install the PostgreSQL driver (run `./web-server.sh` once first to create the virtual environment, or create it manually with `python3 -m venv .venv`):
+Then install the PostgreSQL driver (run `./web-server.sh` or `web-server.bat` once first to create the virtual environment, or create it manually):
 ```bash
+# macOS/Linux
 .venv/bin/pip install -r requirements-postgres.txt
+# Windows
+.venv\Scripts\pip install -r requirements-postgres.txt
 ```
 
 **macOS:** The simplest option is [Postgres.app](https://postgresapp.com) — download, drag to Applications, and launch. It runs in your menu bar. Then add the CLI tools to your PATH (instructions on the Postgres.app site).
@@ -103,7 +109,7 @@ Download and unzip: `https://github.com/rwalker123/ootp-db/archive/refs/heads/ma
 cd ootp-db-main
 ```
 
-The web UI script (`./web-server.sh`) handles virtual environment creation and dependency installation automatically — no manual `pip install` needed.
+The web UI script handles virtual environment creation and dependency installation automatically — no manual `pip install` needed. Use `./web-server.sh` on macOS/Linux or `web-server.bat` on Windows.
 
 No `.env` file is needed for the default SQLite setup. If you want to use PostgreSQL or override the OOTP save discovery path, copy `.env.example` to `.env` and edit it:
 
@@ -117,9 +123,9 @@ cp .env.example .env
 
 1. Make sure [Python 3.11+](https://www.python.org/downloads/) is installed
 2. Run:
-   ```bash
-   ./web-server.sh
-   ```
+   - **macOS/Linux:** `./web-server.sh`
+   - **Windows:** double-click `web-server.bat`, or run it from Command Prompt / PowerShell
+
    This sets up the virtual environment, installs dependencies, and opens the web UI at `http://localhost:8000`. SQLite is used by default — no database server required.
 
 3. The UI auto-discovers OOTP 27 saves. If your saves don't appear, set `OOTP_CSV_PATH` in `.env` to your OOTP installation directory (see Configuration above).
@@ -137,7 +143,7 @@ That's it. You can refresh your import at any time to get the latest save data.
 
 ## The Web UI
 
-The web UI is the main control panel for managing your saves and running imports. Open it by running `./web-server.sh` — it will launch automatically at `http://localhost:8000`.
+The web UI is the main control panel for managing your saves and running imports. Open it by running `./web-server.sh` (macOS/Linux) or `web-server.bat` (Windows) — it will launch automatically at `http://localhost:8000`.
 
 ### Saves Table
 
@@ -184,17 +190,30 @@ These are the scripts the web UI runs behind the scenes. If you're using the web
 
 If this is your first time running scripts manually (without having launched the web UI first), create the virtual environment once:
 
+**macOS/Linux:**
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
+
+**Windows:**
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
 ### Import Save
 
 Pass your save name as the argument:
 
+**macOS/Linux:**
 ```bash
 ./import.sh {save_name}
+```
+
+**Windows:**
+```bat
+import.bat {save_name}
 ```
 
 This runs the full pipeline:
@@ -220,9 +239,8 @@ Done: 45 tables, 28,391 rows in 12.3s
 
 Just run the same command again. All tables are dropped and recreated, so the database always reflects the latest state of your OOTP save.
 
-```bash
-./import.sh {save_name}
-```
+**macOS/Linux:** `./import.sh {save_name}`
+**Windows:** `import.bat {save_name}`
 
 ---
 
