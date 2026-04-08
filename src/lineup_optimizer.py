@@ -191,6 +191,9 @@ def load_roster_batters(conn, team_id):
                pr.age, pr.oa, pr.pot, pr.rating_overall, pr.rating_offense,
                pr.rating_baserunning, pr.rating_defense, pr.rating_discipline,
                pr.rating_durability, pr.flag_injury_risk, pr.prone_overall,
+               pr.rating_now, pr.confidence,
+               pr.rating_now_lhp, pr.rating_now_rhp,
+               pr.confidence_lhp, pr.confidence_rhp,
                p.bats, p.fatigue_points
         FROM player_ratings pr
         JOIN players p ON p.player_id = pr.player_id
@@ -408,69 +411,39 @@ def is_star(player):
 
 
 def platoon_score(player, hand):
-    """Confidence-weighted platoon wOBA for positional assignment and batting-order ranking.
+    """Confidence-weighted split sort score (0–100 scale) for positional assignment
+    and batting-order ranking.
 
-    When no handedness is specified, returns blended_woba (overall talent anchor).
+    Uses precomputed rating_now_lhp/rhp × confidence_lhp/rhp from player_ratings.
+    - hand="L" (opponent is LHP): use rating_now_lhp × confidence_lhp
+    - hand="R" (opponent is RHP): use rating_now_rhp × confidence_rhp
+    - no hand: return sort_score (rating_now × confidence, overall)
 
-    Veteran (total_pa >= 502):
-        confidence = sqrt(min(split_pa / 300, 1.0))
-        score      = split_woba × confidence
-        A sheltered veteran (many total PA, few split PA) is penalized by low
-        confidence — the team's usage pattern signals they aren't a platoon option.
-
-    Rookie (10 <= total_pa < 502):
-        confidence = sqrt(min(total_pa / 502, 1.0))
-        score      = split_woba × confidence + blended_woba × (1 − confidence)
-        Single sqrt curve blending from blended_woba (0 PA) to split_woba (502 PA).
-        Avoids double-penalty — only one confidence curve applied.
-
-    Below 10 total PA: returns blended_woba (no split data worth using).
+    confidence_lhp/rhp encodes the PA-ramp from ratings.py using
+    PLATOON_LHP_PA_THRESHOLD / PLATOON_RHP_PA_THRESHOLD, so a player with
+    6 PA vs LHP gets near-zero confidence and won't beat an established hitter.
     """
-    adv = player.get("adv") or {}
-    blended = player.get("blended_woba") or adv.get("woba") or 0.300
-
-    if not hand:
-        return blended
-
     if hand == "L":
-        split_woba = adv.get("woba_vs_lhp")
-        split_pa   = adv.get("pa_vs_lhp") or 0
-    else:
-        split_woba = adv.get("woba_vs_rhp")
-        split_pa   = adv.get("pa_vs_rhp") or 0
-
-    total_pa = adv.get("pa") or 0
-
-    if total_pa < _PLATOON_MIN_PA or split_woba is None:
-        return blended
-
-    if total_pa >= _PLATOON_VETERAN_PA:
-        confidence = math.sqrt(min(split_pa / _PLATOON_FULL_CONF_PA, 1.0))
-        return split_woba * confidence
-    else:
-        split_confidence = math.sqrt(min(split_pa / _PLATOON_FULL_CONF_PA, 1.0))
-        new_formula = split_woba * split_confidence
-        pa_weight = math.sqrt(min(total_pa / _PLATOON_VETERAN_PA, 1.0))
-        return new_formula * pa_weight + blended * (1.0 - pa_weight)
+        return (player.get("rating_now_lhp") or 50.0) * (player.get("confidence_lhp") or 0.5)
+    elif hand == "R":
+        return (player.get("rating_now_rhp") or 50.0) * (player.get("confidence_rhp") or 0.5)
+    return player.get("sort_score") or 0.0
 
 
 def hot_hand_sort_score(player):
-    """Season wOBA adjusted by 30-day temperature modifier. Stars get half-penalty."""
-    adv = player.get("adv") or {}
-    # Use regression-adjusted wOBA as base. Hot-hand still rewards genuine
-    # streaks via the temperature modifier, but the baseline is talent-anchored.
-    season_woba = player.get("blended_woba") or adv.get("woba") or 0.300
+    """Sort score adjusted by 30-day temperature modifier. Stars get half-penalty."""
     temp = player.get("temp_flag", "neutral")
     star = is_star(player)
+    base = player.get("sort_score") or 0.0
 
     modifiers = dict(
-        hot_extreme=0.030,
-        hot=0.015,
-        cold=-0.015 if not star else -0.008,
-        cold_extreme=-0.030 if not star else -0.015,
+        hot_extreme=3.0,
+        hot=1.5,
+        cold=-1.5 if not star else -0.8,
+        cold_extreme=-3.0 if not star else -1.5,
         neutral=0.0,
     )
-    return season_woba + modifiers.get(temp, 0.0)
+    return base + modifiers.get(temp, 0.0)
 
 
 def _resolve_player_name(name, players):
@@ -502,8 +475,8 @@ def rank_players(players, philosophy, hand):
         key = lambda p: platoon_score(p, hand)
     elif philosophy == "hot-hand":
         key = lambda p: hot_hand_sort_score(p)
-    else:  # modern and traditional both sort by blended wOBA; slot mapping differs
-        key = lambda p: p.get("blended_woba") or 0.0
+    else:  # modern and traditional both sort by sort_score; slot mapping differs
+        key = lambda p: p.get("sort_score") or 0.0
     return sorted(players, key=key, reverse=True)
 
 
@@ -513,15 +486,15 @@ PREMIUM_DEFENSE_POSITIONS = frozenset([2, 4, 6, 8])  # C, 2B, SS, CF
 CORNER_POSITIONS = frozenset([5, 7, 9])               # 3B, LF, RF — bat-first but defense matters
 BATTER_POSITIONS = frozenset([3, 5, 7, 9])            # 1B, 3B, LF, RF — bat-first spots
 
-# Defense bonus scales per position class (fielding_rating / 100 * scale = wOBA bonus).
-# Default: premium full weight; corners ~half; 1B ~37.5% (least defense-sensitive).
+# Defense bonus scales per position class (fielding_rating / 100 * scale = sort_score bonus).
+# Calibrated relative to sort_score range (0–100): premium max ~4 pts, corners ~2, 1B ~1.5.
 # favor_offense halves all scales.
-_DEFENSE_BONUS_SCALE_PREMIUM  = 0.040   # C/2B/SS/CF: 70 rating → +.028
-_DEFENSE_BONUS_SCALE_CORNER   = 0.020   # 3B/LF/RF:   70 rating → +.014
-_DEFENSE_BONUS_SCALE_1B       = 0.015   # 1B:         70 rating → +.0105
-_FAVOR_OFFENSE_DIVISOR        = 2       # favor_offense halves each scale above
+_DEFENSE_BONUS_SCALE_PREMIUM  = 4.0    # C/2B/SS/CF: 70 rating → +2.8 pts
+_DEFENSE_BONUS_SCALE_CORNER   = 2.0    # 3B/LF/RF:   70 rating → +1.4 pts
+_DEFENSE_BONUS_SCALE_1B       = 1.5    # 1B:         70 rating → +1.05 pts
+_FAVOR_OFFENSE_DIVISOR        = 2      # favor_offense halves each scale above
 
-_PRIMARY_POS_BONUS_MAX = 0.010          # max primary-position bonus (at 100% usage)
+_PRIMARY_POS_BONUS_MAX = 1.0           # max primary-position bonus (at 100% usage)
 
 
 def _positional_assignment_score(player, pos_code, favor_offense=False, hand=None):
@@ -543,7 +516,7 @@ def _positional_assignment_score(player, pos_code, favor_offense=False, hand=Non
       1B:                   ~37.5% scale— 70 rating → +.0105
     favor_offense halves all three scales.
     """
-    woba = platoon_score(player, hand) if hand else (player.get("blended_woba") or 0.0)
+    score = platoon_score(player, hand) if hand else (player.get("sort_score") or 0.0)
 
     # Usage-scaled primary position bonus, confidence-weighted by 3-year sample size.
     # sqrt(min(total_3yr_games / 100, 1.0)) prevents a player with 9 games at 100%
@@ -551,7 +524,7 @@ def _positional_assignment_score(player, pos_code, favor_offense=False, hand=Non
     usage = (player.get("pos_usage_pct") or {}).get(pos_code, 0.0)
     total_3yr = player.get("total_3yr_games") or 0
     usage_conf = math.sqrt(min(total_3yr / 100, 1.0))
-    woba += _PRIMARY_POS_BONUS_MAX * usage * usage_conf
+    score += _PRIMARY_POS_BONUS_MAX * usage * usage_conf
 
     # Defense bonus — scale depends on position class
     fielding = (player.get("fielding_ratings") or {}).get(pos_code) \
@@ -566,8 +539,8 @@ def _positional_assignment_score(player, pos_code, favor_offense=False, hand=Non
         scale = 0.0
     if favor_offense:
         scale /= _FAVOR_OFFENSE_DIVISOR
-    woba += (fielding / 100.0) * scale
-    return woba
+    score += (fielding / 100.0) * scale
+    return score
 
 
 def _select_positional_nine(ranked, dh_used, primary_only=False,
@@ -853,15 +826,16 @@ def handedness_pattern(lineup):
 
 # ── HTML rendering ────────────────────────────────────────────────────────────
 
-def temp_tag(flag):
-    tags = dict(
-        hot_extreme='<span class="tag tag-good">HOT</span>',
-        hot='<span class="tag tag-good">Warm</span>',
-        cold='<span class="tag tag-warn">Cool</span>',
-        cold_extreme='<span class="tag tag-bad">COLD</span>',
-        neutral='<span class="tag tag-neutral">—</span>',
+def temp_emoji(flag):
+    """Inline emoji badge appended to player name — replaces the old Temp column."""
+    emojis = dict(
+        hot_extreme=' 🔥🔥',
+        hot=' 🔥',
+        cold=' 🧊',
+        cold_extreme=' 🧊🧊',
+        neutral='',
     )
-    return tags.get(flag, tags["neutral"])
+    return emojis.get(flag, '')
 
 
 def iso_td(val):
@@ -934,9 +908,6 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         rolling = p.get("rolling") or {}
         r_woba = rolling.get("rolling_woba")
 
-        lhp_td = f'<td style="background:#e8f5e9">{fmt_woba(adv.get("woba_vs_lhp"))}</td>' if hand == "L" else f'<td>{fmt_woba(adv.get("woba_vs_lhp"))}</td>'
-        rhp_td = f'<td style="background:#e8f5e9">{fmt_woba(adv.get("woba_vs_rhp"))}</td>' if hand == "R" else f'<td>{fmt_woba(adv.get("woba_vs_rhp"))}</td>'
-
         pa_val = adv.get("pa") or 0
         pa_style = ' style="color:#cc7700;font-weight:bold"' if pa_val < 80 else ' style="color:#555"'
         fat_val = p.get("fatigue_points") or 0
@@ -944,21 +915,37 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         fat_cell = f'<td style="color:{fat_color};font-weight:bold">{fat_val}</td>'
         force_badge = ' <span class="tag tag-force" title="Manager force-start override">[F]</span>' if p.get("forced") else ""
         emg_badge = ' <span class="tag tag-bad" title="Emergency assignment — no qualified player met rating/games floors">[!]</span>' if p.get("emergency") else ""
+        temp_badge = temp_emoji(p.get('temp_flag', 'neutral'))
+
+        if hand == "L":
+            woba_cell = f'<td>{fmt_woba(adv.get("woba_vs_lhp"))}</td>'
+            rating_now_val = p.get("rating_now_lhp") or 0
+            conf_val = p.get("confidence_lhp") or 0
+        elif hand == "R":
+            woba_cell = f'<td>{fmt_woba(adv.get("woba_vs_rhp"))}</td>'
+            rating_now_val = p.get("rating_now_rhp") or 0
+            conf_val = p.get("confidence_rhp") or 0
+        else:
+            woba_cell = woba_td(adv.get('woba'))
+            rating_now_val = p.get("rating_now") or 0
+            conf_val = p.get("confidence") or 0
+
+        rating_now_color = grade_color(rating_now_val)
+        conf_color = "#1a7a1a" if conf_val >= 0.8 else "#cc7700" if conf_val >= 0.4 else "#cc2222"
+
         lineup_rows.append(f"""
           <tr>
             <td style="font-size:16px;font-weight:900;color:#1a1a2e;width:28px">{slot}</td>
-            <td class="left">{name}{star_badge}{force_badge}{emg_badge}</td>
+            <td class="left">{name}{temp_badge}{star_badge}{force_badge}{emg_badge}</td>
             <td>{pos_str}</td>
             <td>{bats_str}</td>
-            <td>{temp_tag(p.get('temp_flag', 'neutral'))}</td>
             {wrc_td(adv.get('wrc_plus'))}
             <td{pa_style}>{fmt_int(pa_val) if pa_val else "—"}</td>
             <td>{fmt_woba(adv.get('obp'))}</td>
             {iso_td(adv.get('iso'))}
-            {woba_td(adv.get('woba'))}
-            {lhp_td}
-            {rhp_td}
-            <td style="color:#2266cc;font-weight:bold">{fmt_woba(r_woba)}</td>
+            {woba_cell}
+            <td style="background:#e8f5e9;color:{rating_now_color};font-weight:bold">{rating_now_val:.0f}</td>
+            <td style="color:{conf_color};font-weight:bold">{conf_val:.2f}</td>
             {fat_cell}
             <td style="color:#555">{int(p.get('rating_baserunning') or 0)}</td>
           </tr>""")
@@ -971,7 +958,7 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
     roster_rows = []
     for p in sorted(all_players, key=lambda x: (x["player_id"] not in lineup_pids,
                                                   ((x.get("adv") or {}).get("pa") or 0) == 0,
-                                                  -(x.get("blended_woba") or 0))):
+                                                  -(x.get("sort_score") or 0))):
         adv = p.get("adv") or {}
         in_lineup = p["player_id"] in lineup_pids
         name = html_mod.escape(f"{p['first_name']} {p['last_name']}")
@@ -999,19 +986,36 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         fat_val = p.get("fatigue_points") or 0
         fat_color = _fatigue_color(fat_val)
         force_badge = ' <span class="tag tag-force" title="Manager force-start override">[F]</span>' if p.get("forced") else ""
+        temp_badge = temp_emoji(p.get('temp_flag', 'neutral'))
+
+        if hand == "L":
+            woba_cell = f'<td>{fmt_woba(adv.get("woba_vs_lhp"))}</td>'
+            rating_now_val = p.get("rating_now_lhp") or 0
+            conf_val = p.get("confidence_lhp") or 0
+        elif hand == "R":
+            woba_cell = f'<td>{fmt_woba(adv.get("woba_vs_rhp"))}</td>'
+            rating_now_val = p.get("rating_now_rhp") or 0
+            conf_val = p.get("confidence_rhp") or 0
+        else:
+            woba_cell = woba_td(adv.get('woba'))
+            rating_now_val = p.get("rating_now") or 0
+            conf_val = p.get("confidence") or 0
+
+        rating_now_color = grade_color(rating_now_val)
+        conf_color = "#1a7a1a" if conf_val >= 0.8 else "#cc7700" if conf_val >= 0.4 else "#cc2222"
+
         roster_rows.append(f"""
           <tr{row_style}>
-            <td class="left">{name}{force_badge}</td>
+            <td class="left">{name}{temp_badge}{force_badge}</td>
             <td>{pos_str}</td>
             <td>{bats_str}</td>
             {wrc_td(adv.get('wrc_plus'))}
             <td{pa_style}>{fmt_int(pa_val) if pa_val else "—"}</td>
             <td>{fmt_woba(adv.get('obp'))}</td>
             {iso_td(adv.get('iso'))}
-            {woba_td(adv.get('woba'))}
-            <td>{fmt_woba(adv.get('woba_vs_lhp'))}</td>
-            <td>{fmt_woba(adv.get('woba_vs_rhp'))}</td>
-            <td style="color:#2266cc;font-weight:bold">{fmt_woba(r_woba)}</td>
+            {woba_cell}
+            <td style="background:#e8f5e9;color:{rating_now_color};font-weight:bold">{rating_now_val:.0f}</td>
+            <td style="color:{conf_color};font-weight:bold">{conf_val:.2f}</td>
             <td style="color:{fat_color};font-weight:bold">{fat_val}</td>
             <td style="color:#555">{int(p.get('rating_baserunning') or 0)}</td>
             {role_cell}
@@ -1079,10 +1083,10 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       {'<span class="flag flag-yellow">Primary Position Only</span>' if primary_only else '<span class="flag flag-blue">Multi-Position</span>'}
     </div>
     <div class="temp-legend">
-      <span><span class="tag tag-good">HOT</span> 30-day wOBA &ge;+.060</span>
-      <span><span class="tag tag-good">Warm</span> +.030&ndash;.059</span>
-      <span><span class="tag tag-warn">Cool</span> &minus;.030&ndash;.059</span>
-      <span><span class="tag tag-bad">COLD</span> &le;&minus;.060</span>
+      <span>🔥🔥 extreme hot streak (30-day wOBA &ge;+.060)</span>
+      <span>🔥 hot (+.030&ndash;.059)</span>
+      <span>🧊 cold (&minus;.030&ndash;.059)</span>
+      <span>🧊🧊 extreme cold (&le;&minus;.060)</span>
       <span style="color:#f0c040;font-weight:bold">★</span>&nbsp;= Star (wOBA &ge;.370 or Rating &ge;70) &mdash; cold-streak penalty halved
     </div>
     {excl_html}
@@ -1096,11 +1100,12 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         <tr>
           <th style="width:36px">#</th>
           <th class="left">Name</th>
-          <th>Pos</th><th>Bats</th><th>Temp</th>
+          <th>Pos</th><th>Bats</th>
           <th>wRC+</th><th title="Career MLB plate appearances — amber = low sample, ranking adjusted">PA</th>
-          <th>OBP</th><th>ISO</th><th>wOBA</th>
-          <th>vs LHP</th><th>vs RHP</th>
-          <th>30-Day wOBA</th>
+          <th>OBP</th><th>ISO</th>
+          <th>{"vs LHP" if hand == "L" else "vs RHP" if hand == "R" else "wOBA"}</th>
+          <th title="Performance rating (rating_now or split equivalent)">Rating</th>
+          <th title="Statistical confidence 0–1. Red = thin sample, green = established">Conf</th>
           <th title="Fatigue 0–100. Red ≥70, amber ≥40, green &lt;40">Fat.</th>
           <th>Speed</th>
         </tr>
@@ -1110,12 +1115,12 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       </tbody>
     </table>
     <div class="split-note">
-      vs LHP / vs RHP shown from career split stats. 30-Day wOBA = last 30 game entries
-      (min 30 PA required). Highlighted column = today&rsquo;s favored handedness matchup.<br>
+      wOBA column shows career split vs today&rsquo;s opponent handedness (or overall when unspecified).
+      🔥 = hot streak (30-day wOBA +.030+), 🔥🔥 = extreme (+.060+).
+      🧊 = cold (−.030+), 🧊🧊 = extreme (−.060+).<br>
       * = playing out of primary position.
-      C, 2B, SS, CF selection applies a small defense tiebreaker (&le;0.012 wOBA).<br>
-      <b>PA (amber = &lt;80):</b> Ranking uses a PA-regressed wOBA (50/50 at 300 PA) —
-      low-PA call-ups rank by talent rating until they have meaningful MLB samples.<br>
+      C, 2B, SS, CF selection applies a small defense tiebreaker.<br>
+      <b>PA (amber = &lt;80):</b> Low-PA players rank by talent rating until they have meaningful MLB samples.<br>
       <b>[F]</b> = manager override (force-start or force-position). Bypasses eligibility floors.
       <b>Fat.</b> = fatigue 0&ndash;100 (green &lt;40, amber &ge;40, red &ge;70).
       Use <code>fatigue &lt;N&gt;</code> in skill args to auto-bench players above a threshold.
@@ -1136,8 +1141,10 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
         <tr>
           <th class="left">Name</th><th>Pos</th><th>Bats</th>
           <th>wRC+</th><th title="Career MLB plate appearances — amber = low sample, ranking adjusted">PA</th>
-          <th>OBP</th><th>ISO</th><th>wOBA</th>
-          <th>vs LHP</th><th>vs RHP</th><th>30-Day</th>
+          <th>OBP</th><th>ISO</th>
+          <th>{"vs LHP" if hand == "L" else "vs RHP" if hand == "R" else "wOBA"}</th>
+          <th title="Performance rating (rating_now or split equivalent)">Rating</th>
+          <th title="Statistical confidence 0–1. Red = thin sample, green = established">Conf</th>
           <th title="Fatigue 0–100">Fat.</th><th>Speed</th>
           <th class="left">Role</th>
         </tr>
@@ -1147,8 +1154,8 @@ def build_html(team_name, team_abbr, philosophy, hand, lineup, all_players,
       </tbody>
     </table>
     <div class="split-note">
-      Split wOBA reflects career PA vs that handedness; values may be sparse at low sample sizes.
-      Bench players are dimmed.
+      wOBA column reflects career PA vs today&rsquo;s opponent handedness (or overall when unspecified).
+      Values may be sparse at low sample sizes. Bench players are dimmed.
     </div>
   </div>
 
@@ -1224,16 +1231,10 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
         p["bats_str"] = BATS_MAP.get(p.get("bats") or 1, "R")
         p["forced"] = False
 
-    # Compute PA-regressed wOBA using full-league anchors
+    # Sort score: rating_now × confidence from player_ratings.
+    # Precomputed in ratings.py — no regression needed here.
     for p in batters:
-        adv = p["adv"]
-        p["blended_woba"] = compute_blended_woba(
-            observed_woba=adv.get("woba"),
-            pa=adv.get("pa") or 0,
-            rating_offense=p.get("rating_offense"),
-            league_avg_woba=league_avg_woba,
-            avg_rating_offense=avg_rating_offense,
-        )
+        p["sort_score"] = (p.get("rating_now") or 50.0) * (p.get("confidence") or 0.5)
 
     # Apply fatigue auto-bench
     fatigue_benched = []

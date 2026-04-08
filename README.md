@@ -132,6 +132,8 @@ cp .env.example .env
    - **Additional complete scouted ratings** — required for full player rating reports
    - **Game logs** — required for play-by-play and game log queries
 
+   Also check your **Player Rating Scales** settings (Game > Game Settings > Global Settings > Player Rating Scales): both **Current Ratings Scale** and **Potential Ratings Scale** must be set to a scale (e.g. "20 to 80") — not "None". If either is set to None, OOTP does not export those ratings and player reports will show N/A for the affected columns. If you change these settings, use the **Regenerate All Scouted Ratings** button before re-exporting.
+
 5. Export your data: click **Database Tools > Export CSV Files**. Do not use the MySQL export option.
 6. Click **Import** next to a save to load it into the database.
 7. Note that in my research, it appears advanced analytic stats are only for the current season. When you import data, previous season advanced analytics are not overwritten. Theoretically, this can give you a long term analysis that the AI can use to evaluate trends in your players.

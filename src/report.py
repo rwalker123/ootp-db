@@ -129,6 +129,8 @@ def rating_color(val):
 
 
 def rating_td(val):
+    if not val:
+        return '<td style="color:#999;text-align:center">N/A</td>'
     c = rating_color(val)
     return f'<td style="color:{c};font-weight:bold;text-align:center">{val}</td>'
 

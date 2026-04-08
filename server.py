@@ -37,6 +37,20 @@ _running_imports: dict = {}  # save_name -> {"proc": Popen, "log": [str]}
 _running_jobs: dict = {}    # job_id -> {"proc": Popen, "log": [str], "skill": str, "args": str}
 _jobs_lock = threading.Lock()
 
+_INTERACTIVE_INSTRUCTIONS = (
+    "\n\n---\n"
+    "INTERACTIVE MODE: Do NOT generate the HTML report yet. Run your normal analysis, "
+    "query the database, compute stats, present your findings as text in this conversation, "
+    "then wait. The user will ask follow-up questions. "
+    'When you receive the exact message "GENERATE_REPORT": '
+    "(1) run the Python entry point to generate the HTML file and capture the GENERATED: path, "
+    "(2) read that HTML file and replace the placeholder comment (e.g. <!-- RATING_SUMMARY -->, "
+    "<!-- BATTING_SUMMARY -->, <!-- PITCHING_SUMMARY -->, or <!-- FA_CALLOUT_SUMMARY -->) "
+    "with your analysis HTML drawn from everything discussed in this session — "
+    "write the file back, "
+    "(3) print the terminal summary as normal."
+)
+
 
 def _stream_output(proc, log):
     """Read subprocess stdout into log list (runs in a daemon thread)."""
@@ -47,7 +61,39 @@ def _stream_output(proc, log):
         pass
 
 
-def _stream_claude_json(proc, log):
+def _check_line_for_report(line, job_entry):
+    """If line contains GENERATED:/path, store file_path and write sidecar."""
+    if job_entry is None:
+        return
+    m = re.match(r'^GENERATED:(.+\.html)', line.strip())
+    if m:
+        rp = m.group(1).strip()
+        if '/absolute/path/to/' not in rp and rp.startswith('/'):
+            job_entry["file_path"] = rp
+            _write_sidecar(job_entry, rp)
+
+
+def _write_sidecar(job_entry, report_path):
+    """Write a .session.json sidecar alongside the report HTML."""
+    import datetime
+    html_path = Path(report_path)
+    sidecar_path = html_path.with_name(html_path.stem + ".session.json")
+    data = {
+        "session_id": job_entry.get("session_id"),
+        "llm": job_entry.get("llm", "claude"),
+        "skill": job_entry.get("skill"),
+        "args": job_entry.get("args"),
+        "report_path": report_path,
+        "interactive": job_entry.get("interactive", False),
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    try:
+        sidecar_path.write_text(json.dumps(data, indent=2))
+    except OSError:
+        pass
+
+
+def _stream_claude_json(proc, log, job_entry=None):
     """Parse Claude --output-format stream-json NDJSON into human-readable log lines."""
     import json as _json
     try:
@@ -59,9 +105,15 @@ def _stream_claude_json(proc, log):
                 ev = _json.loads(line)
             except _json.JSONDecodeError:
                 log.append(line)  # pass through non-JSON lines verbatim
+                _check_line_for_report(line, job_entry)
                 continue
 
             ev_type = ev.get("type")
+
+            if ev_type == "system" and ev.get("subtype") == "init":
+                if job_entry is not None and "session_id" not in job_entry:
+                    job_entry["session_id"] = ev.get("session_id")
+                continue
 
             if ev_type == "assistant":
                 for block in ev.get("message", {}).get("content", []):
@@ -70,6 +122,7 @@ def _stream_claude_json(proc, log):
                         text = block.get("text", "").strip()
                         if text:
                             log.append(text)
+                            _check_line_for_report(text, job_entry)
                     elif btype == "tool_use":
                         name = block.get("name", "tool")
                         inp = block.get("input", {})
@@ -99,9 +152,44 @@ def _stream_claude_json(proc, log):
                         if text:
                             for tline in text.splitlines():
                                 log.append(tline)
+                                _check_line_for_report(tline, job_entry)
 
             elif ev_type == "result":
                 pass  # result.result repeats last assistant block; cost display removed
+
+    except Exception:
+        pass
+
+
+def _stream_codex_json(proc, log, job_entry=None):
+    """Parse Codex --json JSONL output into human-readable log lines."""
+    import json as _json
+    try:
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
+            try:
+                ev = _json.loads(line)
+            except _json.JSONDecodeError:
+                log.append(line)
+                _check_line_for_report(line, job_entry)
+                continue
+
+            ev_type = ev.get("type")
+
+            if ev_type == "thread.started":
+                if job_entry is not None and "session_id" not in job_entry:
+                    job_entry["session_id"] = ev.get("thread_id")
+
+            elif ev_type == "item.completed":
+                item = ev.get("item", {})
+                if item.get("type") == "agent_message":
+                    text = item.get("text", "").strip()
+                    if text:
+                        for tline in text.splitlines():
+                            log.append(tline)
+                            _check_line_for_report(tline, job_entry)
 
     except Exception:
         pass
@@ -151,6 +239,9 @@ def get_jobs_data():
             "log": list(entry["log"]),
             "running": _job_is_running(entry),
             "file_path": entry.get("file_path"),
+            "interactive": entry.get("interactive", False),
+            "session_id": entry.get("session_id"),
+            "llm": entry.get("llm", "claude"),
         }
     return jobs
 
@@ -362,16 +453,32 @@ def _subprocess_env():
     return env
 
 
-def build_command(llm_key, skill, args):
+def build_command(llm_key, skill, args, interactive=False):
     """Return (argv, stream_fn) for the given LLM, skill, and args."""
+    if interactive:
+        args = args + _INTERACTIVE_INSTRUCTIONS
     if llm_key == "codex":
-        # All skills (including adhoc) invoked via $skill-name convention
         prompt = f"${skill} {args}".strip()
-        return ["codex", "exec", "--full-auto", prompt], _stream_output
+        return ["codex", "exec", "--full-auto", "--json", prompt], _stream_codex_json
     else:
         # Claude: all skills invoked via /skill-name so the adapter shim is loaded
         prompt = f"/{skill} {args}".strip()
         return ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose"], _stream_claude_json
+
+
+def build_resume_command(llm_key, session_id, message):
+    """Return (argv, stream_fn) to resume a previous session with a new message."""
+    if llm_key == "codex":
+        return (
+            ["codex", "exec", "resume", session_id, "--full-auto", "--json", message],
+            _stream_codex_json,
+        )
+    else:
+        return (
+            ["claude", "--resume", session_id, "-p", message,
+             "--output-format", "stream-json", "--verbose"],
+            _stream_claude_json,
+        )
 
 
 def check_env_file():
@@ -664,9 +771,15 @@ class Handler(SimpleHTTPRequestHandler):
             _json_response(self, result)
         elif self.path == "/reports/jobs":
             _json_response(self, get_jobs_data())
-        elif self.path.startswith("/reports/jobs/") and self.path.endswith("/stream"):
-            job_id = self.path[len("/reports/jobs/"):-len("/stream")]
-            self._handle_job_stream(job_id)
+        elif "/reports/jobs/" in self.path:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            if parsed.path.endswith("/stream"):
+                job_id = parsed.path[len("/reports/jobs/"):-len("/stream")]
+                offset = int((parse_qs(parsed.query).get("offset") or ["0"])[0])
+                self._handle_job_stream(job_id, offset)
+            else:
+                super().do_GET()
         elif self.path.startswith("/reports/search"):
             _handle_reports_search(self)
         else:
@@ -718,6 +831,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_clear_job(body)
         elif self.path == "/saves/set-llm":
             self._handle_set_llm(body)
+        elif re.match(r"^/reports/jobs/[^/]+/followup$", self.path):
+            job_id = self.path.split("/")[3]
+            self._handle_followup(job_id, body)
+        elif re.match(r"^/reports/jobs/[^/]+/generate$", self.path):
+            job_id = self.path.split("/")[3]
+            self._handle_followup(job_id, {"message": "GENERATE_REPORT"})
         else:
             self.send_error(404)
 
@@ -760,6 +879,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _handle_generate(self, body):
         skill = body.get("skill", "").strip()
         args = body.get("args", "").strip()
+        interactive = bool(body.get("interactive", False))
         # lineup-optimizer has all-optional args; allow empty string through
         args_optional = skill in ("lineup-optimizer",)
         if not skill or (not args and not args_optional):
@@ -775,7 +895,7 @@ class Handler(SimpleHTTPRequestHandler):
             report_dir.mkdir(parents=True, exist_ok=True)
             report_path = str(report_dir / f"{job_id}.html")
             build_args = f"{args}\n\nReport path: {report_path}"
-        cmd, stream_fn = build_command(llm_key, skill, build_args)
+        cmd, stream_fn = build_command(llm_key, skill, build_args, interactive=interactive)
         proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
@@ -783,12 +903,47 @@ class Handler(SimpleHTTPRequestHandler):
             stderr=subprocess.STDOUT,
             env=_subprocess_env(),
         )
-        threading.Thread(target=stream_fn, args=(proc, log), daemon=True).start()
         with _jobs_lock:
-            _running_jobs[job_id] = {"proc": proc, "log": log, "skill": skill, "args": args}
+            _running_jobs[job_id] = {
+                "proc": proc, "log": log, "skill": skill, "args": args,
+                "interactive": interactive, "llm": llm_key,
+            }
+            job_entry = _running_jobs[job_id]
+        threading.Thread(target=stream_fn, args=(proc, log, job_entry), daemon=True).start()
         _json_response(self, {"job_id": job_id}, 202)
 
-    def _handle_job_stream(self, job_id):
+    def _handle_followup(self, job_id, body):
+        message = body.get("message", "").strip()
+        if not message:
+            self._respond(400, "Missing message")
+            return
+        with _jobs_lock:
+            entry = _running_jobs.get(job_id)
+        if not entry:
+            self._respond(404, "Job not found")
+            return
+        if _job_is_running(entry):
+            self._respond(409, "Job is still running")
+            return
+        session_id = entry.get("session_id")
+        if not session_id:
+            self._respond(400, "No session ID — cannot resume")
+            return
+        llm_key = entry.get("llm", "claude")
+        cmd, stream_fn = build_resume_command(llm_key, session_id, message)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=_subprocess_env(),
+        )
+        with _jobs_lock:
+            entry["proc"] = proc
+        threading.Thread(target=stream_fn, args=(proc, entry["log"], entry), daemon=True).start()
+        _json_response(self, {"ok": True}, 202)
+
+    def _handle_job_stream(self, job_id, offset=0):
         entry = _running_jobs.get(job_id)
         if not entry:
             self.send_error(404, "Job not found")
@@ -800,7 +955,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
 
-        sent = 0
+        sent = offset
         try:
             while True:
                 log = entry["log"]

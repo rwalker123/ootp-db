@@ -137,7 +137,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
                pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
                pr.prone_overall, pr.work_ethic, pr.intelligence, pr.greed, pr.loyalty,
                p.bats, p.throws,
-               pr.rating_now, pr.rating_ceiling
+               pr.rating_now, pr.rating_ceiling, pr.confidence
         FROM player_ratings pr
         JOIN players p ON p.player_id = pr.player_id
         {join_clause}
@@ -162,7 +162,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
             flag_injury_risk=r[19], flag_leader=r[20], flag_high_ceiling=r[21],
             prone_overall=r[22], work_ethic=r[23], intelligence=r[24],
             greed=r[25], loyalty=r[26], bats=r[27], throws=r[28],
-            rating_now=r[29], rating_ceiling=r[30],
+            rating_now=r[29], rating_ceiling=r[30], confidence=r[31],
         ))
     return results
 
@@ -197,8 +197,8 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
                     else str(int(r["wrc_plus"])) if r["wrc_plus"] is not None else "—")
         key_label = "FIP" if is_pitcher else "wRC+"
         war_disp = f"{float(r['war']):.1f}" if r["war"] is not None else "—"
-        rating_now = float(r["rating_now"]) if r.get("rating_now") is not None else None
-        rating_ceiling = float(r["rating_ceiling"]) if r.get("rating_ceiling") is not None else None
+        conf = float(r["confidence"]) if r.get("confidence") is not None else 0.0
+        conf_color = "#1a7a1a" if conf >= 0.9 else "#cc7700" if conf >= 0.5 else "#cc2222"
         prone_v = r["prone_overall"]
         greed_v = r["greed"]
         we_v = r["work_ethic"] or 0
@@ -207,13 +207,13 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
 
         flags = ""
         if r["flag_leader"]:
-            flags += "🏆 "
+            flags += '<span title="Leader — positive clubhouse presence">🏆</span> '
         if r["flag_high_ceiling"]:
-            flags += "📈 "
+            flags += '<span title="High Ceiling — significant upside remaining">📈</span> '
         if we_v > 160:
-            flags += "⚡ "
+            flags += '<span title="Elite Work Ethic — likely to develop and maintain skills">⚡</span> '
         if iq_v > 160:
-            flags += "🧠"
+            flags += '<span title="High Baseball IQ — reads the game well, adjusts quickly">🧠</span>'
 
         def _fmt_score(val):
             if val is None:
@@ -231,9 +231,8 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
             f'<td class="left"><b>{r["first_name"]} {r["last_name"]}</b></td>'
             f'<td>{pos_name}</td>'
             f'<td>{int(r["age"]) if r["age"] else "?"}</td>'
-            f'{_fmt_score(rating_now)}'
-            f'{_fmt_score(rating_ceiling)}'
             f'<td>{grade_badge(rating)}</td>'
+            f'<td style="font-weight:bold;color:{conf_color}">{conf:.0%}</td>'
             f'{extra_cells}'
             f'<td>{key_stat}</td>'
             f'<td>{war_disp}</td>'
@@ -303,14 +302,22 @@ def generate_free_agents_report(save_name, criteria_label, where_clause,
   <div class="section-title">Results</div>
   <table>
   <tr>
-  <th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th><th>Now</th><th>Ceiling</th>
-  <th>Rating</th>{extra_headers}<th>{key_header}</th><th>WAR</th><th>Injury</th><th>Greed</th><th>Flags</th>
+  <th>#</th><th class="left">Name</th><th>Pos</th><th>Age</th>
+  <th>Rating</th><th>Conf</th>{extra_headers}<th>{key_header}</th><th>WAR</th><th>Injury</th><th>Greed</th><th>Flags</th>
   </tr>
   {table_rows}
   </table>
 </div>
 
 {spotlight}
+
+<div style="font-size:12px;color:#888;margin:8px 16px 16px;line-height:1.8">
+  <b>Flag legend:</b>&nbsp;
+  🏆 Leader &nbsp;&bull;&nbsp;
+  📈 High Ceiling &nbsp;&bull;&nbsp;
+  ⚡ Elite Work Ethic &nbsp;&bull;&nbsp;
+  🧠 High Baseball IQ
+</div>
 
 </div>
 </body></html>"""

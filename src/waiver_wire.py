@@ -216,7 +216,7 @@ def _lookup_player(conn, first_name, last_name):
             pr.rating_contact_quality, pr.rating_discipline,
             pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
             pr.oa, pr.pot, pr.war, pr.wrc_plus,
-            pr.rating_now, pr.rating_ceiling,
+            pr.rating_now, pr.rating_ceiling, pr.confidence,
             pr.prone_overall as pr_prone,
             pr.player_type, pr.team_abbr,
             pr.work_ethic, pr.intelligence, pr.greed, pr.loyalty,
@@ -230,7 +230,7 @@ def _lookup_player(conn, first_name, last_name):
             pc.salary5, pc.salary6, pc.salary7, pc.salary8, pc.salary9,
             t.nickname as team_name
         FROM players p
-        JOIN player_ratings pr ON pr.player_id = p.player_id
+        LEFT JOIN player_ratings pr ON pr.player_id = p.player_id
         JOIN players_roster_status prs ON prs.player_id = p.player_id
         LEFT JOIN players_contract pc ON pc.player_id = p.player_id
         LEFT JOIN teams t ON t.team_id = p.team_id
@@ -258,7 +258,7 @@ def _get_incumbents(conn, my_team_id, comparison_positions, player_type, player_
     sql = f"""
         SELECT
             pr.player_id, pr.first_name, pr.last_name, pr.position, pr.age,
-            pr.oa, pr.pot, pr.rating_now, pr.rating_ceiling,
+            pr.oa, pr.pot, pr.rating_now, pr.rating_ceiling, pr.confidence,
             pr.rating_overall, pr.rating_offense, pr.rating_defense,
             pr.rating_durability, pr.rating_development, pr.war, pr.wrc_plus,
             pr.flag_injury_risk, pr.flag_leader, pr.player_type,
@@ -487,7 +487,8 @@ def _build_candidate_header(p, adv):
         {team_disp_esc} &bull; Age {p.get("age", "?")} &bull;
         {bats}/{throws} &bull;
         <span class="badge badge-oa">NOW {rating_now:.1f}</span>&nbsp;
-        <span class="badge badge-pot">CEIL {rating_ceiling:.1f}</span>
+        <span class="badge badge-pot">CEIL {rating_ceiling:.1f}</span>&nbsp;
+        <span class="badge" style="background:#333;color:{'#1a7a1a' if (p.get('confidence') or 0) >= 0.9 else '#cc7700' if (p.get('confidence') or 0) >= 0.5 else '#cc2222'}">CONF {(p.get('confidence') or 0):.0%}</span>
       </div>
       <div style="margin-top:8px">{status_html}</div>
       {flags_html}

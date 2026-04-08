@@ -30,6 +30,17 @@ Before running any code block, replace all placeholders with the parsed values:
 
 Evaluate a waiver wire claim for **$ARGUMENTS**.
 
+### Before Step 1: Validate input
+
+Check whether `$ARGUMENTS` looks like a player name (at least two words, both looking like proper names).
+Position groups — "infielders", "outfielders", "pitchers", "catchers", "relievers", "starters",
+"closers", "shortstops", "second basemen", etc. — are **not** player names.
+
+If $ARGUMENTS is not a player name:
+1. Print exactly: `NEEDS_INPUT: "$ARGUMENTS" is not a player name — the skill expects a specific player (e.g. /waiver-claim Jordan Montgomery).`
+2. Then look up available players at that position group and list them (use the DB query pattern from AGENTS.md)
+3. **STOP** — do not proceed to Step 1
+
 ### Step 1: Generate (or retrieve cached) the report
 
 Parse $ARGUMENTS: the first word is the first name, all remaining words form the last name (e.g., "Jackson Jobe" → first=Jackson last=Jobe; "Ronald De La Cruz" → first=Ronald last=De La Cruz).
@@ -67,7 +78,7 @@ engine = get_engine(save)
 with engine.connect() as conn:
     rows = conn.execute(text(
         "SELECT first_name, last_name, team_id, position, age FROM players "
-        "WHERE last_name ILIKE :n AND retired=0 LIMIT 10"
+        "WHERE last_name LIKE :n AND retired=0 LIMIT 10"
     ), dict(n="%<LAST>%")).fetchall()
     for r in rows:
         print(r)
