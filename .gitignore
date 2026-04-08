@@ -13,3 +13,4 @@ saves.json
 .claude/settings.local.json
 saves.sqlite.json
 saves.postgresql.json
+schema_snapshots/
