@@ -2,8 +2,10 @@
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SRC = _ROOT / "src"
@@ -11,12 +13,16 @@ _IMP_PATH = _SRC / "import.py"
 
 
 def _load_importer():
-    sys.path.insert(0, str(_SRC))
-    spec = importlib.util.spec_from_file_location("ootp_importer", _IMP_PATH)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    original_sys_path = list(sys.path)
+    try:
+        sys.path.insert(0, str(_SRC))
+        spec = importlib.util.spec_from_file_location("ootp_importer", _IMP_PATH)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        sys.path[:] = original_sys_path
 
 
 _imp = _load_importer()
@@ -34,6 +40,15 @@ class TestDetectOotpVersion(unittest.TestCase):
     def test_no_version_in_path(self):
         p = Path("/tmp/manual_copy/MySave.lg")
         self.assertIsNone(_imp.detect_ootp_version(p))
+
+
+class TestLoadSchemaSnapshot(unittest.TestCase):
+    def test_corrupt_json_returns_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "snap.json"
+            bad.write_text('{"tables":', encoding="utf-8")
+            with patch.object(_imp, "schema_snapshot_path", return_value=bad):
+                self.assertEqual(_imp.load_schema_snapshot("ignored"), {})
 
 
 class TestDiffSchemas(unittest.TestCase):

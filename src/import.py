@@ -49,19 +49,58 @@ def load_schema_snapshot(db_name: str) -> dict[str, list[str]]:
     path = schema_snapshot_path(db_name)
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text())
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(
+            f"Warning: could not read schema snapshot {path}: {e}",
+            file=sys.stderr,
+        )
+        return {}
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        print(
+            f"Warning: corrupted schema snapshot {path} ({e}); "
+            "treating as no baseline.",
+            file=sys.stderr,
+        )
+        return {}
+    if not isinstance(data, dict):
+        print(
+            f"Warning: invalid schema snapshot {path} (not a JSON object); "
+            "treating as no baseline.",
+            file=sys.stderr,
+        )
+        return {}
     raw = data.get("tables") or {}
-    return {str(k): [str(c) for c in v] for k, v in raw.items()}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, list):
+            continue
+        out[str(k)] = [str(c) for c in v]
+    return out
 
 
 def save_schema_snapshot(db_name: str, tables: dict[str, list[str]]) -> None:
     SCHEMA_SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = schema_snapshot_path(db_name)
     ordered = {
         t: sorted(cols) for t, cols in sorted(tables.items(), key=lambda x: x[0])
     }
-    schema_snapshot_path(db_name).write_text(
-        json.dumps(dict(tables=ordered), indent=2)
-    )
+    payload = json.dumps(dict(tables=ordered), indent=2)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, dest)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def diff_schemas(
@@ -271,17 +310,19 @@ def _update_registry(save_name, db_name, csv_dir, ootp_version: int | None = Non
 
 def resolve_save(arg, ootp_root=None):
     """
-    Given a save name or path, return (csv_dir, save_name, lg_dir).
+    Given a save name or an existing .lg save directory path, return
+    (csv_dir, save_name, lg_dir).
+
     Resolution order:
-      1. Existing directory path (absolute or relative)
+      1. Existing .lg directory path (absolute or relative)
       2. Auto-discover via glob in known OOTP locations
       3. OOTP_CSV_PATH fallback (if set)
     """
     p = Path(arg).expanduser().resolve()
 
     if p.is_dir():
-        # User passed a path — accept .lg dir directly or its parent
-        lg_dir = p if p.suffix == ".lg" else p
+        # User passed a path — must be the .lg save folder itself
+        lg_dir = p
         if lg_dir.suffix != ".lg":
             print(f"Error: '{arg}' is a directory but doesn't look like a .lg save folder.")
             sys.exit(1)
