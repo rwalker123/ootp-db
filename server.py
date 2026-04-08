@@ -68,7 +68,7 @@ def _check_line_for_report(line, job_entry):
     m = re.match(r'^GENERATED:(.+\.html)', line.strip())
     if m:
         rp = m.group(1).strip()
-        if '/absolute/path/to/' not in rp and rp.startswith('/'):
+        if _is_under_reports(Path(rp)):
             job_entry["file_path"] = rp
             _write_sidecar(job_entry, rp)
 
@@ -182,6 +182,10 @@ def _stream_codex_json(proc, log, job_entry=None):
                 if job_entry is not None and "session_id" not in job_entry:
                     job_entry["session_id"] = ev.get("thread_id")
 
+            elif ev_type in ("error", "error.occurred"):
+                msg = ev.get("message") or ev.get("error") or str(ev)
+                log.append(f"[Codex error] {msg}")
+
             elif ev_type == "item.completed":
                 item = ev.get("item", {})
                 if item.get("type") == "agent_message":
@@ -190,6 +194,31 @@ def _stream_codex_json(proc, log, job_entry=None):
                         for tline in text.splitlines():
                             log.append(tline)
                             _check_line_for_report(tline, job_entry)
+                        # Codex emits the report path as a file:// URL in agent messages
+                        # rather than via a GENERATED: tool-result line (Claude's pattern).
+                        # Synthesize a GENERATED: entry so the frontend detects success
+                        # and auto-launches the report.
+                        fm = re.search(r'file://(/[^\s`\'"]+\.html)', text)
+                        if fm:
+                            synth = f"GENERATED:{fm.group(1)}"
+                            log.append(synth)
+                            _check_line_for_report(synth, job_entry)
+                else:
+                    # Shell call outputs, tool results, etc. — scan for GENERATED:/CACHED:
+                    # and surface those lines to the log; suppress everything else.
+                    raw_out = item.get("output") or item.get("content") or item.get("text") or ""
+                    if isinstance(raw_out, str):
+                        for tline in raw_out.splitlines():
+                            if re.match(r'^(GENERATED|CACHED):', tline):
+                                log.append(tline)
+                            _check_line_for_report(tline, job_entry)
+                    elif isinstance(raw_out, list):
+                        for part in raw_out:
+                            if isinstance(part, dict):
+                                for tline in (part.get("text") or "").splitlines():
+                                    if re.match(r'^(GENERATED|CACHED):', tline):
+                                        log.append(tline)
+                                    _check_line_for_report(tline, job_entry)
 
     except Exception:
         pass
@@ -1124,7 +1153,7 @@ class Handler(SimpleHTTPRequestHandler):
             entry["proc"] = proc
 
             def _restore_on_failure():
-                stream_fn(proc, log)
+                stream_fn(proc, log, entry)
                 if proc.returncode != 0 and not target.exists() and backup.exists():
                     shutil.move(str(backup), str(target))
                     log.append("Error: LLM job failed — original report restored.")

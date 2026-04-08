@@ -1259,10 +1259,12 @@ def score_offense(row, xwoba_pctile, ootp_bat_score=None, career_pa=0, pa_thresh
     """
     threshold = pa_threshold if pa_threshold is not None else PA_REGRESSION_THRESHOLD
     wrc = row.get("wrc_plus", WRC_UNKNOWN_DEFAULT)
+    if wrc is None or pd.isna(wrc):
+        wrc = WRC_UNKNOWN_DEFAULT
     if career_pa < threshold:
         pa_trust = min((career_pa / threshold) ** REGRESSION_EXPONENT, 1.0)
         wrc_cap = WRC_UNKNOWN_DEFAULT + pa_trust * WRC_CAP_HEADROOM
-        wrc = min(wrc, wrc_cap) if wrc is not None else WRC_UNKNOWN_DEFAULT
+        wrc = min(wrc, wrc_cap)
     wrc_score = clamp((wrc - WRC_SCORE_FLOOR) * (SCORE_MAX / (ELITE_WRC - WRC_SCORE_FLOOR)))
     xwoba_score = xwoba_pctile if not pd.isna(xwoba_pctile) else PERCENTILE_AVG
     if career_pa < threshold:

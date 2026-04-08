@@ -395,8 +395,11 @@ def _build_candidate_header(p, adv):
     role_label = ROLE_MAP.get(int(p.get("role") or 0), "—")
     player_type = p.get("player_type", "batter")
 
-    rating_now = float(p.get("rating_now") or 0)
-    rating_ceiling = float(p.get("rating_ceiling") or 0)
+    rating_now = p.get("rating_now")
+    rating_ceiling = p.get("rating_ceiling")
+    has_ratings = rating_now is not None
+    rating_now = float(rating_now) if has_ratings else None
+    rating_ceiling = float(rating_ceiling) if rating_ceiling is not None else None
     rating = float(p.get("rating_overall") or 0)
     grade = letter_grade(rating)
     team_disp = p.get("team_abbr") or "FA"
@@ -486,8 +489,8 @@ def _build_candidate_header(p, adv):
         {pos_label}{f" ({role_label})" if pos_label == "P" else ""} &bull;
         {team_disp_esc} &bull; Age {p.get("age", "?")} &bull;
         {bats}/{throws} &bull;
-        <span class="badge badge-oa">NOW {rating_now:.1f}</span>&nbsp;
-        <span class="badge badge-pot">CEIL {rating_ceiling:.1f}</span>&nbsp;
+        <span class="badge badge-oa">NOW {f"{rating_now:.1f}" if rating_now is not None else "N/A"}</span>&nbsp;
+        <span class="badge badge-pot">CEIL {f"{rating_ceiling:.1f}" if rating_ceiling is not None else "N/A"}</span>&nbsp;
         <span class="badge" style="background:#333;color:{'#1a7a1a' if (p.get('confidence') or 0) >= 0.9 else '#cc7700' if (p.get('confidence') or 0) >= 0.5 else '#cc2222'}">CONF {(p.get('confidence') or 0):.0%}</span>
       </div>
       <div style="margin-top:8px">{status_html}</div>
