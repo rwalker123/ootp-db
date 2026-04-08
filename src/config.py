@@ -274,3 +274,28 @@ WOBA_1B = 0.87
 WOBA_2B = 1.27
 WOBA_3B = 1.62
 WOBA_HR = 2.10
+
+# ---------------------------------------------------------------------------
+# Trade value — position class OA adjustments
+# ---------------------------------------------------------------------------
+# Applied to the offered player's raw OA before computing the return band.
+# Positive = premium position (you can ask for more in return).
+# Negative = discount position (you'll get less in return).
+# String keys for pitcher sub-roles ("sp", "rp", "closer").
+# Integer keys for position players by OOTP position code (2=C … 9=RF).
+TRADE_POSITION_ADJUSTMENTS = {
+    "sp":      3,   # SP: scarce, always in demand
+    "rp":     -5,   # RP: deep market discount
+    "closer": -2,   # Closer: some premium over generic RP
+    2:          3,  # C: scarce
+    3:         -3,  # 1B: limited defensive value
+    4:          0,  # 2B
+    5:          0,  # 3B
+    6:          2,  # SS: premium up-the-middle
+    7:          0,  # LF
+    8:          2,  # CF: premium up-the-middle
+    9:          0,  # RF
+}
+
+# How far above the matched band ceiling the "add-on required" tier extends.
+TRADE_TIER2_OA_ABOVE = 10

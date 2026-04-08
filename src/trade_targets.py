@@ -10,6 +10,7 @@ from pathlib import Path
 from config import (
     GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
     INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
+    TRADE_POSITION_ADJUSTMENTS, TRADE_TIER2_OA_ABOVE,
 )
 from ootp_db_constants import MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP
 from report_write import write_report_html, report_filename
@@ -105,6 +106,24 @@ def row_bg(rating):
     return "white"
 
 
+def get_position_adjustment(position_code, role_code=None):
+    """Return OA trade value adjustment for a position/role from config.
+
+    Pitchers (position=1) are keyed by role: "sp" (11), "closer" (13), "rp" (all others).
+    Position players are keyed by their integer position code.
+    """
+    if int(position_code or 0) == 1:
+        if role_code == 11:
+            key = "sp"
+        elif role_code == 13:
+            key = "closer"
+        else:
+            key = "rp"
+    else:
+        key = int(position_code) if position_code is not None else 0
+    return TRADE_POSITION_ADJUSTMENTS.get(key, 0)
+
+
 # Column order must match row_to_dict keys below
 _SELECT = """
     SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,
@@ -115,7 +134,7 @@ _SELECT = """
            pr.rating_durability, pr.rating_development, pr.rating_clubhouse,
            pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling,
            pr.prone_overall, pr.work_ethic, pr.intelligence, pr.greed,
-           p.bats, p.throws,
+           p.bats, p.throws, p.role,
            t.abbr AS team_abbr,
            pc.years, pc.current_year, pc.no_trade,
            pc.salary0, pc.salary1, pc.salary2, pc.salary3, pc.salary4,
@@ -141,7 +160,7 @@ _KEYS = [
     "rating_durability", "rating_development", "rating_clubhouse",
     "flag_injury_risk", "flag_leader", "flag_high_ceiling",
     "prone_overall", "work_ethic", "intelligence", "greed",
-    "bats", "throws",
+    "bats", "throws", "role",
     "team_abbr",
     "years", "current_year", "no_trade",
     "salary0", "salary1", "salary2", "salary3", "salary4",
@@ -201,6 +220,9 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
         print(f"MY_TEAM_ID={my_team_id}")
         print(f"MY_TEAM_ABBR={my_team_abbr}")
         print(f"MY_TEAM_NAME={my_team_name}")
+        adj_export = {str(k): v for k, v in TRADE_POSITION_ADJUSTMENTS.items()}
+        print(f"TRADE_POS_ADJUSTMENTS={json.dumps(adj_export)}")
+        print(f"TRADE_TIER2_OA_ABOVE={TRADE_TIER2_OA_ABOVE}")
 
         if player_name:
             parts = player_name.strip().split(None, 1)
@@ -231,6 +253,8 @@ def lookup_trade_context(save_name, player_name=None, mode="offering"):
                         f"{d['wrc_plus']}|{d['war']}|{yrs_rem}|{sal}|"
                         f"{d['mlb_service_years']}|{d['team_abbr']}"
                     )
+                    pos_adj = get_position_adjustment(d["position"], d.get("role"))
+                    print(f"POSITION_DISCOUNT={pos_adj}")
 
         if mode == "offering":
             needs = conn.execute(text(
@@ -328,14 +352,30 @@ def build_table_rows(results, show_team, highlight):
     return html
 
 
-def query_trade_targets(save_name, offer_label, offered_where, target_where, my_team_id,
+def query_trade_targets(save_name, offer_label, offered_where, target_base_where,
+                        oa_floor, oa_ceil, my_team_id,
                         mode="offering", target_join="", order_by="pr.rating_overall DESC",
                         limit=25, highlight=None):
-    """Query offered and target players for a trade evaluation.
+    """Query offered and tiered target players for a trade evaluation.
 
-    Returns dict(offered=list, targets=list).
+    target_base_where: SQL WHERE fragment with position/type filters only — no OA filter.
+    oa_floor / oa_ceil: main value band; Python builds tier ranges from these.
+
+    Returns dict(offered=list, tier1=list, tier2=list).
     """
+    oa_floor = int(oa_floor)
+    oa_ceil = int(oa_ceil)
+    limit = int(limit)
+    _ALLOWED_ORDER_BY = {
+        "pr.rating_overall DESC",
+        "pr.rating_overall ASC",
+        "pr.oa DESC",
+        "pr.oa ASC",
+    }
+    if order_by not in _ALLOWED_ORDER_BY:
+        order_by = "pr.rating_overall DESC"
     engine = get_engine(save_name)
+    tier2_ceil = oa_ceil + TRADE_TIER2_OA_ABOVE
 
     if mode == "acquiring":
         offered_team_filter = f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
@@ -345,8 +385,7 @@ def query_trade_targets(save_name, offer_label, offered_where, target_where, my_
         target_team_filter = f"p.team_id != {my_team_id} AND p.league_id = {MLB_LEAGUE_ID}"
 
     offered_sql = (
-        _SELECT
-        + _FROM
+        _SELECT + _FROM
         + f"""
         WHERE p.free_agent = 0 AND p.retired = 0
           AND {offered_team_filter}
@@ -356,58 +395,65 @@ def query_trade_targets(save_name, offer_label, offered_where, target_where, my_
         """
     )
 
-    target_sql = (
-        _SELECT
-        + _FROM
-        + (f"\n{target_join}" if target_join else "")
-        + f"""
-        WHERE p.free_agent = 0 AND p.retired = 0
-          AND {target_team_filter}
-          AND ({target_where})
-        ORDER BY {order_by}
-        LIMIT {limit}
-        """
-    )
+    def _tier_sql(oa_lo, oa_hi):
+        return (
+            _SELECT + _FROM
+            + (f"\n{target_join}" if target_join else "")
+            + f"""
+            WHERE p.free_agent = 0 AND p.retired = 0
+              AND {target_team_filter}
+              AND ({target_base_where})
+              AND pr.oa BETWEEN {oa_lo} AND {oa_hi}
+            ORDER BY {order_by}
+            LIMIT {limit}
+            """
+        )
 
     with engine.connect() as conn:
         offered = [row_to_dict(r) for r in conn.execute(text(offered_sql)).fetchall()]
-        targets = [row_to_dict(r) for r in conn.execute(text(target_sql)).fetchall()]
+        tier1 = [row_to_dict(r) for r in conn.execute(text(_tier_sql(oa_floor, oa_ceil))).fetchall()]
+        tier2 = [row_to_dict(r) for r in conn.execute(text(_tier_sql(oa_ceil + 1, tier2_ceil))).fetchall()]
 
-    return dict(offered=offered, targets=targets)
+    return dict(offered=offered, tier1=tier1, tier2=tier2)
 
 
 def generate_trade_targets_report(
     save_name,
     offer_label,
     offered_where,
-    target_where,
+    target_base_where,
+    oa_floor,
+    oa_ceil,
     my_team_id,
     mode="offering",
     target_join="",
-    order_by="pr.rating_overall DESC",
-    limit=25,
     highlight=None,
 ):
-    """Generate a trade targets HTML report.
+    """Generate a trade targets HTML report with value-tiered results.
 
-    offer_label:   Human-readable label, e.g. "Johnny Bench".
-    offered_where: SQL WHERE fragment for the player(s) on the offer side.
-    target_where:  SQL WHERE fragment for the return side.
-    my_team_id:    The managed team's team_id (read from saves.json).
-    mode:          "offering" — you're trading away your player, seeking returns.
-                   "acquiring" — you want someone else's player; show what you'd give up.
-    target_join:   Optional JOIN clause for advanced stats tables.
-    highlight:     List of (col_key, display_label) tuples for extra columns, or None.
+    offer_label:       Human-readable label, e.g. "Johnny Bench".
+    offered_where:     SQL WHERE fragment for the player(s) on the offer side.
+    target_base_where: SQL WHERE fragment for position/type filters only — no OA filter.
+    oa_floor / oa_ceil: Main value band (already position-adjusted by the agent).
+                       Python extends upward for the add-on tier internally.
+    my_team_id:        The managed team's team_id (read from saves.json).
+    mode:              "offering" — you're trading away your player, seeking returns.
+                       "acquiring" — you want someone else's player; show what you'd give up.
+    target_join:       Optional JOIN clause for advanced stats tables.
+    highlight:         List of (col_key, display_label) tuples for extra columns, or None.
 
-    Returns (path_str, dict(offered=list, targets=list)).
+    Returns (path_str, dict(offered=list, tier1=list, tier2=list)).
     """
     last_import = get_last_import_time()
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    tier2_ceil = oa_ceil + TRADE_TIER2_OA_ABOVE
 
-    result = query_trade_targets(save_name, offer_label, offered_where, target_where,
-                                  my_team_id, mode, target_join, order_by, limit, highlight)
+    result = query_trade_targets(save_name, offer_label, offered_where, target_base_where,
+                                  oa_floor, oa_ceil, my_team_id, mode, target_join,
+                                  "pr.rating_overall DESC", 25, highlight)
     offered = result["offered"]
-    targets = result["targets"]
+    tier1 = result["tier1"]
+    tier2 = result["tier2"]
 
     if offered:
         p = offered[0]
@@ -418,25 +464,27 @@ def generate_trade_targets_report(
         "label": offer_label,
         "mode": mode,
         "offered_where": offered_where,
-        "target_where": target_where,
+        "target_base_where": target_base_where,
+        "oa_floor": oa_floor,
+        "oa_ceil": oa_ceil,
         "target_join": target_join,
-        "order_by": order_by,
-        "limit": limit,
         "highlight": highlight,
     }
 
     offer_label_esc = html.escape(offer_label, quote=True)
     if mode == "acquiring":
-        offered_show_team = True   # show where the target player plays
-        target_show_team = False   # targets are your own players
+        offered_show_team = True
+        target_show_team = False
         offered_section_title = "Player You're Targeting"
-        targets_section_title = f"What You'd Need to Give Up ({len(targets)} players)"
+        tier1_section_title = f"What You'd Need to Give Up — Direct Match ({len(tier1)})"
+        tier2_section_title = f"What You'd Need to Give Up — Add-On Required ({len(tier2)})"
         page_meta = f"Acquiring: {offer_label_esc}"
     else:
-        offered_show_team = False  # your players — team is implied
+        offered_show_team = False
         target_show_team = True
         offered_section_title = "What You're Offering"
-        targets_section_title = f"Return Targets ({len(targets)} players)"
+        tier1_section_title = f"Straight Swap Candidates ({len(tier1)})"
+        tier2_section_title = f"Add-On Required ({len(tier2)})"
         page_meta = f"Offering: {offer_label_esc}"
 
     def _key_header_for_rows(rows):
@@ -451,17 +499,39 @@ def generate_trade_targets_report(
     offered_header = build_table_header(show_team=offered_show_team, key_header=key_header_off, highlight=None)
     offered_rows_html = build_table_rows(offered, show_team=offered_show_team, highlight=None)
 
-    key_header_tgt = _key_header_for_rows(targets)
-    targets_header = build_table_header(show_team=target_show_team, key_header=key_header_tgt, highlight=highlight)
-    targets_rows_html = build_table_rows(targets, show_team=target_show_team, highlight=highlight)
+    all_targets = tier1 + tier2
 
-    # Spotlights — check offered side for no-trade in acquiring mode; targets side otherwise
+    key_header_t1 = _key_header_for_rows(tier1)
+    tier1_header = build_table_header(show_team=target_show_team, key_header=key_header_t1, highlight=highlight)
+    tier1_rows_html = build_table_rows(tier1, show_team=target_show_team, highlight=highlight)
+
+    key_header_t2 = _key_header_for_rows(tier2)
+    tier2_header = build_table_header(show_team=target_show_team, key_header=key_header_t2, highlight=highlight)
+    tier2_rows_html = build_table_rows(tier2, show_team=target_show_team, highlight=highlight)
+
+    # Tier 1 block
+    if tier1:
+        tier1_block = f"<table>\n{tier1_header}\n{tier1_rows_html}\n</table>"
+    else:
+        tier1_block = (
+            '<div style="background:#fff3cd;border:1px solid #ffc107;padding:12px 16px;'
+            'border-radius:4px;font-size:13px;margin:4px 0">'
+            "<b>No straight-swap candidates found</b> at this value level. "
+            'See "Add-On Required" below for players reachable with an extra piece.</div>'
+        )
+
+    # Tier 2 block
+    if tier2:
+        tier2_block = f"<table>\n{tier2_header}\n{tier2_rows_html}\n</table>"
+    else:
+        tier2_block = '<p style="color:#888;font-size:13px;margin:4px 0">No candidates in this range.</p>'
+
+    # Spotlights
     spotlight = ""
-    spotlight_list = offered if mode == "acquiring" else targets
+    spotlight_list = offered if mode == "acquiring" else all_targets
     no_trade_list = [r for r in spotlight_list if r.get("no_trade")]
-    injury_list = [r for r in targets if (r.get("prone_overall") or 0) > 150]
-    elite_list = [r for r in (offered if mode == "acquiring" else targets)
-                  if (r.get("rating_overall") or 0) >= 75]
+    injury_list = [r for r in all_targets if (r.get("prone_overall") or 0) > 150]
+    elite_tier2 = [r for r in tier2 if (r.get("rating_overall") or 0) >= 75]
 
     if no_trade_list:
         names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in no_trade_list)
@@ -480,19 +550,21 @@ def generate_trade_targets_report(
             f"<b>⚠ {label}:</b> {names} — Fragile or Wrecked injury rating; "
             f"factor into trade value assessment.</div>"
         )
-    if elite_list and mode != "acquiring":
-        names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in elite_list)
+    if elite_tier2 and mode != "acquiring":
+        names = ", ".join(f"{r['first_name']} {r['last_name']}" for r in elite_tier2)
         spotlight += (
             f'<div style="background:#f0fff0;border:1px solid #88cc88;padding:10px 14px;'
             f'border-radius:4px;margin:8px 0;font-size:13px">'
-            f"<b>⭐ Premium Targets (Rating ≥75):</b> {names} — "
-            f"likely require a strong return package.</div>"
+            f"<b>⭐ Premium Add-On Targets (Rating ≥75):</b> {names} — "
+            f"would require a meaningful package, not just a prospect.</div>"
         )
 
+    total = len(tier1) + len(tier2)
     _ootp_kwargs_esc = json.dumps(dict(
-        offered_where=offered_where, target_where=target_where,
+        offered_where=offered_where, target_base_where=target_base_where,
+        oa_floor=oa_floor, oa_ceil=oa_ceil,
         my_team_id=my_team_id, mode=mode,
-        target_join=target_join, order_by=order_by, limit=limit, highlight=highlight
+        target_join=target_join, highlight=highlight
     )).replace('"', '&quot;')
     _args_esc = offer_label.replace("&", "&amp;").replace('"', "&quot;")
     _ootp_meta = (
@@ -512,7 +584,9 @@ def generate_trade_targets_report(
 <div class="page-header">
   <div class="player-name">Trade Targets</div>
   <div class="player-meta">{page_meta}</div>
-  <div class="import-ts">{len(targets)} player{"s" if len(targets) != 1 else ""} found
+  <div class="import-ts">{len(tier1)} direct match{"es" if len(tier1) != 1 else ""},
+    {len(tier2)} with add-on &bull; OA band {oa_floor}–{oa_ceil} (direct) /
+    {oa_ceil + 1}–{tier2_ceil} (add-on)
     &bull; Last DB import: {last_import or "unknown"} &bull; Generated: {generated_at}</div>
 </div>
 
@@ -529,11 +603,19 @@ def generate_trade_targets_report(
 </div>
 
 <div class="section">
-  <div class="section-title">{targets_section_title}</div>
-  <table>
-  {targets_header}
-  {targets_rows_html}
-  </table>
+  <div class="section-title">{tier1_section_title}</div>
+  <div style="font-size:13px;color:#555;margin:-4px 0 10px">
+    OA {oa_floor}–{oa_ceil} — direct value match; realistic straight trades.
+  </div>
+  {tier1_block}
+</div>
+
+<div class="section">
+  <div class="section-title">{tier2_section_title}</div>
+  <div style="font-size:13px;color:#555;margin:-4px 0 10px">
+    OA {oa_ceil + 1}–{tier2_ceil} — value gap requires a prospect, secondary player, or cash to close.
+  </div>
+  {tier2_block}
 </div>
 
 {spotlight}
@@ -553,4 +635,4 @@ def generate_trade_targets_report(
     report_path = get_reports_dir(save_name, "trade_targets") / report_filename(_trade_base, args_key)
     write_report_html(report_path, html_doc)
 
-    return str(report_path), dict(offered=offered, targets=targets)
+    return str(report_path), dict(offered=offered, tier1=tier1, tier2=tier2)
