@@ -33,19 +33,24 @@ if (-not (Test-Path ".venv")) {
 # ---------------------------------------------------------------------------
 Write-Host "Checking for updates..."
 if (Test-Path ".git") {
-    git fetch origin --quiet 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $behind = [int](git rev-list HEAD..origin/main --count 2>$null)
-        if ($behind -gt 0) {
-            '{"updates_available": true, "install_type": "git"}' | Set-Content .update-status
-            Write-Host "! Update available -- run: git pull"
-        } else {
-            '{"updates_available": false, "install_type": "git"}' | Set-Content .update-status
-            Write-Host "OK Up to date"
-        }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        '{"updates_available": null, "install_type": "git"}' | Set-Content .update-status -Encoding UTF8
+        Write-Host "! Unable to check for updates (git not found on PATH)"
     } else {
-        '{"updates_available": null, "install_type": "git"}' | Set-Content .update-status
-        Write-Host "! Unable to check for updates"
+        git fetch origin --quiet 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $behind = [int](git rev-list HEAD..origin/main --count 2>$null)
+            if ($behind -gt 0) {
+                '{"updates_available": true, "install_type": "git"}' | Set-Content .update-status -Encoding UTF8
+                Write-Host "! Update available -- run: git pull"
+            } else {
+                '{"updates_available": false, "install_type": "git"}' | Set-Content .update-status -Encoding UTF8
+                Write-Host "OK Up to date"
+            }
+        } else {
+            '{"updates_available": null, "install_type": "git"}' | Set-Content .update-status -Encoding UTF8
+            Write-Host "! Unable to check for updates"
+        }
     }
 } else {
     if (-not (Test-Path ".downloaded")) {
@@ -57,14 +62,14 @@ if (Test-Path ".git") {
             -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
         $latest = ($apiResponse.Content | ConvertFrom-Json).commit.committer.date
         if ($latest -gt $downloaded) {
-            '{"updates_available": true, "install_type": "zip"}' | Set-Content .update-status
+            '{"updates_available": true, "install_type": "zip"}' | Set-Content .update-status -Encoding UTF8
             Write-Host "! Update available -- download: https://github.com/rwalker123/ootp-db/archive/refs/heads/main.zip"
         } else {
-            '{"updates_available": false, "install_type": "zip"}' | Set-Content .update-status
+            '{"updates_available": false, "install_type": "zip"}' | Set-Content .update-status -Encoding UTF8
             Write-Host "OK Up to date"
         }
     } catch {
-        '{"updates_available": null, "install_type": "zip"}' | Set-Content .update-status
+        '{"updates_available": null, "install_type": "zip"}' | Set-Content .update-status -Encoding UTF8
         Write-Host "! Unable to check for updates"
     }
 }

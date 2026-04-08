@@ -904,8 +904,12 @@ class Handler(SimpleHTTPRequestHandler):
 
         log = []
         env = _subprocess_env()
+        if platform.system() == "Windows":
+            cmd = ["cmd", "/c", str(ROOT / "import.bat"), save_name]
+        else:
+            cmd = ["bash", str(ROOT / "import.sh"), save_name]
         proc = subprocess.Popen(
-            ["bash", str(ROOT / "import.sh"), save_name],
+            cmd,
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

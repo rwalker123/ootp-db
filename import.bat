@@ -27,7 +27,7 @@ if not exist ".env" (
 .venv\Scripts\python src\import.py %*
 set IMPORT_EXIT=%ERRORLEVEL%
 
-if "%~1"=="list" exit /b 0
+if "%~1"=="list" exit /b %IMPORT_EXIT%
 
 set SAVE_NAME=%~1
 
