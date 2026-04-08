@@ -10,7 +10,10 @@ OOTP CSV export → importer → SQLite/PostgreSQL → analytics engine → Clau
 ```
 OOTP exports your save as CSV files, which the importer loads into a local database. **SQLite is the default** — no server setup required. Each import runs an analytics pipeline on top of the raw data — computing advanced stats like wRC+, FIP, and xFIP, along with composite player ratings. Because advanced stats accumulate across imports rather than being overwritten, you build up a multi-year picture of your players over time. Claude Code skills query that database to generate scouting reports, free agent searches, and draft analyses. A lightweight web UI ties it all together for triggering imports and browsing reports without touching the terminal.
 
-OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. Windows is supported via PowerShell scripts (`web-server.bat` / `import.bat`). The Steam version has not been tested — if you use Steam and auto-discovery doesn't find your saves, set `OOTP_CSV_PATH` in `.env`.
+** Disclaimer **
+- OOTP Analyst has been developed and tested on **macOS with the standalone version** of OOTP Baseball 27. 
+- An attempt to add Windows support via PowerShell scripts (`web-server.bat` / `import.bat`) exists but is not tested. 
+- The Steam version has not been tested — if you use Steam and auto-discovery doesn't find your saves, set `OOTP_CSV_PATH` in `.env`.
 
 ## Table of Contents
 
