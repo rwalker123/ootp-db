@@ -1063,13 +1063,20 @@ function _markJobDone(jobId) {
 
   let status = 'Done';
   if (job) {
+    const log = job.log || [];
     if (job.interactive && !job.reportReady) {
       status = 'Waiting…';
     } else if (!job.interactive) {
-      const log = job.log || [];
-      const hasReport = log.some(l => /^(GENERATED|CACHED):/.test(l));
-      const needsInput = log.some(l => /NEEDS_INPUT:/.test(l));
-      if (!hasReport) status = needsInput ? 'Needs Input' : 'Failed';
+      const hasError = log.some(l => /^Error:/.test(l));
+      // Server stores the report's ootp-skill (e.g. player-stats), not "refresh"; job_id is always refresh-*.
+      const isRefreshJob = job.skill === 'refresh' || String(jobId).startsWith('refresh-');
+      if (isRefreshJob) {
+        if (hasError) status = 'Failed';
+      } else {
+        const hasReport = log.some(l => /^(GENERATED|CACHED):/.test(l));
+        const needsInput = log.some(l => /NEEDS_INPUT:/.test(l));
+        if (!hasReport) status = needsInput ? 'Needs Input' : 'Failed';
+      }
     }
   }
 
