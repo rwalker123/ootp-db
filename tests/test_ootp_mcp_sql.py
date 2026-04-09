@@ -27,6 +27,22 @@ class TestValidateReadonlySql(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_readonly_sql("SELECT 1; SELECT 2")
 
+    def test_allow_semicolon_in_string_literal(self):
+        s = validate_readonly_sql("SELECT ';' AS semi")
+        self.assertEqual(s, "SELECT ';' AS semi")
+
+    def test_allow_semicolon_in_line_comment(self):
+        s = validate_readonly_sql("SELECT 1 -- ; semicolon inside comment")
+        self.assertEqual(s, "SELECT 1 -- ; semicolon inside comment")
+
+    def test_allow_semicolon_in_block_comment(self):
+        s = validate_readonly_sql("SELECT 1 /* ; semicolon inside comment */")
+        self.assertEqual(s, "SELECT 1 /* ; semicolon inside comment */")
+
+    def test_reject_string_semicolon_then_second_statement(self):
+        with self.assertRaises(ValueError):
+            validate_readonly_sql("SELECT ';' AS semi; SELECT 2")
+
     def test_reject_insert(self):
         with self.assertRaises(ValueError):
             validate_readonly_sql("INSERT INTO t VALUES (1)")
@@ -38,6 +54,20 @@ class TestValidateReadonlySql(unittest.TestCase):
     def test_reject_not_select(self):
         with self.assertRaises(ValueError):
             validate_readonly_sql("UPDATE players SET x=1")
+
+    def test_reject_writable_cte_delete(self):
+        with self.assertRaises(ValueError):
+            validate_readonly_sql(
+                "WITH x AS (DELETE FROM players RETURNING player_id) "
+                "SELECT player_id FROM x"
+            )
+
+    def test_reject_writable_cte_update(self):
+        with self.assertRaises(ValueError):
+            validate_readonly_sql(
+                "WITH u AS (UPDATE players SET age = age RETURNING player_id) "
+                "SELECT player_id FROM u"
+            )
 
 
 class TestClampLimit(unittest.TestCase):

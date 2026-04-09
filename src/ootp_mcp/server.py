@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 _SRC = Path(__file__).resolve().parent.parent
 _ROOT = _SRC.parent
@@ -156,31 +156,17 @@ def ootp_describe_table(table: str, save_name: str | None = None) -> str:
     t = _validate_table_name(table)
     save = _resolve_save_name(save_name)
     engine = get_engine(save)
+    insp = inspect(engine)
     cols: list[dict] = []
-    with engine.connect() as conn:
-        if engine.dialect.name == "sqlite":
-            rows = conn.execute(text(f"PRAGMA table_info('{t}')")).fetchall()
-            for r in rows:
-                cols.append(
-                    dict(
-                        name=r[1],
-                        type=r[2],
-                        nullable=not bool(r[3]),
-                        primary_key=bool(r[5]),
-                    )
-                )
-        else:
-            rows = conn.execute(
-                text(
-                    "SELECT column_name, data_type, is_nullable "
-                    "FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = :t "
-                    "ORDER BY ordinal_position"
-                ),
-                dict(t=t),
-            ).fetchall()
-            for r in rows:
-                cols.append(dict(name=r[0], type=r[1], nullable=(r[2] == "YES")))
+    for col in insp.get_columns(t):
+        out = dict(
+            name=col.get("name"),
+            type=str(col.get("type")),
+            nullable=bool(col.get("nullable", True)),
+        )
+        if "primary_key" in col:
+            out["primary_key"] = bool(col.get("primary_key"))
+        cols.append(out)
     return json.dumps(dict(save=save, table=t, columns=cols), indent=2)
 
 
