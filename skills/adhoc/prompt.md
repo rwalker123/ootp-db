@@ -86,12 +86,14 @@ if unsure — do not guess column names.
 `players_contract` has **no** bare `salary` column. Salary columns are `salary0` through
 `salary14` (one per contract year). Use `salary0` for the current year's salary.
 
-### 7. Filter career stats correctly
-In `players_career_batting_stats` and `players_career_pitching_stats`:
-- `split_id = 1` → overall (all seasons — use this for career totals)
-- `split_id = 2` → vs LHP/LHB splits
-- `split_id = 3` → vs RHP/RHB splits
-- `split_id = 0` does **not** exist
+### 7. Filter career stats correctly (split_id differs by table)
+**Batting / pitching** (`players_career_batting_stats`, `players_career_pitching_stats`):
+- `split_id = 1` → overall regular season (real + sim); use for career totals
+- `split_id = 2` / `3` → vs LHP/LHB and vs RHP/RHB splits
+- `split_id = 0` does **not** appear in these tables (typical exports)
+
+**Fielding** (`players_career_fielding_stats`) — **not the same:**
+- OOTP uses **both** `split_id = 0` and `1` as disjoint era buckets (historical vs sim-era; year bands vary by save). For all-time games/totals spanning both, use **`split_id IN (0, 1)`**. See **`AGENTS.md`** and `ootp_db_constants` (`SPLIT_CAREER_FIELDING_*`).
 
 ### 8. MLB-level players only (unless asked otherwise)
 `player_ratings` is already pre-filtered to MLB players. For raw tables, filter:

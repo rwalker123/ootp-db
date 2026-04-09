@@ -65,7 +65,10 @@ def resource_query_conventions() -> str:
 - **MLB-only unless asked otherwise:** filter with `league_id = {MLB_LEAGUE_ID}` on league-scoped tables (see `ootp_db_constants.MLB_LEAGUE_ID`).
 - **Ratings:** prefer composite **`player_ratings`** (`rating_overall`, etc.) for rankings — not raw `players_value.oa_rating` alone.
 - **Contracts:** salary columns are **`salary0`..`salary14`** — there is no bare `salary` column. Length is **`years`**; **`current_year`** indexes the active salary column.
-- **Career stats:** `players_career_*` use **`split_id`**: `1` = overall regular season for all years (real + sim). Team current-season stats are in non-`_history` tables.
+- **Career `split_id` (table-specific — do not mix conventions):**
+  - **`players_career_batting_stats` / `players_career_pitching_stats`:** `split_id = 1` = overall regular season (real + sim). **`split_id = 0` does not appear.** Use `1` for career totals; `2`/`3` = vs L/R; `21` = postseason when present.
+  - **`players_career_fielding_stats`:** OOTP uses **both** `split_id = 0` and `1` as disjoint era buckets (historical vs sim-era rows; year bands vary by save). For **all-time** fielding games/totals spanning both, use **`split_id IN (0, 1)`** — `1` alone can omit sim seasons. See `ootp_db_constants` (`SPLIT_CAREER_FIELDING_*`) and **`AGENTS.md`**.
+  - Team **current-season** stats: non-`_history` tables (their own `split_id` meanings — see constants).
 - **Never invent column names.** If unsure, call **`ootp_describe_table`**.
 - Full human schema: project **`AGENTS.md`** (Database Schema Overview).
 """
