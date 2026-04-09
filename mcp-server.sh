@@ -1,5 +1,5 @@
 #!/bin/bash
-# OOTP MCP server (stdio). Cursor normally launches this automatically; use this script
+# OOTP MCP server (stdio). MCP clients normally launch this automatically; use this script
 # to verify the venv, deps, or run with MCP Inspector. Blocks waiting for JSON-RPC on stdin.
 cd "$(dirname "$0")"
 
@@ -50,6 +50,6 @@ mv "$TMPFILE" .update-status
 
 echo ""
 echo "Starting OOTP MCP server (stdio) — waiting for a client on stdin."
-echo "Tip: Cursor starts this automatically when MCP is configured; use this for testing or MCP Inspector."
+echo "Tip: An MCP client usually starts this automatically when configured; use this for testing or MCP Inspector."
 echo ""
 exec .venv/bin/python3 mcp_server.py

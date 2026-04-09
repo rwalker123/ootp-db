@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# OOTP MCP server (stdio). Cursor normally launches this automatically; use this script
+# OOTP MCP server (stdio). MCP clients normally launch this automatically; use this script
 # to verify the venv, deps, or run with MCP Inspector. Blocks waiting for JSON-RPC on stdin.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -66,7 +66,7 @@ if (Test-Path ".git") {
 
 Write-Host ""
 Write-Host "Starting OOTP MCP server (stdio) -- waiting for a client on stdin."
-Write-Host "Tip: Cursor starts this automatically when MCP is configured; use this for testing or MCP Inspector."
+Write-Host "Tip: An MCP client usually starts this automatically when configured; use this for testing or MCP Inspector."
 Write-Host ""
 
 & (Resolve-Path ".venv\Scripts\python.exe").Path "mcp_server.py"
