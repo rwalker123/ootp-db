@@ -99,7 +99,7 @@ from ootp_db_constants import (
     SPLIT_CAREER_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from shared_css import db_name_from_save, get_report_css, get_reports_dir, get_write_engine
 from sqlalchemy import text
 
 # Pre-computed scale range for (val - min) / range conversions.
@@ -230,7 +230,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     and MCP tools, or None if the player is not found.
     Does NOT perform a cache check.
     """
-    engine = get_engine(save_name)
+    engine = get_write_engine(save_name)
 
     with engine.connect() as conn:
         from sqlalchemy import text as sa_text
@@ -605,7 +605,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 
     Returns (path_str, data_dict) where data_dict is None on a cache hit.
     """
-    engine = get_engine(save_name)
+    engine = get_write_engine(save_name)
 
     existing = find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers)
     if existing:
@@ -2080,7 +2080,7 @@ def main():
         sys.exit(1)
 
     save_name = sys.argv[1]
-    engine = get_engine(save_name)
+    engine = get_write_engine(save_name)
     start = time.time()
 
     print("Computing batter ratings...")

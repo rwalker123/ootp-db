@@ -30,7 +30,7 @@ from ootp_db_constants import (
     SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
     GAME_TYPE_REGULAR,
 )
-from shared_css import db_name_from_save, get_engine
+from shared_css import db_name_from_save, get_write_engine
 from sqlalchemy import inspect, text
 
 # ---------------------------------------------------------------------------
@@ -657,7 +657,7 @@ def main():
         sys.exit(1)
 
     save_name = sys.argv[1]
-    engine = get_engine(save_name)
+    engine = get_write_engine(save_name)
     start = time.time()
 
     year = get_current_year(engine)

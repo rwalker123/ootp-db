@@ -23,6 +23,8 @@ PYEOF
 ```
 - **Never** hardcode a database URL — use `get_engine(save_name)` from `src/shared_css.py`,
   which reads `DATABASE_URL` from `.env` and routes to SQLite or PostgreSQL automatically.
+  **`get_engine` is read-only** (SQLite `mode=ro`; Postgres `default_transaction_read_only=on`).
+  Import and derived-table jobs (`import.py`, `analytics.py`, `ratings.py`, etc.) use **`get_write_engine(save_name)`** instead.
 - The active DB engine is configured via `DATABASE_URL` in `.env`:
   - `DATABASE_URL=sqlite` → SQLite files under `db/<save_name>.db`
   - `DATABASE_URL=postgresql://...` → PostgreSQL

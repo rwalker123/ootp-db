@@ -586,10 +586,11 @@ def check_database():
     try:
         if str(SRC) not in sys.path:
             sys.path.insert(0, str(SRC))
-        from sqlalchemy import create_engine, text
+        from shared_css import create_postgres_server_engine
+        from sqlalchemy import text
         from dotenv import load_dotenv
         load_dotenv(env_path)
-        engine = create_engine(database_url.rstrip("/") + "/postgres")
+        engine = create_postgres_server_engine(database_url, read_only=True)
         with engine.connect() as conn:
             rows = conn.execute(text(
                 "SELECT datname FROM pg_database "
@@ -1075,17 +1076,9 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if str(SRC) not in sys.path:
                 sys.path.insert(0, str(SRC))
-            from sqlalchemy import create_engine, text
-            from dotenv import load_dotenv
-            env_path = ROOT / ".env"
-            if env_path.exists():
-                load_dotenv(env_path)
-            db_name = registry["saves"][save_name]["db_name"]
-            db_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "sqlite"
-            if db_url.lower().startswith("sqlite"):
-                engine = create_engine(f"sqlite:///{ROOT / 'db' / db_name}.db")
-            else:
-                engine = create_engine(f"{db_url.rstrip('/')}/{db_name}")
+            from shared_css import get_engine
+            from sqlalchemy import text
+            engine = get_engine(save_name)
             with engine.connect() as conn:
                 rows = conn.execute(text("""
                     SELECT hm.human_manager_id, hm.team_id,
