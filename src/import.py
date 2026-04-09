@@ -15,6 +15,148 @@ from shared_css import db_name_from_save, get_saves_path, load_saves_registry
 from sqlalchemy import create_engine, text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SCHEMA_SNAPSHOTS_DIR = PROJECT_ROOT / "schema_snapshots"
+
+_OOTP_VERSION_RE = re.compile(
+    r"(?:OOTP Baseball|Out of the Park Baseball)\s*(\d+)\s*$",
+    re.IGNORECASE,
+)
+
+
+def detect_ootp_version(lg_dir: Path) -> int | None:
+    """Extract OOTP major version from path (e.g. 27 from folder 'OOTP Baseball 27')."""
+    try:
+        resolved = lg_dir.resolve()
+    except OSError:
+        resolved = lg_dir
+    for p in [resolved, *resolved.parents]:
+        m = _OOTP_VERSION_RE.match(p.name)
+        if m:
+            return int(m.group(1))
+    m = re.search(
+        r"(?:OOTP Baseball|Out of the Park Baseball)\s*(\d+)",
+        str(resolved),
+        re.IGNORECASE,
+    )
+    return int(m.group(1)) if m else None
+
+
+def schema_snapshot_path(db_name: str) -> Path:
+    return SCHEMA_SNAPSHOTS_DIR / f"{db_name}.json"
+
+
+def load_schema_snapshot(db_name: str) -> dict[str, list[str]]:
+    path = schema_snapshot_path(db_name)
+    if not path.is_file():
+        return {}
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(
+            f"Warning: could not read schema snapshot {path}: {e}",
+            file=sys.stderr,
+        )
+        return {}
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        print(
+            f"Warning: corrupted schema snapshot {path} ({e}); "
+            "treating as no baseline.",
+            file=sys.stderr,
+        )
+        return {}
+    if not isinstance(data, dict):
+        print(
+            f"Warning: invalid schema snapshot {path} (not a JSON object); "
+            "treating as no baseline.",
+            file=sys.stderr,
+        )
+        return {}
+    raw = data.get("tables") or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, list):
+            continue
+        out[str(k)] = [str(c) for c in v]
+    return out
+
+
+def save_schema_snapshot(db_name: str, tables: dict[str, list[str]]) -> None:
+    SCHEMA_SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = schema_snapshot_path(db_name)
+    ordered = {
+        t: sorted(cols) for t, cols in sorted(tables.items(), key=lambda x: x[0])
+    }
+    payload = json.dumps(dict(tables=ordered), indent=2)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, dest)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def diff_schemas(
+    previous: dict[str, list[str]],
+    current: dict[str, list[str]],
+) -> dict:
+    """Compare two table→columns maps. Keys are table names; values sorted column lists."""
+    prev_keys = set(previous)
+    cur_keys = set(current)
+    new_tables = sorted(cur_keys - prev_keys)
+    removed_tables = sorted(prev_keys - cur_keys)
+    table_column_changes: dict[str, dict[str, list[str]]] = {}
+    for t in sorted(prev_keys & cur_keys):
+        pcols = set(previous[t])
+        ccols = set(current[t])
+        added = sorted(ccols - pcols)
+        removed = sorted(pcols - ccols)
+        if added or removed:
+            table_column_changes[t] = {
+                "new_columns": added,
+                "removed_columns": removed,
+            }
+    return {
+        "new_tables": new_tables,
+        "removed_tables": removed_tables,
+        "table_column_changes": table_column_changes,
+    }
+
+
+def print_schema_changes(diff: dict, had_previous: bool) -> None:
+    if not had_previous:
+        print(
+            "\nSchema: first import for this database — baseline snapshot saved for next run."
+        )
+        return
+    if (
+        not diff["new_tables"]
+        and not diff["removed_tables"]
+        and not diff["table_column_changes"]
+    ):
+        print("\nSchema changes: none.")
+        return
+    print("\nSchema changes")
+    print("-" * 40)
+    for t in diff["new_tables"]:
+        print(f"  New table: {t}")
+    for t in diff["removed_tables"]:
+        print(f"  Removed table (warning): {t}")
+    for t, ch in sorted(diff["table_column_changes"].items()):
+        if ch["new_columns"]:
+            cols = ", ".join(ch["new_columns"])
+            print(f"  {t}: new columns: {cols}")
+        if ch["removed_columns"]:
+            cols = ", ".join(ch["removed_columns"])
+            print(f"  {t}: removed columns (warning): {cols}")
+
 
 # Known OOTP install root patterns, searched in order, per platform
 if platform.system() == "Windows":
@@ -149,7 +291,7 @@ def _load_registry():
     return load_saves_registry()
 
 
-def _update_registry(save_name, db_name, csv_dir):
+def _update_registry(save_name, db_name, csv_dir, ootp_version: int | None = None):
     registry = _load_registry()
     saves = registry.setdefault("saves", {})
     existing = saves.get(save_name, {})
@@ -157,6 +299,7 @@ def _update_registry(save_name, db_name, csv_dir):
         "db_name": db_name,
         "last_import": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "csv_path": str(csv_dir),
+        "ootp_version": ootp_version,
     })
     saves[save_name] = existing
     # Set active only if not already set
@@ -167,17 +310,19 @@ def _update_registry(save_name, db_name, csv_dir):
 
 def resolve_save(arg, ootp_root=None):
     """
-    Given a save name or path, return (csv_dir, save_name).
+    Given a save name or an existing .lg save directory path, return
+    (csv_dir, save_name, lg_dir).
+
     Resolution order:
-      1. Existing directory path (absolute or relative)
+      1. Existing .lg directory path (absolute or relative)
       2. Auto-discover via glob in known OOTP locations
       3. OOTP_CSV_PATH fallback (if set)
     """
     p = Path(arg).expanduser().resolve()
 
     if p.is_dir():
-        # User passed a path — accept .lg dir directly or its parent
-        lg_dir = p if p.suffix == ".lg" else p
+        # User passed a path — must be the .lg save folder itself
+        lg_dir = p
         if lg_dir.suffix != ".lg":
             print(f"Error: '{arg}' is a directory but doesn't look like a .lg save folder.")
             sys.exit(1)
@@ -216,7 +361,7 @@ def resolve_save(arg, ootp_root=None):
         print(f"Error: No .csv files found in {csv_dir}")
         sys.exit(1)
 
-    return csv_dir, save_name
+    return csv_dir, save_name, lg_dir
 
 
 def main():
@@ -243,7 +388,8 @@ def main():
     arg = " ".join(sys.argv[1:])
 
     ootp_root = os.getenv("OOTP_CSV_PATH")  # optional, for backward compat
-    csv_dir, save_name = resolve_save(arg, ootp_root=ootp_root)
+    csv_dir, save_name, lg_dir = resolve_save(arg, ootp_root=ootp_root)
+    ootp_version = detect_ootp_version(lg_dir)
 
     database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
     if not os.getenv("DATABASE_URL") and os.getenv("POSTGRES_URL"):
@@ -279,6 +425,9 @@ def main():
         engine = create_engine(f"{database_url.rstrip('/')}/{db_name}")
 
     csv_files = sorted(csv_dir.glob("*.csv"))
+    previous_schema = load_schema_snapshot(db_name)
+    had_previous_schema = bool(previous_schema)
+    current_schema: dict[str, list[str]] = {}
 
     # Import CSVs
     start = time.time()
@@ -296,6 +445,7 @@ def main():
                     df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
 
             df.to_sql(table_name, engine, if_exists="replace", index=False)
+            current_schema[table_name] = sorted(str(c) for c in df.columns)
             row_count = len(df)
             total_rows += row_count
             total_tables += 1
@@ -387,12 +537,18 @@ def main():
                         conn.execute(text("ROLLBACK TO SAVEPOINT idx_attempt"))
         conn.commit()
 
+    schema_diff = diff_schemas(previous_schema, current_schema)
+    print_schema_changes(schema_diff, had_previous_schema)
+    save_schema_snapshot(db_name, current_schema)
+
     # Update saves registry
-    _update_registry(save_name, db_name, csv_dir)
+    _update_registry(save_name, db_name, csv_dir, ootp_version=ootp_version)
 
     elapsed = time.time() - start
     print(f"\nDone: {total_tables} tables, {total_rows:,} rows in {elapsed:.1f}s")
     print(f"Save '{save_name}' → database '{db_name}'")
+    if ootp_version is not None:
+        print(f"OOTP version (from path): {ootp_version}")
 
 
 if __name__ == "__main__":

@@ -145,8 +145,12 @@ ootp-db/
 - Build the CSV path: `<save>.lg/import_export/csv`
 - Load config from `.env`
 - Validate that the CSV path exists and contains `.csv` files, exit with clear error if not
-- After a successful import, update `saves.json` with the save's db name, last import time,
-  and csv path. Sets `active` to this save if no active save is set yet.
+- After a successful import, update the engine-specific saves registry (`saves.sqlite.json` or
+  `saves.postgresql.json`) with the save's db name, last import time, csv path, and
+  `ootp_version` (major version inferred from the `.lg` path, or null if unknown). Sets `active`
+  to this save if no active save is set yet.
+- Compare loaded CSV columns to `schema_snapshots/<db_name>.json` from the prior import; print a
+  **Schema changes** summary (new/removed tables and columns), then refresh the snapshot.
 - Derive database name from save name (lowercase, hyphens → underscores)
 - Create the database if it doesn't already exist (SQLite: creates file; PostgreSQL: connects to `postgres` db with AUTOCOMMIT)
 - Connect via DATABASE_URL/<db_name> (or POSTGRES_URL for backward compat)
@@ -189,11 +193,16 @@ cp .env.example .env
 Just run `./import.sh My-Save-2026` again. All tables are dropped and recreated, so the 
 database always reflects the current state of the OOTP save.
 
-## saves.json
-After each import, `saves.json` is written/updated in the project root. It tracks all
-imported saves and which one is currently active. The active save determines which DB
-the skills query. The `active` pointer is set to the first save imported; subsequent
-imports don't change it (it will be switchable from the web UI in the future).
+## Saves registry (`saves.sqlite.json` / `saves.postgresql.json`)
+After each import, the registry for the configured engine is written/updated in the project root
+(legacy `saves.json` is migrated once to the engine-specific file). It tracks all imported saves
+and which one is currently active. Per-save entries include `db_name`, `last_import`, `csv_path`,
+and `ootp_version` when the install path includes a folder like `OOTP Baseball 27`. The active save
+determines which DB the skills query. The `active` pointer is set to the first save imported;
+subsequent imports don't change it (it will be switchable from the web UI in the future).
+
+Schema snapshots for drift detection live under `schema_snapshots/` (gitignored), one JSON file per
+database name.
 
 ## Notes
 - The OOTP CSV dump is triggered from inside OOTP: Game → Game Settings → Database tab → 
