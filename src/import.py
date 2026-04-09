@@ -11,8 +11,14 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from shared_css import db_name_from_save, get_saves_path, load_saves_registry
-from sqlalchemy import create_engine, text
+from shared_css import (
+    create_postgres_server_engine,
+    db_name_from_save,
+    get_saves_path,
+    get_write_engine,
+    load_saves_registry,
+)
+from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_SNAPSHOTS_DIR = PROJECT_ROOT / "schema_snapshots"
@@ -399,17 +405,12 @@ def main():
     is_sqlite = database_url.lower().startswith("sqlite")
 
     if is_sqlite:
-        db_dir = PROJECT_ROOT / "db"
-        db_dir.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(f"sqlite:///{db_dir / db_name}.db")
-        print(f"Using SQLite database: {db_dir / db_name}.db")
+        engine = get_write_engine(save_name)
+        print(f"Using SQLite database: {PROJECT_ROOT / 'db' / (db_name + '.db')}")
     else:
         # Create PostgreSQL database if it doesn't exist
         try:
-            admin_engine = create_engine(
-                f"{database_url.rstrip('/')}/postgres",
-                isolation_level="AUTOCOMMIT",
-            )
+            admin_engine = create_postgres_server_engine(database_url, read_only=False)
             with admin_engine.connect() as conn:
                 exists = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :db"),
@@ -422,7 +423,7 @@ def main():
         except Exception as e:
             print(f"Error: Could not connect to PostgreSQL: {e}")
             sys.exit(1)
-        engine = create_engine(f"{database_url.rstrip('/')}/{db_name}")
+        engine = get_write_engine(save_name)
 
     csv_files = sorted(csv_dir.glob("*.csv"))
     previous_schema = load_schema_snapshot(db_name)

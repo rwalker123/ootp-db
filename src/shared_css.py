@@ -8,6 +8,7 @@ Visual design based on the polished rating report style:
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,6 +16,52 @@ from sqlalchemy import create_engine
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+_PG_READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
+
+
+def _load_database_url() -> str:
+    load_dotenv(_PROJECT_ROOT / ".env")
+    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
+    if os.getenv("POSTGRES_URL") and not os.getenv("DATABASE_URL"):
+        print("Warning: POSTGRES_URL is deprecated, rename to DATABASE_URL in .env")
+    return database_url
+
+
+def _postgres_connect_args(*, read_only: bool) -> dict | None:
+    if not read_only:
+        return None
+    return dict(options=_PG_READ_ONLY_OPTIONS)
+
+
+def create_postgres_server_engine(database_url: str, *, read_only: bool = False):
+    """Connect to the `postgres` maintenance DB (e.g. CREATE DATABASE)."""
+    url = f"{database_url.rstrip('/')}/postgres"
+    ca = _postgres_connect_args(read_only=read_only)
+    if ca:
+        return create_engine(url, isolation_level="AUTOCOMMIT", connect_args=ca)
+    return create_engine(url, isolation_level="AUTOCOMMIT")
+
+
+def _create_engine(save_name: str, *, read_only: bool):
+    database_url = _load_database_url()
+    db_name = db_name_from_save(save_name)
+    if database_url.lower().startswith("sqlite"):
+        db_dir = _PROJECT_ROOT / "db"
+        db_path = db_dir / f"{db_name}.db"
+        if read_only:
+
+            def _sqlite_ro():
+                resolved = db_path.resolve()
+                return sqlite3.connect(f"file:{resolved.as_posix()}?mode=ro", uri=True)
+
+            return create_engine("sqlite://", creator=_sqlite_ro)
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return create_engine(f"sqlite:///{db_path}")
+    url = f"{database_url.rstrip('/')}/{db_name}"
+    ca = _postgres_connect_args(read_only=read_only)
+    if ca:
+        return create_engine(url, connect_args=ca)
+    return create_engine(url)
 
 def _db_engine_name() -> str:
     """Return the short engine name ('sqlite' or 'postgresql') from .env."""
@@ -46,23 +93,19 @@ def load_saves_registry() -> dict:
 
 
 def get_engine(save_name: str):
-    """Create and return a SQLAlchemy engine for the given save's database.
+    """Read-only SQLAlchemy engine for the save's database (queries, reports, MCP).
 
-    Reads DATABASE_URL from .env. Set to 'sqlite' for a local file-based DB,
-    or a full PostgreSQL URL (e.g. postgresql://postgres@localhost:5432).
-    Falls back to POSTGRES_URL for backward compatibility.
+    PostgreSQL: ``default_transaction_read_only=on`` on the session.
+    SQLite: opens the file with ``mode=ro``.
+
+    Import and derived-table scripts use :func:`get_write_engine` instead.
     """
-    load_dotenv(_PROJECT_ROOT / ".env")
-    database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
-    if os.getenv("POSTGRES_URL") and not os.getenv("DATABASE_URL"):
-        print("Warning: POSTGRES_URL is deprecated, rename to DATABASE_URL in .env")
-    db_name = db_name_from_save(save_name)
-    if database_url.lower().startswith("sqlite"):
-        db_dir = _PROJECT_ROOT / "db"
-        db_dir.mkdir(parents=True, exist_ok=True)
-        return create_engine(f"sqlite:///{db_dir / db_name}.db")
-    else:
-        return create_engine(f"{database_url.rstrip('/')}/{db_name}")
+    return _create_engine(save_name, read_only=True)
+
+
+def get_write_engine(save_name: str):
+    """Read-write engine for import, analytics, ratings, and other DB writers."""
+    return _create_engine(save_name, read_only=False)
 
 
 def db_name_from_save(save_name: str) -> str:

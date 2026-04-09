@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 from ootp_db_constants import NATION_USA
-from shared_css import db_name_from_save, get_engine
+from shared_css import db_name_from_save, get_write_engine
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -322,7 +322,7 @@ def main():
     start = time.time()
 
     print(f"Loading IFA prospect data for {save_name}...")
-    engine = get_engine(save_name)
+    engine = get_write_engine(save_name)
     df = load_ifa_data(engine)
     print(f"  {len(df)} IFA-eligible prospects loaded")
 

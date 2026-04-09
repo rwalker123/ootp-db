@@ -23,8 +23,10 @@ PYEOF
 ```
 - **Never** hardcode a database URL — use `get_engine(save_name)` from `src/shared_css.py`,
   which reads `DATABASE_URL` from `.env` and routes to SQLite or PostgreSQL automatically.
+  **`get_engine` is read-only** (SQLite `mode=ro`; Postgres `default_transaction_read_only=on`).
+  Import and derived-table jobs (`import.py`, `analytics.py`, `ratings.py`, etc.) use **`get_write_engine(save_name)`** instead.
 - The active DB engine is configured via `DATABASE_URL` in `.env`:
-  - `DATABASE_URL=sqlite` → SQLite files under `db/<save_name>.db`
+  - `DATABASE_URL=sqlite` → SQLite files under `db/<db_name>.db`, where `db_name` is derived from the save name (lowercase; hyphens and spaces → underscores), same as `db_name_from_save()` in `src/shared_css.py`
   - `DATABASE_URL=postgresql://...` → PostgreSQL
 - **Never** use `psql`, `source .venv/bin/activate`, or other approaches
 - **Always** use `.venv/bin/python3` directly (not `python3` or `source ... && python3`)
@@ -39,7 +41,7 @@ PYEOF
 - The active save and database name are tracked in `saves.postgresql.json` or `saves.sqlite.json`
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.
-  Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_")`.
+  Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_").replace(" ", "_")` (see `db_name_from_save` in `src/shared_css.py`).
 - **Never use magic numbers for OOTP enum values.** All fixed OOTP game schema constants
   (league IDs, level IDs, position codes, split IDs, role codes, result codes, etc.) are
   defined in `src/ootp_db_constants.py`. Import from there:
@@ -115,7 +117,7 @@ All dependencies go in `requirements.txt`:
 All configuration is via a `.env` file in the project root. A `.env.example` should be 
 created as a template. Never commit `.env`.
 ```
-# Use 'sqlite' for local SQLite files (db/<save>.db), or a full PostgreSQL URL
+# Use 'sqlite' for local SQLite files (db/<db_name>.db; same naming as PostgreSQL db_name), or a full PostgreSQL URL
 DATABASE_URL=sqlite
 # DATABASE_URL=postgresql://localhost
 
@@ -151,7 +153,7 @@ ootp-db/
   to this save if no active save is set yet.
 - Compare loaded CSV columns to `schema_snapshots/<db_name>.json` from the prior import; print a
   **Schema changes** summary (new/removed tables and columns), then refresh the snapshot.
-- Derive database name from save name (lowercase, hyphens → underscores)
+- Derive database name from save name (lowercase, hyphens/spaces → underscores)
 - Create the database if it doesn't already exist (SQLite: creates file; PostgreSQL: connects to `postgres` db with AUTOCOMMIT)
 - Connect via DATABASE_URL/<db_name> (or POSTGRES_URL for backward compat)
 - For each `.csv` file in the dump directory:
