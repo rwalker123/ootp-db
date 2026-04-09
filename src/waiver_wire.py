@@ -388,7 +388,7 @@ def _get_team_name(conn, team_id):
 
 # ─── HTML builders ────────────────────────────────────────────────────────────
 
-def _build_candidate_header(p, adv):
+def _build_candidate_header(p, adv, last_import, generated_at):
     pos_label = POS_MAP.get(int(p.get("position") or 0), "?")
     bats = BATS_MAP.get(int(p.get("bats") or 0), "?")
     throws = THROWS_MAP.get(int(p.get("throws") or 0), "?")
@@ -510,7 +510,7 @@ def _build_candidate_header(p, adv):
     <span>Service: <b>{svc_yrs:.1f}yr</b> ({arb})</span>
     <span>Injury Risk: <b style="color:{inj_color}">{inj_label}</b></span>
   </div>
-  <div class="import-ts">Waiver Claim Evaluator</div>
+  <div class="import-ts">Waiver Claim Evaluator &bull; Last DB import: {html.escape(last_import or "unknown")} &bull; Generated: {html.escape(generated_at)}</div>
 </div>"""
 
 
@@ -1382,8 +1382,10 @@ def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
     my_team_name = data.pop("_my_team_name")
 
     # Build HTML
+    last_import = get_last_import_time()
+    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     css = get_report_css("1200px")
-    header_html = _build_candidate_header(candidate, adv)
+    header_html = _build_candidate_header(candidate, adv, last_import, generated_at)
     ratings_html = _build_ratings_section(candidate)
     contract_html = _build_contract_section(candidate)
     adv_html = (
@@ -1413,6 +1415,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
   <meta name="ootp-args" content="{esc_first} {esc_last}">
   <meta name="ootp-args-display" content="">
   <meta name="ootp-save" content="{esc_save}">
+  <meta name="ootp-generated" content="{html.escape(generated_at)}">
   <title>{title}</title>
   <style>{css}</style>
 </head>
