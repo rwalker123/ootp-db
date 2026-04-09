@@ -79,7 +79,7 @@ if (Test-Path ".git") {
 # ---------------------------------------------------------------------------
 $serverRunning = $false
 try {
-    $null = Invoke-WebRequest -Uri "http://localhost:8000/status" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
+    $null = Invoke-WebRequest -Uri "http://localhost:8000/status" -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
     $serverRunning = $true
 } catch {}
 
@@ -120,16 +120,16 @@ $psi.UseShellExecute = $false
 $serverProcess = [System.Diagnostics.Process]::Start($psi)
 Write-Host "Starting server (PID $($serverProcess.Id))..."
 
-# Wait for server to be ready (up to 10s)
+# Wait for server to be ready (up to 20s)
 $ready = $false
-for ($i = 0; $i -lt 20; $i++) {
+for ($i = 0; $i -lt 40; $i++) {
     $serverProcess.Refresh()
     if ($serverProcess.HasExited) {
         Write-Host "X Server exited unexpectedly. Check for errors above."
         exit 1
     }
     try {
-        $null = Invoke-WebRequest -Uri "http://localhost:8000/status" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri "http://localhost:8000/status" -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
         $ready = $true
         break
     } catch {}
@@ -137,7 +137,7 @@ for ($i = 0; $i -lt 20; $i++) {
 }
 
 if (-not $ready) {
-    Write-Host "X Server did not become ready after 10s. Check for errors above."
+    Write-Host "X Server did not become ready after 20s. Check for errors above."
     Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
     exit 1
 }
