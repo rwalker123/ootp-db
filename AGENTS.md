@@ -42,6 +42,7 @@ PYEOF
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.
   Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_").replace(" ", "_")` (see `db_name_from_save` in `src/shared_css.py`).
+- **MCP (Cursor / Claude Desktop):** run `mcp_server.py` from the project root, or `./mcp-server.sh` / `mcp-server.bat` (venv + deps + same update check as web UI); tools `ootp_*` use the same read-only `get_engine` path. See README **Under the Hood → Model Context Protocol (MCP)**.
 - **Never use magic numbers for OOTP enum values.** All fixed OOTP game schema constants
   (league IDs, level IDs, position codes, split IDs, role codes, result codes, etc.) are
   defined in `src/ootp_db_constants.py`. Import from there:
