@@ -2,3 +2,4 @@ pandas
 sqlalchemy
 python-dotenv
 pre-commit
+mcp>=1.2.0

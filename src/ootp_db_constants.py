@@ -115,14 +115,19 @@ RESULT_HBP = 10
 # split_id constants
 # ---------------------------------------------------------------------------
 
-# --- Career player stat tables ---
-# (players_career_batting_stats, players_career_pitching_stats,
-#  players_career_fielding_stats)
-# split_id=0 does NOT exist in these tables.
-SPLIT_CAREER_OVERALL = 1     # all regular-season stats (real history + sim seasons)
+# --- Career batting & pitching (players_career_batting_stats, players_career_pitching_stats) ---
+# In standard CSV exports, split_id=0 does NOT appear. Overall regular-season career rows use
+# split_id=1 for all years (real history + simulated seasons combined).
+SPLIT_CAREER_OVERALL = 1     # overall regular season (only overall bucket for batting/pitching)
 SPLIT_CAREER_VS_LHP = 2      # batter vs LHP / pitcher vs LHB
 SPLIT_CAREER_VS_RHP = 3      # batter vs RHP / pitcher vs RHB
 SPLIT_CAREER_POSTSEASON = 21  # playoff stats
+
+# --- Career fielding (players_career_fielding_stats) only — NOT the same as batting/pitching ---
+# OOTP stores two disjoint era buckets (year ranges depend on the save). Both are needed for
+# all-time games/totals across real history + sim. Use IN (0, 1); do not assume career batting rules.
+SPLIT_CAREER_FIELDING_SIM_ERA = 0       # simulated-era bucket (e.g. current sim years in export)
+SPLIT_CAREER_FIELDING_HISTORICAL = 1    # historical bucket (pre-sim / prior-era rows in export)
 
 # --- Current-season team stat tables ---
 # (team_batting_stats, team_bullpen_pitching_stats, team_starting_pitching_stats,

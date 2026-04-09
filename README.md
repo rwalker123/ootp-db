@@ -25,6 +25,8 @@ OOTP exports your save as CSV files, which the importer loads into a local datab
   - [Discovered Saves](#discovered-saves)
   - [Ad-Hoc Query](#ad-hoc-query)
   - [Pre-Built Reports](#pre-built-reports)
+- [Under the Hood](#under-the-hood)
+  - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
 - [Manual Usage](#manual-usage)
 - [Claude Code Skills](#claude-code-skills)
   - [`/player-stats`](#player-stats-first-last)
@@ -183,6 +185,41 @@ Reports are saved as HTML files on disk, so they persist across sessions. When y
 
 
 ## Under the Hood
+
+### Model Context Protocol (MCP)
+
+The project includes a **read-only** [Model Context Protocol](https://modelcontextprotocol.io) server so you can query your OOTP database from **Claude Desktop** or other MCP clients. It provides tools such as `ootp_list_saves`, `ootp_run_sql`, `ootp_list_tables`, and `ootp_describe_table`, plus resources including `ootp://query-conventions` (high-level schema rules) and `ootp://schema-snapshot` (post-import column snapshot when available).
+
+Run from the **project root** (where `.env` and `saves.*.json` live):
+
+```bash
+.venv/bin/python mcp_server.py
+```
+
+Or use the launcher scripts (same venv/setup/update check as the web UI scripts):
+
+| Platform | Command |
+|----------|---------|
+| macOS / Linux | `./mcp-server.sh` |
+| Windows | `mcp-server.bat` or `.\mcp-server.ps1` |
+
+These start the **stdio** MCP server in the foreground (waiting on stdin). Many MCP clients launch `mcp_server.py` for you when the server is configured; use the launchers to verify the environment or to attach [MCP Inspector](https://github.com/modelcontextprotocol/inspector).
+
+**Example** `mcpServers` entry (replace with your absolute paths):
+
+```json
+{
+  "mcpServers": {
+    "ootp-db": {
+      "command": "/path/to/ootp-db/.venv/bin/python",
+      "args": ["/path/to/ootp-db/mcp_server.py"],
+      "cwd": "/path/to/ootp-db"
+    }
+  }
+}
+```
+
+Use **SQLite** or **PostgreSQL** the same way as the rest of the app (`DATABASE_URL` in `.env`). Run at least one import so the database and saves registry exist.
 
 ## Manual Usage
 

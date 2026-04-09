@@ -38,11 +38,9 @@ Claude Code skills (`.claude/skills/`) are the primary UX layer on top of the DB
 
 **Always filter `league_id = 203` for MLB** unless the user explicitly asks about minors.
 
-**`split_id` in player career stats** (`players_career_batting_stats`, `players_career_pitching_stats`):
-- `0` = simulated seasons, `1` = real historical seasons
-- **Always use `split_id IN (0, 1)` for overall career stats.** Using only `= 1` silently drops
-  every simulated season — a common and hard-to-notice bug.
-- `2` = vs LHP/LHB splits, `3` = vs RHP/RHB
+**`split_id` in player career tables** — rules **differ by table** (see `AGENTS.md`):
+- **`players_career_batting_stats` / `players_career_pitching_stats`:** `split_id = 1` = overall regular season (real + sim). **`split_id = 0` does not appear** in typical exports — use **`split_id = 1`** for career totals. `2` / `3` = vs L/R splits.
+- **`players_career_fielding_stats`:** OOTP uses **both** `0` and `1` as disjoint era buckets. For all-time fielding totals spanning both, use **`split_id IN (0, 1)`**; `1` alone can omit sim-era rows. Constants: `SPLIT_CAREER_FIELDING_SIM_ERA`, `SPLIT_CAREER_FIELDING_HISTORICAL` in `ootp_db_constants.py`.
 
 **Player quality vs trade value**:
 - Rank/compare by `player_ratings.rating_overall` (0–100 composite) — never `players_value.oa`
@@ -64,8 +62,8 @@ prior seasons in `_history` tables (`team_history_record`, etc.).
 | `player_ratings` | Computed 0-100 composite scores — **use for ranking players** |
 | `batter_advanced_stats` | xwoba, barrel%, hard hit%, wRC+, OPS+, FIP per player |
 | `pitcher_advanced_stats` | FIP, xFIP, K-BB%, xwOBA allowed per pitcher |
-| `players_career_batting_stats` | Year-by-year career batting (use `split_id IN (0,1)`) |
-| `players_career_pitching_stats` | Year-by-year career pitching |
+| `players_career_batting_stats` / `players_career_pitching_stats` | Career splits: overall = `split_id = 1` (no `0` in export) |
+| `players_career_fielding_stats` | All-time fielding: often `split_id IN (0, 1)` — see `AGENTS.md` |
 | `team_record` / `team_batting_stats` / `team_pitching_stats` | Current season team stats |
 
 `player_ratings` columns: `rating_overall`, `rating_offense`, `rating_defense`,

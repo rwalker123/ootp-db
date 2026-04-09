@@ -22,6 +22,8 @@ from config import (
 from ootp_db_constants import (
     MLB_LEAGUE_ID,
     POS_MAP, BATS_MAP, POS_STR_MAP,
+    SPLIT_CAREER_FIELDING_HISTORICAL,
+    SPLIT_CAREER_FIELDING_SIM_ERA,
 )
 from report_write import write_report_html, report_filename
 from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
@@ -253,14 +255,12 @@ def load_position_games(conn, player_ids):
     clause = ",".join(str(i) for i in player_ids)
     result = {pid: {"games": {}, "usage_pct": {}, "total_3yr_games": 0} for pid in player_ids}
     try:
-        # All-time games for eligibility.
-        # For players_career_fielding_stats: split_id=0 = sim seasons (2026+),
-        # split_id=1 = real historical seasons (pre-sim). Both needed for all-time totals.
+        # All-time games for eligibility (fielding: two era buckets — see AGENTS.md / ootp_db_constants).
         rows = conn.execute(text(f"""
             SELECT player_id, position, SUM(g) AS total_games
             FROM players_career_fielding_stats
             WHERE player_id IN ({clause})
-              AND split_id IN (0, 1)
+              AND split_id IN ({SPLIT_CAREER_FIELDING_SIM_ERA}, {SPLIT_CAREER_FIELDING_HISTORICAL})
             GROUP BY player_id, position
         """)).fetchall()
         for r in rows:
@@ -274,12 +274,12 @@ def load_position_games(conn, player_ids):
                 SELECT player_id, position, SUM(g) AS pos_games
                 FROM players_career_fielding_stats
                 WHERE player_id IN ({clause})
-                  AND split_id IN (0, 1)
+                  AND split_id IN ({SPLIT_CAREER_FIELDING_SIM_ERA}, {SPLIT_CAREER_FIELDING_HISTORICAL})
                   AND year >= (
                       SELECT MAX(year) - {CAREER_STATS_LOOKBACK_YEARS}
                       FROM players_career_fielding_stats AS sub
                       WHERE sub.player_id = players_career_fielding_stats.player_id
-                        AND sub.split_id IN (0, 1)
+                        AND sub.split_id IN ({SPLIT_CAREER_FIELDING_SIM_ERA}, {SPLIT_CAREER_FIELDING_HISTORICAL})
                   )
                 GROUP BY player_id, position
             ),

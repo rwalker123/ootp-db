@@ -42,6 +42,7 @@ PYEOF
   at the project root (engine-specific). Read the correct file based on `DATABASE_URL` in `.env`,
   or use `load_saves_registry()` from `src/shared_css.py`.
   Active save name: `registry["active"]`; DB name: `save_name.lower().replace("-", "_").replace(" ", "_")` (see `db_name_from_save` in `src/shared_css.py`).
+- **MCP (Cursor / Claude Desktop):** run `mcp_server.py` from the project root, or `./mcp-server.sh` / `mcp-server.bat` (venv + deps + same update check as web UI); tools `ootp_*` use the same read-only `get_engine` path. See README **Under the Hood → Model Context Protocol (MCP)**.
 - **Never use magic numbers for OOTP enum values.** All fixed OOTP game schema constants
   (league IDs, level IDs, position codes, split IDs, role codes, result codes, etc.) are
   defined in `src/ootp_db_constants.py`. Import from there:
@@ -407,16 +408,20 @@ view but may differ by 5 points on individual ratings.
 ### Notable Column Conventions
 
 #### Enum Values
-- `split_id` **in player career tables** (`players_career_batting_stats`, `players_career_pitching_stats`,
-  `players_career_fielding_stats`):
-  - **1 = overall regular season** — used for ALL seasons, both real history (pre-sim) and
-    simulated seasons. `split_id=0` does not exist in these tables. `split_id=1` alone gives
-    complete career totals. (Earlier docs incorrectly stated 0=sim, 1=real — verified wrong.)
-  - 2 = vs LHP (batting) / vs LHB (pitching), 3 = vs RHP / vs RHB, 21 = postseason
+- `split_id` **in player career tables** — **behavior differs by table** (OOTP export quirk; do not assume one rule for all three):
+  - **`players_career_batting_stats` and `players_career_pitching_stats`:**
+    - **`split_id = 1`** = overall regular season for **all** years (real history and simulated seasons **in one bucket**). In typical exports **`split_id = 0` does not appear** — use **`split_id = 1`** for full career batting/pitching totals.
+    - **`split_id = 2`** = vs LHP (batting) / vs LHB (pitching); **`3`** = vs RHP / vs RHB; **`21`** = postseason (when present).
     ```sql
-    AND split_id = 1         -- overall (all seasons: real history + sim)
+    AND split_id = 1         -- overall career batting/pitching (real + sim)
     AND split_id = 2         -- vs LHP/LHB splits only
     AND split_id = 3         -- vs RHP/RHB splits only
+    ```
+  - **`players_career_fielding_stats`** (different from batting/pitching):
+    - OOTP writes **two disjoint era buckets**, commonly **`split_id = 1`** (historical / pre-sim rows) and **`split_id = 0`** (sim-era rows). Year ranges depend on the save; the buckets do not overlap the same `(player_id, year, …)` row.
+    - For **all-time** fielding games or totals that must include **both** real history and sim, use **`split_id IN (0, 1)`**. Filtering only **`split_id = 1`** can **drop** all sim-era fielding lines. Import **`SPLIT_CAREER_FIELDING_SIM_ERA`** and **`SPLIT_CAREER_FIELDING_HISTORICAL`** from `ootp_db_constants` when you need named constants.
+    ```sql
+    AND split_id IN (0, 1)   -- all-time career fielding (both era buckets)
     ```
 - `split_id` **in team stats tables** (`team_batting_stats`, `team_pitching_stats`, etc.):
   - 0 = overall/current season

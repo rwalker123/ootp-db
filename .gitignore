@@ -14,3 +14,4 @@ saves.json
 saves.sqlite.json
 saves.postgresql.json
 schema_snapshots/
+.cursor/

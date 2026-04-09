@@ -1353,16 +1353,30 @@ class Handler(SimpleHTTPRequestHandler):
         if skill == "trade-targets":
             from trade_targets import generate_trade_targets_report
             _reg = _load_saves_registry()
-            _my_team_id = _reg.get("saves", {}).get(save, {}).get("my_team_id") or 10
+            _my_team_id = (
+                kw.get("my_team_id")
+                or _reg.get("saves", {}).get(save, {}).get("my_team_id")
+                or 10
+            )
+            # ootp-kwargs uses target_base_where; older callers may have used target_where
+            _target_base = kw.get("target_base_where") or kw.get("target_where", "1=1")
+            _offered = kw.get("offered_where", "1=1")
+            _oa_floor = kw.get("oa_floor")
+            _oa_ceil = kw.get("oa_ceil")
+            if _oa_floor is None or _oa_ceil is None:
+                raise ValueError(
+                    "trade-targets report is missing oa_floor/oa_ceil — regenerate the report once"
+                )
             path, _ = generate_trade_targets_report(
-                save, args,
-                offered_where=kw.get("offered_where", "1=1"),
-                target_where=kw.get("target_where", "1=1"),
-                my_team_id=_my_team_id,
+                save,
+                args,
+                _offered,
+                _target_base,
+                _oa_floor,
+                _oa_ceil,
+                _my_team_id,
                 mode=kw.get("mode", "offering"),
                 target_join=kw.get("target_join", ""),
-                order_by=order or "pr.rating_overall DESC",
-                limit=limit,
                 highlight=kw.get("highlight"),
             )
             return path
