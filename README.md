@@ -102,7 +102,7 @@ sudo -u postgres createuser --superuser $USER
 
 ## Setup
 
-Download and unzip: `https://github.com/rwalker123/ootp-db/archive/refs/heads/main.zip`
+Download and unzip: [main branch (ZIP)](https://github.com/rwalker123/ootp-db/archive/refs/heads/main.zip)
 
 > If you plan to contribute to the project, see [Contributing](#contributing) below for the fork-and-clone workflow instead.
 
