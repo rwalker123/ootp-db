@@ -3,7 +3,7 @@
 ## Project Overview
 
 A Python CLI that imports OOTP Baseball CSV dumps into PostgreSQL. Post-import analytics
-(`src/analytics.py`, `src/ratings.py`) compute advanced stats and composite player ratings.
+(`src/analytics.py`, `src/ratings/` via `python -m ratings` from `src/`) compute advanced stats and composite player ratings.
 Claude Code skills (`.claude/skills/`) are the primary UX layer on top of the DB.
 
 ---

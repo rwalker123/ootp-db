@@ -419,7 +419,7 @@ def platoon_score(player, hand):
     - hand="R" (opponent is RHP): use rating_now_rhp × confidence_rhp
     - no hand: return sort_score (rating_now × confidence, overall)
 
-    confidence_lhp/rhp encodes the PA-ramp from ratings.py using
+    confidence_lhp/rhp encodes the PA-ramp from the ratings package using
     PLATOON_LHP_PA_THRESHOLD / PLATOON_RHP_PA_THRESHOLD, so a player with
     6 PA vs LHP gets near-zero confidence and won't beat an established hitter.
     """
@@ -1237,7 +1237,7 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
         p["forced"] = False
 
     # Sort score: rating_now × confidence from player_ratings.
-    # Precomputed in ratings.py — no regression needed here.
+    # Precomputed in ratings.compute — no regression needed here.
     for p in batters:
         rating_now = p.get("rating_now")
         confidence = p.get("confidence")

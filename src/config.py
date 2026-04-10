@@ -1,6 +1,6 @@
 """Rating engine configuration — tunable constants.
 
-Edit this file to adjust scoring behaviour without touching ratings.py logic.
+Edit this file to adjust scoring behaviour without touching src/ratings/ compute logic.
 All values are project-wide defaults; individual skill calls can pass overrides.
 """
 
@@ -239,7 +239,7 @@ OOTP_RATING_SCALE_MAX = 80
 
 # ---------------------------------------------------------------------------
 # Hitter archetype classification thresholds
-# Applied in ratings.py classify_batter_archetype(); requires pa >= ARCHETYPE_MIN_PA.
+# Applied in ratings.queries.classify_batter_archetype(); requires pa >= ARCHETYPE_MIN_PA.
 # ---------------------------------------------------------------------------
 ARCHETYPE_MIN_PA = 50           # minimum PA before an archetype is assigned
 

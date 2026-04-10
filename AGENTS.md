@@ -24,7 +24,7 @@ PYEOF
 - **Never** hardcode a database URL — use `get_engine(save_name)` from `src/shared_css.py`,
   which reads `DATABASE_URL` from `.env` and routes to SQLite or PostgreSQL automatically.
   **`get_engine` is read-only** (SQLite `mode=ro`; Postgres `default_transaction_read_only=on`).
-  Import and derived-table jobs (`import.py`, `analytics.py`, `ratings.py`, etc.) use **`get_write_engine(save_name)`** instead.
+  Import and derived-table jobs (`import.py`, `analytics.py`, `ratings` package / `python -m ratings`, etc.) use **`get_write_engine(save_name)`** instead.
 - The active DB engine is configured via `DATABASE_URL` in `.env`:
   - `DATABASE_URL=sqlite` → SQLite files under `db/<db_name>.db`, where `db_name` is derived from the save name (lowercase; hyphens and spaces → underscores), same as `db_name_from_save()` in `src/shared_css.py`
   - `DATABASE_URL=postgresql://...` → PostgreSQL
@@ -61,7 +61,7 @@ PYEOF
 - **Only use column names documented in the schema below.** Do not guess or invent 
   column names. If unsure, check the schema section first.
 - **When ranking or listing players by quality, always use `player_ratings.rating_overall`**
-  (the composite 0–100 score computed by `src/ratings.py`) rather than `players_value.oa_rating`
+  (the composite 0–100 score computed by `src/ratings/` — run via `python -m ratings` from `src/`) rather than `players_value.oa_rating`
   or `players_value.oa` (OOTP's raw 20–80 scale). The `player_ratings` table also has
   per-dimension scores (`rating_offense`, `rating_defense`, etc.) and is pre-filtered to
   MLB-level players. See the Analytics Engine section for its full schema.
@@ -136,8 +136,22 @@ ootp-db/
 ├── .env.example
 ├── .gitignore
 └── src/
-    └── import.py
+    ├── import.py
+    ├── analytics.py
+    ├── shared_css.py
+    ├── config.py
+    ├── ootp_db_constants.py
+    └── ratings/          # example domain package (see “Domain packages” under Skill Architecture)
+        ├── __init__.py
+        ├── __main__.py
+        ├── compute.py
+        ├── constants.py
+        ├── grades.py
+        ├── queries.py
+        └── report.py
 ```
+
+Larger features that outgrow a single `src/<script>.py` file should follow the **ratings-style domain package** described in **Skill Architecture → Domain packages and module split (ratings model)** below.
 
 ## import.py Behavior
 - Accept a save name or path as a CLI argument (e.g. `My-Save-2026` or `/path/to/My-Save-2026.lg`)
@@ -605,6 +619,29 @@ def generate_<type>_report(save_name, ...):
 - CSS: use the shared `get_report_css()` from `src/shared_css.py` for visual consistency
 - Reports go under `PROJECT_ROOT / "reports" / "<type>/"`
 
+### Domain packages and module split (ratings model)
+
+When new Python work combines **batch / ETL** (derived tables, pandas, heavy merges), **per-request queries** (skills, MCP, server), and **HTML reports** (cache, templates), **do not** keep everything in one huge `src/<thing>.py`. Follow the layout used by **`src/ratings/`**:
+
+| Piece | Role | Typical module |
+|-------|------|----------------|
+| **Shared constants** | Maps, weight dicts, column names used by both batch and report/query paths | `constants.py` |
+| **Tiny shared helpers** | Letter grades, one-liners with no heavy imports | e.g. `grades.py` |
+| **Batch / compute** | Load frames, scoring, `to_sql`, CLI `main()` | `compute.py` |
+| **Query / skill API** | Read-only assembly for agents (names, focus modifiers, MCP helpers) | `queries.py` |
+| **Report** | Cache check, HTML generation, `write_report_html` | `report.py` |
+| **CLI** | `python -m <package>` from `src/` | `__main__.py` delegates to `compute.main()` (or equivalent) |
+
+**Conventions:**
+
+- **Package location:** `src/<domain>/` as a proper package (`__init__.py`). Do **not** place `src/<domain>.py` next to `src/<domain>/` — Python import ambiguity.
+- **Invocation:** Run batch jobs as `( cd src && python -m <domain> <save_name> )`. Wire `import.sh` / `import.bat` the same way as `ratings`.
+- **Public API:** Re-export stable names from `__init__.py` (`from domain import generate_*_report`, `query_*`, …) so `server.py`, MCP, and skills keep simple imports.
+- **Lazy imports:** If the package pulls in **pandas / numpy** only for batch compute, use **`__getattr__`** in `__init__.py` (see `src/ratings/__init__.py`) so `import <domain>` or `from <domain> import query_*` does **not** load the heavy submodule until something like `main` or `compute_*` is accessed.
+- **Cross-cutting config** stays in **`config.py`**, **`ootp_db_constants.py`**, and **`shared_css.py`**; do not introduce repo-wide folders like `src/compute/` or `src/reports/` that scatter one feature across layers.
+
+Legacy single-file scripts (`analytics.py`, `free_agents.py`, …) are fine until a change touches enough surface area to justify a package; **new large features** should start as or migrate to this model.
+
 ### `/free-agents` Highlight Columns
 
 The `generate_free_agents_report` function accepts a `highlight` parameter — a list of
@@ -631,9 +668,13 @@ Maximum 2 highlight columns per search. Column keys come from `player_ratings`.
 
 ## Player Ratings Table (`player_ratings`)
 
-Computed by `src/ratings.py` — run after `analytics.py`. Contains one row per MLB-level
+Computed by `src/ratings/` — run after `analytics.py`. Contains one row per MLB-level
 player with composite 0–100 ratings. **Use this table, not `players_value`, when ranking
 or comparing players.**
+
+```bash
+( cd src && ../.venv/bin/python3 -m ratings My-Save-2026 )
+```
 
 **Identity:** `player_id`, `first_name`, `last_name`, `team_abbr`, `position`, `age`,
 `oa` (OOTP overall), `pot` (OOTP potential), `player_type` ("batter" or "pitcher")

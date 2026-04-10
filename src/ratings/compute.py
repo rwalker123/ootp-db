@@ -1,25 +1,12 @@
-#!/usr/bin/env python3
-"""Player rating system for OOTP Baseball.
+"""Batch computation: build the player_ratings table (run after analytics)."""
 
-Computes composite 0-100 ratings for all MLB players by combining:
-- Advanced stats (from batter/pitcher_advanced_stats tables)
-- OOTP ratings (potential, fielding, running)
-- Personality traits (work ethic, intelligence, adaptability, leadership)
-- Injury proneness
-- Career trajectory trends
-
-Run after analytics.py:
-    python src/ratings.py My-Save-2026
-"""
-
-import json
 import sys
 import time
-from datetime import datetime
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
+
 from config import (
     BATTER_WEIGHT_BASERUNNING,
     BATTER_WEIGHT_CLUBHOUSE,
@@ -42,10 +29,6 @@ from config import (
     DEVELOPMENT_TRAIT_WEIGHT_INTELLIGENCE,
     DEVELOPMENT_TRAIT_WEIGHT_WORK_ETHIC,
     FIELDING_MIN_GAMES,
-    INJURY_DURABLE_MAX,
-    INJURY_FRAGILE_MAX,
-    INJURY_IRON_MAN_MAX,
-    INJURY_NORMAL_MAX,
     INJURY_OVERALL_DEDUCTION,
     INJURY_PRONE_THRESHOLD,
     IP_REGRESSION_THRESHOLD,
@@ -54,7 +37,6 @@ from config import (
     OFFENSE_WRC_WEIGHT,
     OFFENSE_XWOBA_WEIGHT,
     OOTP_MAX_BLEND_WEIGHT,
-    OOTP_RATING_SCALE_MAX,
     OOTP_RATING_SCALE_MIN,
     PA_REGRESSION_THRESHOLD,
     PITCHER_WEIGHT_CLUBHOUSE,
@@ -69,29 +51,20 @@ from config import (
     RELIEVER_G_TARGET,
     STARTER_IP_TARGET,
     STARTER_MIN_GS,
-    TRAIT_AVERAGE_MAX,
-    TRAIT_BELOW_AVG_MAX,
-    TRAIT_GOOD_MAX,
-    TRAIT_POOR_MAX,
-    WRC_CAP_HEADROOM,
-    LEAGUE_AVG_WRC,
     ELITE_WRC,
+    WRC_CAP_HEADROOM,
     WRC_SCORE_FLOOR,
     WRC_UNKNOWN_DEFAULT,
     SCORE_MAX,
     PERCENTILE_AVG,
     PLATOON_LHP_PA_THRESHOLD,
     PLATOON_RHP_PA_THRESHOLD,
-    ARCHETYPE_MIN_PA,
-    ARCHETYPE_SPEED_SB, ARCHETYPE_SPEED_XSLG_MAX, ARCHETYPE_SPEED_XBA_MIN, ARCHETYPE_SPEED_K_MAX,
-    ARCHETYPE_PATIENT_BB_MIN, ARCHETYPE_PATIENT_XWOBA_MIN, ARCHETYPE_PATIENT_XSLG_MIN,
-    ARCHETYPE_MASHER_BARREL_MIN, ARCHETYPE_MASHER_XSLG_MIN, ARCHETYPE_MASHER_K_MIN,
-    ARCHETYPE_CONTACT_K_MAX, ARCHETYPE_CONTACT_XBA_MIN, ARCHETYPE_CONTACT_XSLG_MAX,
-    ARCHETYPE_EMPTY_XBA_MIN, ARCHETYPE_EMPTY_XSLG_MAX, ARCHETYPE_EMPTY_BARREL_MAX,
 )
 from ootp_db_constants import (
-    MLB_LEAGUE_ID, MLB_LEVEL_ID,
-    POS_PITCHER, POS_CATCHER,
+    MLB_LEAGUE_ID,
+    MLB_LEVEL_ID,
+    POS_PITCHER,
+    POS_CATCHER,
     POS_FIRST_BASE as POS_1B,
     POS_SECOND_BASE as POS_2B,
     POS_THIRD_BASE as POS_3B,
@@ -99,1002 +72,24 @@ from ootp_db_constants import (
     POS_LEFT_FIELD as POS_LF,
     POS_CENTER_FIELD as POS_CF,
     POS_RIGHT_FIELD as POS_RF,
-    SPLIT_CAREER_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+    SPLIT_CAREER_OVERALL,
+    SPLIT_TEAM_PITCHING_OVERALL,
 )
-from report_write import write_report_html, report_filename
-from shared_css import (
-    db_name_from_save,
-    get_engine,
-    get_report_css,
-    get_reports_dir,
-    get_write_engine,
+from shared_css import get_write_engine
+
+from .constants import (
+    BATTER_WEIGHTS,
+    DP_SCALE,
+    LOW_DEFENSE_POS,
+    PITCHER_WEIGHTS,
+    POS_FIELD_COL,
+    PREMIUM_DEFENSE_POS,
+    SCALE_RANGE,
+    ZR_HALF_RANGE,
 )
-from sqlalchemy import text
+from .grades import letter_grade
 
-# Pre-computed scale range for (val - min) / range conversions.
-_SCALE_RANGE = OOTP_RATING_SCALE_MAX - OOTP_RATING_SCALE_MIN
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def _rating_slug(first_name, last_name, player_id, focus_modifiers=None):
-    slug = f"{first_name.lower()}_{last_name.lower()}_{player_id}"
-    if focus_modifiers:
-        mod_str = "_".join(sorted(m.lower().strip(",") for m in focus_modifiers))
-        slug = f"{slug}_{mod_str}"
-    return slug
-
-
-def find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers=None):
-    """Return the report path if it exists and is newer than the last import.
-
-    Returns the path string if the report is current, or None if it needs
-    to be (re)generated.
-    """
-    from sqlalchemy import text as sa_text
-
-    with engine.connect() as conn:
-        row = conn.execute(
-            sa_text("SELECT player_id FROM players WHERE first_name = :f AND last_name = :l"),
-            dict(f=first_name, l=last_name),
-        ).fetchone()
-        if not row:
-            return None
-        player_id = row[0]
-
-    args_key = {"focus": sorted(m.lower().strip(",") for m in focus_modifiers) if focus_modifiers else []}
-    report_path = PROJECT_ROOT / "reports" / save_name / "ratings" / report_filename(f"rating_{player_id}", args_key)
-
-    if not report_path.exists():
-        return None
-
-    if not LAST_IMPORT_PATH.exists():
-        return str(report_path)
-
-    report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
-    import_time = datetime.fromisoformat(LAST_IMPORT_PATH.read_text().strip())
-
-    if report_mtime >= import_time:
-        return str(report_path)
-
-    return None
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
-
-
-def classify_batter_archetype(adv):
-    """Classify a batter into one of five archetypes based on advanced stats.
-
-    Returns (label, color, description) or (None, None, None) if insufficient data.
-
-    Priority order (first match wins):
-      1. Speedster    — speed-first profile
-      2. Patient Slugger  — walks + real power
-      3. All-or-Nothing   — big power, high strikeouts
-      4. Contact Hitter   — contact-first, low K
-      5. Empty Average Bat — average without damage
-    """
-    if not adv:
-        return None, None, None
-    pa = adv.get("pa") or 0
-    if pa < ARCHETYPE_MIN_PA:
-        return None, None, None
-
-    xwoba   = adv.get("xwoba") or 0
-    xslg    = adv.get("xslg") or 0
-    xba     = adv.get("xba") or 0
-    xbacon  = adv.get("xbacon") or 0
-    barrel  = adv.get("barrel_pct") or 0
-    bb_pct  = adv.get("bb_pct") or 0
-    k_pct   = adv.get("k_pct") or 0
-    sb      = adv.get("sb") or 0
-
-    # 1. Speedster / Table-Setter
-    if (sb >= ARCHETYPE_SPEED_SB
-            and xslg < ARCHETYPE_SPEED_XSLG_MAX
-            and (xba >= ARCHETYPE_SPEED_XBA_MIN or k_pct < ARCHETYPE_SPEED_K_MAX)):
-        return ("Speedster", "#1a6b8a",
-                f"Speed-first profile: {int(sb)} SB, low power (xSLG {xslg:.3f})")
-
-    # 2. Patient Slugger
-    if (bb_pct >= ARCHETYPE_PATIENT_BB_MIN
-            and xwoba >= ARCHETYPE_PATIENT_XWOBA_MIN
-            and xslg >= ARCHETYPE_PATIENT_XSLG_MIN):
-        return ("Patient Slugger", "#1a7a1a",
-                f"High BB% ({bb_pct*100:.1f}%), elite xwOBA ({xwoba:.3f}), strong xSLG ({xslg:.3f})")
-
-    # 3. All-or-Nothing Masher
-    if (barrel >= ARCHETYPE_MASHER_BARREL_MIN
-            and xslg >= ARCHETYPE_MASHER_XSLG_MIN
-            and k_pct >= ARCHETYPE_MASHER_K_MIN):
-        return ("All-or-Nothing", "#8a4a1a",
-                f"Big power (Barrel {barrel*100:.1f}%, xSLG {xslg:.3f}) but high K% ({k_pct*100:.1f}%)")
-
-    # 4. Contact Hitter
-    if (k_pct < ARCHETYPE_CONTACT_K_MAX
-            and xba >= ARCHETYPE_CONTACT_XBA_MIN
-            and xslg < ARCHETYPE_CONTACT_XSLG_MAX):
-        return ("Contact Hitter", "#2266cc",
-                f"Low K% ({k_pct*100:.1f}%), strong xBA ({xba:.3f}), contact-first approach")
-
-    # 5. Empty Average Bat
-    if (xba >= ARCHETYPE_EMPTY_XBA_MIN
-            and xslg < ARCHETYPE_EMPTY_XSLG_MAX
-            and barrel < ARCHETYPE_EMPTY_BARREL_MAX):
-        return ("Empty Average", "#888888",
-                f"Decent xBA ({xba:.3f}) but weak xSLG ({xslg:.3f}), little damage on contact")
-
-    return None, None, None
-
-
-def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
-    """Query and compute all data needed for a player rating report.
-
-    Returns a complete dict with all values needed by generate_rating_report
-    and MCP tools, or None if the player is not found.
-    Does NOT perform a cache check.
-    """
-    engine = get_engine(save_name)
-
-    with engine.connect() as conn:
-        from sqlalchemy import text as sa_text
-
-        _rating_sql = (
-            "SELECT pr.player_id, pr.first_name, pr.last_name, pr.team_abbr, pr.position, "
-            "pr.age, pr.oa, pr.pot, pr.player_type, pr.rating_overall, "
-            "pr.rating_offense, pr.rating_contact_quality, pr.rating_discipline, "
-            "pr.rating_defense, pr.rating_potential, pr.rating_durability, "
-            "pr.rating_development, pr.rating_clubhouse, pr.rating_baserunning, "
-            "pr.flag_injury_risk, pr.flag_leader, pr.flag_high_ceiling, "
-            "pr.wrc_plus, pr.war, pr.prone_overall, "
-            "pr.rating_now, pr.rating_ceiling, pr.confidence, "
-            "p.bats, p.throws, "
-            "p.prone_leg, p.prone_back, p.prone_arm, "
-            "p.personality_work_ethic, p.personality_intelligence, p.personality_leader, "
-            "p.personality_greed, p.personality_loyalty, p.personality_play_for_winner"
-        )
-        _rating_from = (
-            " FROM player_ratings pr "
-            "JOIN players p ON p.player_id = pr.player_id "
-            "WHERE pr.first_name = :first AND pr.last_name = :last"
-        )
-        try:
-            row = conn.execute(sa_text(
-                _rating_sql + ", p.personality_adaptability " + _rating_from
-            ), dict(first=first_name, last=last_name)).fetchone()
-        except Exception:
-            row = conn.execute(sa_text(_rating_sql + _rating_from), dict(first=first_name, last=last_name)).fetchone()
-
-        if not row:
-            return None
-
-        vals = list(row._mapping.values()) if hasattr(row, "_mapping") else list(row)
-        adaptability = None
-        if len(vals) == 40:
-            adaptability = vals.pop()
-        (player_id, first, last, team_abbr, position, age, oa, pot, player_type,
-         rating_overall, r_offense, r_contact, r_discipline, r_defense, r_potential,
-         r_durability, r_development, r_clubhouse, r_baserunning,
-         flag_injury, flag_leader_val, flag_ceiling,
-         wrc_plus_or_fip, war, prone_overall,
-         rating_now, rating_ceiling, confidence,
-         bats, throws, prone_leg, prone_back, prone_arm,
-         work_ethic, intelligence, leader, greed, loyalty, play_for_winner) = vals
-
-        # Position rank by Performance Rating (rating_now)
-        rank_row = conn.execute(sa_text(
-            "SELECT COUNT(*)+1 FROM player_ratings WHERE position = :pos AND rating_now > :r"
-        ), dict(pos=position, r=rating_now)).fetchone()
-        total_row = conn.execute(sa_text(
-            "SELECT COUNT(*) FROM player_ratings WHERE position = :pos"
-        ), dict(pos=position)).fetchone()
-        rank = int(rank_row[0])
-        rank_total = int(total_row[0])
-
-        # Advanced stats for archetype classification (batters only)
-        adv_row = conn.execute(sa_text(
-            "SELECT pa, xwoba, xslg, xba, xbacon, barrel_pct, bb_pct, k_pct, sb "
-            "FROM batter_advanced_stats WHERE player_id = :pid"
-        ), dict(pid=player_id)).fetchone()
-        adv_for_archetype = dict(zip(
-            ("pa", "xwoba", "xslg", "xba", "xbacon", "barrel_pct", "bb_pct", "k_pct", "sb"),
-            adv_row
-        )) if adv_row else None
-
-    is_pitcher = (player_type == "pitcher")
-    archetype_label, archetype_color, archetype_desc = (
-        (None, None, None) if is_pitcher
-        else classify_batter_archetype(adv_for_archetype)
-    )
-
-    # Determine weights
-    pos_map = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
-    bats_map = {1: "R", 2: "L", 3: "S"}
-    throws_map = {1: "R", 2: "L"}
-    pos_name = pos_map.get(position, str(position))
-    bats_str = bats_map.get(bats, "?")
-    throws_str = throws_map.get(throws, "?")
-
-    is_pitcher = (player_type == "pitcher")
-
-    if is_pitcher:
-        base_weights = dict(
-            offense=PITCHER_WEIGHT_RUN_PREVENTION,
-            contact_quality=PITCHER_WEIGHT_CONTACT_SUPPRESSION,
-            discipline=PITCHER_WEIGHT_DOMINANCE,
-            defense=PITCHER_WEIGHT_COMMAND,
-            potential=PITCHER_WEIGHT_POTENTIAL,
-            durability=PITCHER_WEIGHT_DURABILITY,
-            clubhouse=PITCHER_WEIGHT_CLUBHOUSE,
-            baserunning=PITCHER_WEIGHT_ROLE_VALUE,
-        )
-        component_labels = [
-            ("offense", "Run Prevention"),
-            ("contact_quality", "Contact Suppression"),
-            ("discipline", "Dominance"),
-            ("defense", "Command"),
-            ("durability", "Durability"),
-            ("baserunning", "Role Value"),
-            ("potential", "Potential"),
-            ("clubhouse", "Clubhouse"),
-        ]
-    else:
-        base_weights = dict(BATTER_WEIGHTS)
-        component_labels = [
-            ("offense", "Offense"),
-            ("contact_quality", "Contact Quality"),
-            ("discipline", "Discipline"),
-            ("defense", "Defense"),
-            ("durability", "Durability"),
-            ("baserunning", "Baserunning"),
-            ("potential", "Potential"),
-            ("clubhouse", "Clubhouse"),
-        ]
-
-    scores = dict(
-        offense=r_offense, contact_quality=r_contact, discipline=r_discipline,
-        defense=r_defense, potential=r_potential, durability=r_durability,
-        development=r_development, clubhouse=r_clubhouse, baserunning=r_baserunning,
-    )
-
-    # Map position keywords to position numbers so we can recompute defense
-    # at the correct position when a position modifier is given.
-    POS_KEYWORD_MAP = {
-        "first": POS_1B, "1b": POS_1B,
-        "second": POS_2B, "2b": POS_2B,
-        "third": POS_3B, "3b": POS_3B,
-        "shortstop": POS_SS, "ss": POS_SS,
-        "catcher": POS_CATCHER, "catching": POS_CATCHER,
-        "left": POS_LF, "lf": POS_LF,
-        "center": POS_CF, "cf": POS_CF,
-        "right": POS_RF, "rf": POS_RF,
-    }
-
-    if focus_modifiers and not is_pitcher:
-        target_pos = next(
-            (POS_KEYWORD_MAP[m.lower().strip(",")] for m in focus_modifiers
-             if m.lower().strip(",") in POS_KEYWORD_MAP),
-            None
-        )
-        if target_pos is not None:
-            # Recompute defense for the target position.
-            # Show the RAW fielding score (no positional multiplier) in the breakdown
-            # so users see actual fielding quality at that position.
-            # Move the multiplier into base_weights["defense"] instead so the
-            # composite rating calculation is unchanged.
-            with engine.connect() as conn:
-                from sqlalchemy import text as sa_text
-                field_row = conn.execute(sa_text(
-                    "SELECT * FROM players_fielding WHERE player_id = :pid"
-                ), dict(pid=player_id)).fetchone()
-                if field_row:
-                    field_dict = dict(zip(field_row._mapping.keys(), field_row))
-                    pos_col = POS_FIELD_COL.get(target_pos)
-                    if pos_col and pos_col in field_dict:
-                        field_rating = field_dict.get(pos_col) or 0
-                        raw_score = min(100.0, max(0.0, (field_rating - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)) if field_rating > 0 else 50.0
-                        scores["defense"] = raw_score
-                        # Shift positional multiplier into the weight
-                        if target_pos in PREMIUM_DEFENSE_POS:
-                            base_weights["defense"] = min(base_weights["defense"] * DEFENSE_PREMIUM_MULTIPLIER, 0.95)
-                        elif target_pos in LOW_DEFENSE_POS:
-                            base_weights["defense"] *= DEFENSE_BAT_FIRST_MULTIPLIER
-
-    # Focus modifier keywords → (component, boost_amount)
-    # Standard boost: 0.15 | Heavier bat-first positions: 0.22 | DH (pure hitter): 0.35
-    focus_map = {
-        "defense": ("defense", 0.15), "fielding": ("defense", 0.15),
-        "power": ("contact_quality", 0.15), "contact": ("contact_quality", 0.15),
-        "upside": ("potential", 0.15), "potential": ("potential", 0.15),
-        "durability": ("durability", 0.15),
-        "discipline": ("discipline", 0.15),
-        "offense": ("offense", 0.15), "hitting": ("offense", 0.15),
-        "speed": ("baserunning", 0.15), "baserunning": ("baserunning", 0.15),
-        "development": ("potential", 0.15), "work": ("potential", 0.15), "ethic": ("potential", 0.15),
-        "adaptability": ("potential", 0.15), "iq": ("potential", 0.15),
-        "clubhouse": ("clubhouse", 0.15), "leadership": ("clubhouse", 0.15),
-        "dominance": ("discipline", 0.15), "strikeouts": ("discipline", 0.15),
-        "command": ("defense", 0.15), "control": ("defense", 0.15),
-        # Position names — boost reflects positional value tiers
-        # Heavy bat emphasis: 1B, LF
-        "first": ("offense", 0.22), "1b": ("offense", 0.22),
-        "left": ("offense", 0.22), "lf": ("offense", 0.22),
-        # Standard bat-first: 3B, RF, generic OF
-        "third": ("offense", 0.15), "3b": ("offense", 0.15),
-        "right": ("offense", 0.15), "rf": ("offense", 0.15),
-        "outfield": ("offense", 0.15), "of": ("offense", 0.15),
-        # DH: pure hitter, defense not a factor
-        "dh": ("offense", 0.35), "designated": ("offense", 0.35),
-        # Defense-first: SS, C
-        "shortstop": ("defense", 0.15), "ss": ("defense", 0.15),
-        "catcher": ("defense", 0.15), "catching": ("defense", 0.15),
-        # Balanced, defense slightly favored: 2B, CF
-        "second": ("defense", 0.15), "2b": ("defense", 0.15),
-        "center": ("defense", 0.15), "cf": ("defense", 0.15),
-        # "base", "field", "hitter" are filler words — not mapped
-    }
-
-    weights = dict(base_weights)
-    adjusted = False
-    adj_rating = rating_overall
-
-    if focus_modifiers:
-        for mod in focus_modifiers:
-            mod_lower = mod.lower().strip(",")
-            entry = focus_map.get(mod_lower)
-            if entry:
-                component, boost = entry
-                if component in weights:
-                    adjusted = True
-                    others = [k for k in weights if k != component]
-                    total_others = sum(weights[k] for k in others)
-                    if total_others > 0:
-                        for k in others:
-                            weights[k] -= boost * (weights[k] / total_others)
-                    weights[component] += boost
-
-        if adjusted:
-            adj_rating = sum(scores[k] * weights[k] for k in weights)
-            adj_rating = float(max(0, min(100, adj_rating)))
-
-    def lg(score):
-        return letter_grade(score)
-
-    final_rating = adj_rating if adjusted else rating_overall
-
-    # Durability labels
-    def injury_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= 25:
-            return "Iron Man"
-        if v <= 75:
-            return "Durable"
-        if v <= 125:
-            return "Normal"
-        if v <= 174:
-            return "Fragile"
-        return "Wrecked"
-
-    def injury_color(val):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if v <= 75:
-            return "#1a7a1a"
-        if v <= 125:
-            return "#cc7700"
-        return "#cc2222"
-
-    # Personality labels
-    def trait_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= 50:
-            return "Poor"
-        if v <= 100:
-            return "Below Avg"
-        if v <= 130:
-            return "Average"
-        if v <= 160:
-            return "Good"
-        return "Elite"
-
-    def trait_color(val, invert=False):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if invert:
-            if v >= 161:
-                return "#cc2222"
-            if v >= 131:
-                return "#cc7700"
-            return "#1a7a1a"
-        if v >= 161:
-            return "#1a7a1a"
-        if v >= 131:
-            return "#4a9a2a"
-        if v >= 101:
-            return "#888"
-        return "#cc7700"
-
-    def bar_html(score):
-        w = int(max(0, min(100, score)))
-        cls = "bar-green" if score >= 70 else "bar-yellow" if score >= 40 else "bar-red"
-        return f'<div class="bar-bg"><div class="bar-fill {cls}" style="width:{w}%"></div></div>'
-
-    def _rating_bg(score):
-        grade = lg(score)
-        if grade in ("A+", "A"):
-            return "#1a7a1a"
-        if grade in ("B+", "B"):
-            return "#2266cc"
-        if grade in ("C+", "C"):
-            return "#cc7700"
-        return "#cc2222"
-
-    def grade_badge(score):
-        grade = lg(score)
-        bg = _rating_bg(score)
-        return (f'<span style="background:{bg};color:white;border-radius:4px;'
-                f'font-weight:bold;font-size:13px;padding:2px 8px">{grade} {score:.1f}</span>')
-
-    oa_disp = int(oa) if oa is not None else 0
-    pot_disp = int(pot) if pot is not None else 0
-    age_disp = int(age) if age is not None else 0
-    prone_overall_v = int(prone_overall) if prone_overall is not None else 100
-    prone_leg_v = int(prone_leg) if prone_leg is not None else 100
-    prone_back_v = int(prone_back) if prone_back is not None else 100
-    prone_arm_v = int(prone_arm) if prone_arm is not None else 100
-    we_v = int(work_ethic) if work_ethic is not None else 100
-    iq_v = int(intelligence) if intelligence is not None else 100
-    adapt_v = int(adaptability) if adaptability is not None else 100
-    leader_v = int(leader) if leader is not None else 100
-    greed_v = int(greed) if greed is not None else 100
-    loyalty_v = int(loyalty) if loyalty is not None else 100
-    pfw_v = int(play_for_winner) if play_for_winner is not None else 100
-
-    key_stat_label = "FIP" if is_pitcher else "wRC+"
-    key_stat_val = f"{wrc_plus_or_fip:.2f}" if is_pitcher else str(int(wrc_plus_or_fip)) if wrc_plus_or_fip is not None else "—"
-    war_val = f"{float(war):.1f}" if war is not None else "—"
-
-    return dict(
-        player_id=player_id,
-        first_name=first,
-        last_name=last,
-        team_abbr=team_abbr,
-        position=position,
-        pos_name=pos_name,
-        age=age_disp,
-        oa=oa_disp,
-        pot=pot_disp,
-        player_type=player_type,
-        is_pitcher=is_pitcher,
-        rating_overall=rating_overall,
-        rating_now=float(rating_now) if rating_now is not None else 0.0,
-        rating_ceiling=float(rating_ceiling) if rating_ceiling is not None else 0.0,
-        confidence=float(confidence) if confidence is not None else 0.0,
-        scores=scores,
-        weights=weights,
-        component_labels=component_labels,
-        adjusted=adjusted,
-        adj_rating=adj_rating,
-        final_rating=final_rating,
-        rank=rank,
-        rank_total=rank_total,
-        bats_str=bats_str,
-        throws_str=throws_str,
-        oa_disp=oa_disp,
-        pot_disp=pot_disp,
-        age_disp=age_disp,
-        prone_overall_v=prone_overall_v,
-        prone_leg_v=prone_leg_v,
-        prone_back_v=prone_back_v,
-        prone_arm_v=prone_arm_v,
-        we_v=we_v,
-        iq_v=iq_v,
-        adapt_v=adapt_v,
-        leader_v=leader_v,
-        greed_v=greed_v,
-        loyalty_v=loyalty_v,
-        pfw_v=pfw_v,
-        flag_injury_risk=bool(flag_injury),
-        flag_leader=bool(flag_leader_val),
-        flag_high_ceiling=bool(flag_ceiling),
-        key_stat_label=key_stat_label,
-        key_stat_val=key_stat_val,
-        war_val=war_val,
-        wrc_plus=None if is_pitcher else wrc_plus_or_fip,
-        fip=wrc_plus_or_fip if is_pitcher else None,
-        war=war,
-        focus_modifiers=focus_modifiers,
-        archetype_label=archetype_label,
-        archetype_color=archetype_color,
-        archetype_desc=archetype_desc,
-    )
-
-
-def generate_rating_report(save_name, first_name, last_name, focus_modifiers=None):
-    """Generate (or return cached) a player rating HTML report.
-
-    focus_modifiers: list of strings like ["defense", "power"] or None.
-
-    Returns (path_str, data_dict) where data_dict is None on a cache hit.
-    """
-    engine = get_write_engine(save_name)
-
-    existing = find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers)
-    if existing:
-        return existing, None
-
-    last_import = get_last_import_time()
-    generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-    data = query_player_rating(save_name, first_name, last_name, focus_modifiers)
-    if data is None:
-        print(f"Player not found: {first_name} {last_name}")
-        sys.exit(1)
-
-    # Extract all values from data dict for HTML generation
-    player_id = data["player_id"]
-    first = data["first_name"]
-    last = data["last_name"]
-    team_abbr = data["team_abbr"]
-    pos_name = data["pos_name"]
-    age_disp = data["age_disp"]
-    oa_disp = data["oa_disp"]
-    pot_disp = data["pot_disp"]
-    player_type = data["player_type"]
-    is_pitcher = data["is_pitcher"]
-    rating_overall = data["rating_overall"]
-    rating_now = data["rating_now"]
-    rating_ceiling = data["rating_ceiling"]
-    confidence = data["confidence"]
-    scores = data["scores"]
-    weights = data["weights"]
-    component_labels = data["component_labels"]
-    adjusted = data["adjusted"]
-    adj_rating = data["adj_rating"]
-    final_rating = data["final_rating"]
-    rank = data["rank"]
-    rank_total = data["rank_total"]
-    bats_str = data["bats_str"]
-    throws_str = data["throws_str"]
-    prone_overall_v = data["prone_overall_v"]
-    prone_leg_v = data["prone_leg_v"]
-    prone_back_v = data["prone_back_v"]
-    prone_arm_v = data["prone_arm_v"]
-    we_v = data["we_v"]
-    iq_v = data["iq_v"]
-    adapt_v = data["adapt_v"]
-    leader_v = data["leader_v"]
-    greed_v = data["greed_v"]
-    loyalty_v = data["loyalty_v"]
-    pfw_v = data["pfw_v"]
-    flag_injury = data["flag_injury_risk"]
-    flag_leader_val = data["flag_leader"]
-    flag_ceiling = data["flag_high_ceiling"]
-    key_stat_label = data["key_stat_label"]
-    key_stat_val = data["key_stat_val"]
-    war_val = data["war_val"]
-    archetype_label = data.get("archetype_label")
-    archetype_color = data.get("archetype_color")
-    archetype_desc = data.get("archetype_desc")
-
-    def lg(score):
-        return letter_grade(score)
-
-    def bar_html(score):
-        w = int(max(0, min(100, score)))
-        cls = "bar-green" if score >= 70 else "bar-yellow" if score >= 40 else "bar-red"
-        return f'<div class="bar-bg"><div class="bar-fill {cls}" style="width:{w}%"></div></div>'
-
-    def injury_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= INJURY_IRON_MAN_MAX:
-            return "Iron Man"
-        if v <= INJURY_DURABLE_MAX:
-            return "Durable"
-        if v <= INJURY_NORMAL_MAX:
-            return "Normal"
-        if v <= INJURY_FRAGILE_MAX:
-            return "Fragile"
-        return "Wrecked"
-
-    def injury_color(val):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if v <= INJURY_DURABLE_MAX:
-            return "#1a7a1a"
-        if v <= INJURY_NORMAL_MAX:
-            return "#cc7700"
-        return "#cc2222"
-
-    def trait_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= TRAIT_POOR_MAX:
-            return "Poor"
-        if v <= TRAIT_BELOW_AVG_MAX:
-            return "Below Avg"
-        if v <= TRAIT_AVERAGE_MAX:
-            return "Average"
-        if v <= TRAIT_GOOD_MAX:
-            return "Good"
-        return "Elite"
-
-    def trait_color(val, invert=False):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if invert:
-            if v > TRAIT_GOOD_MAX:
-                return "#cc2222"
-            if v > TRAIT_AVERAGE_MAX:
-                return "#cc7700"
-            return "#1a7a1a"
-        if v > TRAIT_GOOD_MAX:
-            return "#1a7a1a"
-        if v > TRAIT_AVERAGE_MAX:
-            return "#4a9a2a"
-        if v > TRAIT_BELOW_AVG_MAX:
-            return "#888"
-        return "#cc7700"
-
-    adj_note = ""
-    if adjusted:
-        adj_note = (f'<div class="section"><div class="callout">'
-                    f'Focus: <b>{", ".join(focus_modifiers)}</b> — '
-                    f'Default: {rating_overall:.1f} ({lg(rating_overall)}) &rarr; '
-                    f'Adjusted: {adj_rating:.1f} ({lg(adj_rating)})</div></div>')
-
-    flag_pills = ""
-    if archetype_label:
-        title = f' title="{archetype_desc}"' if archetype_desc else ""
-        flag_pills += (f'<span class="flag"{title} style="background:{archetype_color}20;'
-                       f'color:{archetype_color};border:1px solid {archetype_color}60">'
-                       f'{archetype_label}</span>')
-    if flag_injury:
-        flag_pills += '<span class="flag flag-red">⚠ Injury Risk</span>'
-    if flag_leader_val:
-        flag_pills += '<span class="flag flag-yellow">🏆 Leader</span>'
-    if flag_ceiling:
-        flag_pills += '<span class="flag flag-blue">📈 High Ceiling</span>'
-    flags_html = f'<div class="flags">{flag_pills}</div>' if flag_pills else ""
-
-    _trade_only_tip = (
-        '<span style="cursor:help;color:#7f8c8d;font-size:11px;margin-left:3px;vertical-align:super" '
-        'title="Trade only">†</span>'
-    )
-    sub_rows = ""
-    for key, label in component_labels:
-        sc = scores[key]
-        w_cell = f"{weights[key] * 100:.0f}%"
-        label_html = label
-        if key in ("potential", "clubhouse"):
-            label_html = f"{label}{_trade_only_tip}"
-        sub_rows += (f'<tr><td class="left">{label_html}</td>'
-                     f'<td>{w_cell}</td>'
-                     f'<td class="score-num">{sc:.1f}</td>'
-                     f'<td>{bar_html(sc)}</td></tr>')
-
-    # Personality table rows
-    inj_rows = (
-        f'<tr><td class="left">Overall</td><td>{prone_overall_v}</td>'
-        f'<td style="color:{injury_color(prone_overall_v)};font-weight:bold">{injury_label(prone_overall_v)}</td></tr>'
-        f'<tr><td class="left">Leg</td><td>{prone_leg_v}</td>'
-        f'<td style="color:{injury_color(prone_leg_v)};font-weight:bold">{injury_label(prone_leg_v)}</td></tr>'
-        f'<tr><td class="left">Back</td><td>{prone_back_v}</td>'
-        f'<td style="color:{injury_color(prone_back_v)};font-weight:bold">{injury_label(prone_back_v)}</td></tr>'
-        f'<tr><td class="left">Arm</td><td>{prone_arm_v}</td>'
-        f'<td style="color:{injury_color(prone_arm_v)};font-weight:bold">{injury_label(prone_arm_v)}</td></tr>'
-    )
-    dev_rows = (
-        f'<tr><td class="left">Work Ethic</td><td>{we_v}</td>'
-        f'<td style="color:{trait_color(we_v)};font-weight:bold">{trait_label(we_v)}</td></tr>'
-        f'<tr><td class="left">Baseball IQ</td><td>{iq_v}</td>'
-        f'<td style="color:{trait_color(iq_v)};font-weight:bold">{trait_label(iq_v)}</td></tr>'
-        f'<tr><td class="left">Adaptability</td><td>{adapt_v}</td>'
-        f'<td style="color:{trait_color(adapt_v)};font-weight:bold">{trait_label(adapt_v)}</td></tr>'
-    )
-    club_rows = (
-        f'<tr><td class="left">Leadership</td><td>{leader_v}</td>'
-        f'<td style="color:{trait_color(leader_v)};font-weight:bold">{trait_label(leader_v)}</td></tr>'
-        f'<tr><td class="left">Greed</td><td>{greed_v}</td>'
-        f'<td style="color:{trait_color(greed_v, invert=True)};font-weight:bold">{trait_label(greed_v)}</td></tr>'
-        f'<tr><td class="left">Loyalty</td><td>{loyalty_v}</td>'
-        f'<td style="color:{trait_color(loyalty_v)};font-weight:bold">{trait_label(loyalty_v)}</td></tr>'
-        f'<tr><td class="left">Play for Winner</td><td>{pfw_v}</td>'
-        f'<td style="color:{trait_color(pfw_v)};font-weight:bold">{trait_label(pfw_v)}</td></tr>'
-    )
-
-    _focus_str = (' ' + ' '.join(focus_modifiers)) if focus_modifiers else ''
-    _focus_display = ("Focus: " + ", ".join(focus_modifiers)) if focus_modifiers else ""
-    _ootp_kwargs_esc = json.dumps(dict(first=first_name, last=last_name, focus_modifiers=focus_modifiers)).replace('"', '&quot;')
-    _ootp_meta = (
-        '<meta name="ootp-skill" content="player-rating">'
-        f'<meta name="ootp-args" content="{first_name} {last_name}{_focus_str}">'
-        f'<meta name="ootp-args-display" content="{_focus_display}">'
-        f'<meta name="ootp-save" content="{save_name}">'
-        f'<meta name="ootp-kwargs" content="{_ootp_kwargs_esc}">'
-    )
-
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{first} {last} - Rating Report</title>
-{_ootp_meta}
-<style>{get_report_css()}</style></head><body>
-<div class="container">
-
-<div class="page-header">
-  <div class="header-top">
-    <div>
-      <div class="player-name">{first} {last}</div>
-      <div class="player-meta">{team_abbr} &bull; {pos_name} &bull; Age {age_disp} &bull; B/T: {bats_str}/{throws_str}</div>
-      <div style="margin-top:6px">
-        <span class="badge badge-oa">OA {oa_disp}</span>
-        <span class="badge badge-pot">POT {pot_disp}</span>
-      </div>
-      {flags_html}
-    </div>
-    <div class="grade-badge">{lg(rating_now)}</div>
-  </div>
-  <div class="rating-bar-wrap">
-    <span class="rating-label">Performance Rating</span>
-    <span class="rating-val">{rating_now:.1f}</span>
-    {'&nbsp;<span style="color:#cc7700;font-size:12px" title="Limited statistical sample — Performance Rating may not reflect true ability">⚠ Limited sample</span>' if confidence < 0.8 else ''}
-    <span class="oa-pot">&nbsp;&bull;&nbsp;#{rank} of {rank_total} {pos_name}</span>
-  </div>
-  <div class="rating-bar-wrap" style="margin-top:4px">
-    <span style="font-size:12px;color:#888">Trade/Contract Rating:&nbsp;</span>
-    <span style="font-size:14px;color:#aaa;font-weight:600">{final_rating:.1f}</span>
-    <span style="font-size:12px;color:#666;margin-left:4px">(age-adjusted)</span>
-  </div>
-  <div class="import-ts">Generated: {generated_at} &bull; Last DB import: {last_import or "unknown"}</div>
-</div>
-
-{adj_note}
-
-<div class="section">
-  <div class="section-title">Analysis</div>
-<!-- ANALYSIS:START --><!-- RATING_SUMMARY --><!-- ANALYSIS:END -->
-</div>
-
-<div class="section">
-  <div class="section-title">Rating Breakdown</div>
-  <table>
-  <tr><th class="left">Component</th><th>Weight</th><th>Score</th><th>Bar</th></tr>
-  {sub_rows}
-  <tr style="border-top:2px solid #2c2c3e">
-  <td class="left"><b>Trade/Contract Rating</b></td><td></td>
-  <td class="score-num">{final_rating:.1f}</td>
-  <td>{bar_html(final_rating)}</td>
-  </tr>
-  </table>
-  <p style="font-size:11px;color:#888;margin:6px 0 0 0">† Trade only</p>
-</div>
-
-<div class="section">
-  <div class="section-title">Durability</div>
-  <table>
-  <tr><th class="left">Area</th><th>Value</th><th>Label</th></tr>
-  {inj_rows}
-  </table>
-</div>
-
-<div class="section">
-  <div class="section-title">Development Potential</div>
-  <p style="font-size:12px;color:#666;margin:0 0 8px 0">Work ethic, baseball IQ, and adaptability scale the <b>Potential</b> component in the Trade/Contract rating (along with OA/POT gap and age).</p>
-  <table>
-  <tr><th class="left">Trait</th><th>Value</th><th>Label</th></tr>
-  {dev_rows}
-  </table>
-</div>
-
-<div class="section">
-  <div class="section-title">Clubhouse</div>
-  <table>
-  <tr><th class="left">Trait</th><th>Value</th><th>Label</th></tr>
-  {club_rows}
-  </table>
-</div>
-
-<div class="section">
-  <div class="section-title">Key Stats</div>
-  <table>
-  <tr><th>{key_stat_label}</th><th>WAR</th></tr>
-  <tr><td>{key_stat_val}</td><td>{war_val}</td></tr>
-  </table>
-</div>
-
-</div>
-</body></html>"""
-
-    args_key = {"focus": sorted(m.lower().strip(",") for m in focus_modifiers) if focus_modifiers else []}
-    report_path = get_reports_dir(save_name, "ratings") / report_filename(f"rating_{player_id}", args_key)
-    write_report_html(report_path, html)
-
-    return str(report_path), dict(
-        player_name=f"{first} {last}",
-        team_abbr=team_abbr,
-        position=pos_name,
-        age=age_disp,
-        oa=oa_disp,
-        pot=pot_disp,
-        player_type=player_type,
-        rating_overall=round(final_rating, 1),
-        grade=lg(final_rating),
-        rank=rank,
-        rank_total=rank_total,
-        wrc_plus=data["wrc_plus"],
-        fip=data["fip"],
-        war=data["war"],
-        flag_injury_risk=bool(flag_injury),
-        flag_leader=bool(flag_leader_val),
-        flag_high_ceiling=bool(flag_ceiling),
-        adjusted=adjusted,
-    )
-
-
-def fetch_career_trend_stats(engine, first_name, last_name):
-    """Fetch last 4 MLB seasons of career rate stats for a player.
-
-    Returns a list of printable strings (TYPE: and YEAR: lines) for the agent.
-    """
-    def fmt_v(v, d=3):
-        return f"{v:.{d}f}" if v is not None else "--"
-
-    def fmt_pct(v):
-        return f"{v:.1f}%" if v is not None else "--"
-
-    def safe_div(n, d):
-        return n / d if d and d > 0 else None
-
-    with engine.connect() as conn:
-        pid_row = conn.execute(
-            text("SELECT player_id FROM players WHERE first_name=:f AND last_name=:l"),
-            dict(f=first_name, l=last_name),
-        ).fetchone()
-        if not pid_row:
-            return ["PLAYER_NOT_FOUND"]
-        pid = pid_row[0]
-
-        rows = conn.execute(text(
-            "SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war "
-            "FROM players_career_batting_stats "
-            "WHERE player_id=:pid AND split_id=:split_id AND league_id=:league_id AND level_id=:level_id "
-            "ORDER BY year DESC LIMIT 4"
-        ), dict(pid=pid, split_id=SPLIT_CAREER_OVERALL, league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID)).fetchall()
-
-        if rows:
-            lines = ["TYPE:batter"]
-            for r in rows:
-                yr, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war = r
-                singles = h - (d or 0) - (t or 0) - (hr or 0)
-                avg   = safe_div(h, ab)
-                obp   = safe_div((h or 0) + (bb or 0) + (hp or 0),
-                                 (ab or 0) + (bb or 0) + (hp or 0) + (sf or 0))
-                slg   = safe_div(singles + 2*(d or 0) + 3*(t or 0) + 4*(hr or 0), ab)
-                iso   = (slg - avg) if slg is not None and avg is not None else None
-                babip = safe_div((h or 0) - (hr or 0),
-                                 (ab or 0) - (k or 0) - (hr or 0) + (sf or 0))
-                k_pct  = safe_div((k or 0) * 100, pa)
-                bb_pct = safe_div((bb or 0) * 100, pa)
-                ops    = (obp + slg) if obp is not None and slg is not None else None
-                war_str = fmt_v(float(war), 1) if war is not None else "--"
-                lines.append(
-                    f"YEAR:{yr} G:{g} PA:{pa} HR:{hr} "
-                    f"AVG:{fmt_v(avg)} OBP:{fmt_v(obp)} SLG:{fmt_v(slg)} OPS:{fmt_v(ops)} "
-                    f"ISO:{fmt_v(iso)} BABIP:{fmt_v(babip)} "
-                    f"K%:{fmt_pct(k_pct)} BB%:{fmt_pct(bb_pct)} WAR:{war_str}"
-                )
-            return lines
-
-        rows = conn.execute(text(
-            "SELECT year, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war "
-            "FROM players_career_pitching_stats "
-            "WHERE player_id=:pid AND split_id=:split_id AND league_id=:league_id AND level_id=:level_id "
-            "ORDER BY year DESC LIMIT 4"
-        ), dict(pid=pid, split_id=SPLIT_CAREER_OVERALL, league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID)).fetchall()
-        if rows:
-            lines = ["TYPE:pitcher"]
-            for r in rows:
-                yr, g, gs, ip, ha, hra, bb, k, er, bf, hp, gb, fb, war = r
-                ip_f   = float(ip) if ip else 0
-                era    = safe_div((er or 0) * 9, ip_f)
-                whip   = safe_div((ha or 0) + (bb or 0), ip_f)
-                k_pct  = safe_div((k or 0) * 100, bf)
-                bb_pct = safe_div((bb or 0) * 100, bf)
-                kbb    = (k_pct - bb_pct) if k_pct is not None and bb_pct is not None else None
-                hr9    = safe_div((hra or 0) * 9, ip_f)
-                total_bf = (gb or 0) + (fb or 0)
-                gb_pct = safe_div((gb or 0) * 100, total_bf)
-                war_str = fmt_v(float(war), 1) if war is not None else "--"
-                lines.append(
-                    f"YEAR:{yr} G:{g} GS:{gs} IP:{fmt_v(ip_f, 1)} ERA:{fmt_v(era)} "
-                    f"WHIP:{fmt_v(whip)} K%:{fmt_pct(k_pct)} BB%:{fmt_pct(bb_pct)} "
-                    f"K-BB%:{fmt_pct(kbb)} HR/9:{fmt_v(hr9)} GB%:{fmt_pct(gb_pct)} WAR:{war_str}"
-                )
-            return lines
-
-        return ["NO_CAREER_DATA"]
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Positions where defense matters most (get 1.3x defense weight)
-PREMIUM_DEFENSE_POS = {POS_CATCHER, POS_SS, POS_2B, POS_CF}
-# Positions where defense matters least (get 0.7x)
-LOW_DEFENSE_POS = {POS_1B, POS_LF, POS_RF}
-
-# ZR scoring: score = clamp(50 + zr / half_range * 50)
-# half_range calibrated from empirical p10/p90 spread in the DB
-ZR_HALF_RANGE = {
-    POS_CATCHER: 1.5, POS_1B: 2.5, POS_2B: 4.5, POS_3B: 5.0,
-    POS_SS: 5.5, POS_LF: 6.0, POS_CF: 9.0, POS_RF: 6.5,
-}
-
-# DP per 150G scoring: clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
-# Calibrated from empirical min/max in the DB
-DP_SCALE = {
-    POS_1B: (19, 134),
-    POS_2B: (43, 116),
-    POS_3B: (11, 40),
-    POS_SS: (27, 111),
-}
-
-# Position field rating column mapping
-POS_FIELD_COL = {
-    POS_CATCHER: "fielding_rating_pos2",
-    POS_1B: "fielding_rating_pos3",
-    POS_2B: "fielding_rating_pos4",
-    POS_3B: "fielding_rating_pos5",
-    POS_SS: "fielding_rating_pos6",
-    POS_LF: "fielding_rating_pos7",
-    POS_CF: "fielding_rating_pos8",
-    POS_RF: "fielding_rating_pos9",
-}
-
-# Dimension weights — sourced from config.py so they can be tuned without
-# touching logic. See config.py for documentation on each weight.
-BATTER_WEIGHTS = {
-    "offense":         BATTER_WEIGHT_OFFENSE,
-    "contact_quality": BATTER_WEIGHT_CONTACT,
-    "discipline":      BATTER_WEIGHT_DISCIPLINE,
-    "defense":         BATTER_WEIGHT_DEFENSE,
-    "potential":       BATTER_WEIGHT_POTENTIAL,
-    "durability":      BATTER_WEIGHT_DURABILITY,
-    "clubhouse":       BATTER_WEIGHT_CLUBHOUSE,
-    "baserunning":     BATTER_WEIGHT_BASERUNNING,
-}
-
-PITCHER_WEIGHTS = {
-    "run_prevention":      PITCHER_WEIGHT_RUN_PREVENTION,
-    "dominance":           PITCHER_WEIGHT_DOMINANCE,
-    "contact_suppression": PITCHER_WEIGHT_CONTACT_SUPPRESSION,
-    "command":             PITCHER_WEIGHT_COMMAND,
-    "potential":           PITCHER_WEIGHT_POTENTIAL,
-    "durability":          PITCHER_WEIGHT_DURABILITY,
-    "clubhouse":           PITCHER_WEIGHT_CLUBHOUSE,
-    "role_value":          PITCHER_WEIGHT_ROLE_VALUE,
-}
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def clamp(val, lo=0, hi=100):
     """Clamp value to [lo, hi]."""
     if pd.isna(val):
@@ -1389,7 +384,7 @@ def score_defense(row, fielding_row, position):
     if pos_col and fielding_row is not None and pos_col in fielding_row:
         field_rating = fielding_row[pos_col]
         if pd.notna(field_rating) and field_rating > 0:
-            rating_score = clamp((field_rating - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
+            rating_score = clamp((field_rating - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100)
         else:
             rating_score = 50.0
     else:
@@ -1477,7 +472,7 @@ def score_baserunning(batting_row):
                 "running_ratings_baserunning"]:
         v = batting_row.get(col)
         if pd.notna(v) and v > 0:
-            vals.append(clamp((v - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100))
+            vals.append(clamp((v - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100))
     return np.mean(vals) if vals else 50.0
 
 
@@ -1757,7 +752,7 @@ def compute_batter_ratings(engine):
         sr_vals = [row.get(c) for c in ("sr_contact", "sr_power", "sr_eye", "sr_gap")]
         sr_vals = [v for v in sr_vals if v is not None and not pd.isna(v) and v > 0]
         if sr_vals:
-            ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
+            ootp_bat_score = clamp((sum(sr_vals) / len(sr_vals) - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100)
             cur_available = True
         else:
             ootp_bat_score = None
@@ -1990,7 +985,7 @@ def compute_pitcher_ratings(engine):
         sr_pit_vals = [v for v in sr_pit_vals if v is not None and not pd.isna(v) and v > 0]
         career_ip = float(career_ip_totals.get(pid, 0))
         if sr_pit_vals:
-            ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100)
+            ootp_pit_score = clamp((sum(sr_pit_vals) / len(sr_pit_vals) - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100)
             pit_cur_available = True
             if career_ip < IP_REGRESSION_THRESHOLD:
                 ip_trust = min(career_ip / IP_REGRESSION_THRESHOLD, 1.0) ** REGRESSION_EXPONENT
@@ -2100,35 +1095,10 @@ def compute_pitcher_ratings(engine):
     return pd.DataFrame(results)
 
 
-# ---------------------------------------------------------------------------
-# Letter grade
-# ---------------------------------------------------------------------------
-def letter_grade(score):
-    if score >= 90:
-        return "A+"
-    elif score >= 80:
-        return "A"
-    elif score >= 70:
-        return "B+"
-    elif score >= 60:
-        return "B"
-    elif score >= 50:
-        return "C+"
-    elif score >= 40:
-        return "C"
-    elif score >= 30:
-        return "D"
-    else:
-        return "F"
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     if len(sys.argv) != 2:
-        print(f"Usage: python {sys.argv[0]} <save_name>")
-        print("Example: python src/ratings.py My-Save-2026")
+        print("Usage: python -m ratings <save_name>")
+        print("Example: (cd src && python -m ratings My-Save-2026)")
         sys.exit(1)
 
     save_name = sys.argv[1]
@@ -2166,7 +1136,7 @@ def main():
     # Top position players
     qual_bat = batter_ratings[batter_ratings["wrc_plus"].notna()].copy()
     if len(qual_bat) > 0:
-        print(f"\nTop 15 position players:")
+        print("\nTop 15 position players:")
         top = qual_bat.nlargest(15, "rating_overall")
         for _, row in top.iterrows():
             abbr = str(row.get("team_abbr", ""))[:4] or "???"
@@ -2185,7 +1155,7 @@ def main():
     # Top pitchers
     qual_pit = pitcher_ratings[pitcher_ratings["wrc_plus"].notna()].copy()  # fip stored here
     if len(qual_pit) > 0:
-        print(f"\nTop 15 pitchers:")
+        print("\nTop 15 pitchers:")
         top = qual_pit.nlargest(15, "rating_overall")
         for _, row in top.iterrows():
             abbr = str(row.get("team_abbr", ""))[:4] or "???"
@@ -2201,6 +1171,3 @@ def main():
                   f"FIP={row['wrc_plus']:5.2f}  WAR={row['war']:4.1f}  "
                   f"OA={int(row['oa']) if pd.notna(row['oa']) else 0:2d} POT={int(row['pot']) if pd.notna(row['pot']) else 0:2d}{flags}")
 
-
-if __name__ == "__main__":
-    main()
