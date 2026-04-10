@@ -35,7 +35,7 @@ fi
 FAILED_STEPS=()
 
 python src/analytics.py "$@"    || FAILED_STEPS+=("analytics")
-python src/ratings.py "$@"      || FAILED_STEPS+=("ratings")
+( cd src && ../.venv/bin/python3 -m ratings "$@" ) || FAILED_STEPS+=("ratings")
 python src/draft_ratings.py "$@" || FAILED_STEPS+=("draft_ratings")
 python src/ifa_ratings.py "$@"  || FAILED_STEPS+=("ifa_ratings")
 

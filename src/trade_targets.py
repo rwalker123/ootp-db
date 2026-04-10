@@ -14,17 +14,16 @@ from config import (
 )
 from ootp_db_constants import MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
 
 
 def letter_grade(score):
@@ -444,7 +443,7 @@ def generate_trade_targets_report(
 
     Returns (path_str, dict(offered=list, tier1=list, tier2=list)).
     """
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     tier2_ceil = oa_ceil + TRADE_TIER2_OA_ABOVE
 

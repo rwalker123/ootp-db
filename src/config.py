@@ -1,6 +1,6 @@
 """Rating engine configuration — tunable constants.
 
-Edit this file to adjust scoring behaviour without touching ratings.py logic.
+Edit this file to adjust scoring behaviour without touching src/ratings/compute logic.
 All values are project-wide defaults; individual skill calls can pass overrides.
 """
 
@@ -173,9 +173,8 @@ BATTER_WEIGHT_CONTACT     = 0.18
 BATTER_WEIGHT_DISCIPLINE  = 0.08
 BATTER_WEIGHT_DEFENSE     = 0.14
 BATTER_WEIGHT_POTENTIAL   = 0.15
-BATTER_WEIGHT_DURABILITY  = 0.05   # injury risk only
-BATTER_WEIGHT_DEVELOPMENT = 0.03   # work ethic + intelligence
-BATTER_WEIGHT_CLUBHOUSE   = 0.02   # leadership + greed(inv) + loyalty
+BATTER_WEIGHT_DURABILITY  = 0.08   # injury risk only (Performance + Trade)
+BATTER_WEIGHT_CLUBHOUSE   = 0.02   # leadership + greed(inv) + loyalty (Trade only)
 BATTER_WEIGHT_BASERUNNING = 0.05
 
 # ---------------------------------------------------------------------------
@@ -186,9 +185,8 @@ PITCHER_WEIGHT_DOMINANCE           = 0.15
 PITCHER_WEIGHT_CONTACT_SUPPRESSION = 0.15
 PITCHER_WEIGHT_COMMAND             = 0.10
 PITCHER_WEIGHT_POTENTIAL           = 0.15
-PITCHER_WEIGHT_DURABILITY          = 0.05   # injury risk only
-PITCHER_WEIGHT_DEVELOPMENT         = 0.03   # work ethic + intelligence
-PITCHER_WEIGHT_CLUBHOUSE           = 0.02   # leadership + greed(inv) + loyalty
+PITCHER_WEIGHT_DURABILITY          = 0.08   # injury risk only (Performance + Trade)
+PITCHER_WEIGHT_CLUBHOUSE           = 0.02   # leadership + greed(inv) + loyalty (Trade only)
 PITCHER_WEIGHT_ROLE_VALUE          = 0.05
 
 # ---------------------------------------------------------------------------
@@ -213,6 +211,19 @@ DEVELOPMENT_MAX_AGE = 27
 # Applied as: ((max_age - age) / (max_age - min_age)) ** DEVELOPMENT_EXPONENT
 DEVELOPMENT_EXPONENT = 0.75
 
+# Trait blend for "development" (work ethic, intelligence, adaptability).
+# Used inside rating_potential (OA/POT gap × realization multiplier × age credit).
+# Weights must sum to 1.0.
+DEVELOPMENT_TRAIT_WEIGHT_WORK_ETHIC   = 0.40
+DEVELOPMENT_TRAIT_WEIGHT_INTELLIGENCE = 0.40
+DEVELOPMENT_TRAIT_WEIGHT_ADAPTABILITY = 0.20
+
+# Maps development trait score (0–100) to a multiplier on the OA/POT ceiling gap
+# before age credit: m = MIN + (score/100)×(MAX−MIN). MAX > 1 allows exceeding
+# the naive ceiling score when traits are elite; MIN < 1 dings poor traits.
+DEVELOPMENT_REALIZATION_MULT_MIN = 0.88
+DEVELOPMENT_REALIZATION_MULT_MAX = 1.12
+
 # ---------------------------------------------------------------------------
 # wOBA linear weights (FanGraphs-style, used across analytics, report, lineup)
 # Canonical source: analytics.py values at project inception.
@@ -228,7 +239,7 @@ OOTP_RATING_SCALE_MAX = 80
 
 # ---------------------------------------------------------------------------
 # Hitter archetype classification thresholds
-# Applied in ratings.py classify_batter_archetype(); requires pa >= ARCHETYPE_MIN_PA.
+# Applied in ratings.queries.classify_batter_archetype(); requires pa >= ARCHETYPE_MIN_PA.
 # ---------------------------------------------------------------------------
 ARCHETYPE_MIN_PA = 50           # minimum PA before an archetype is assigned
 

@@ -41,8 +41,11 @@ set FAILED_STEPS=
 .venv\Scripts\python src\analytics.py %*
 if errorlevel 1 set FAILED_STEPS=!FAILED_STEPS! analytics
 
-.venv\Scripts\python src\ratings.py %*
-if errorlevel 1 set FAILED_STEPS=!FAILED_STEPS! ratings
+pushd src
+..\.venv\Scripts\python -m ratings %*
+set RATINGS_EXIT=%ERRORLEVEL%
+popd
+if %RATINGS_EXIT% neq 0 set FAILED_STEPS=!FAILED_STEPS! ratings
 
 .venv\Scripts\python src\draft_ratings.py %*
 if errorlevel 1 set FAILED_STEPS=!FAILED_STEPS! draft_ratings

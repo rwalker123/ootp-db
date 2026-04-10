@@ -14,11 +14,17 @@ from ootp_db_constants import (
     SPLIT_CAREER_OVERALL,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+    load_saves_registry,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
 # Positions considered "pitcher" for group comparison
 PITCHER_POS = {1}
@@ -28,12 +34,6 @@ OF_POS = {7, 8, 9}
 CORNER_IF_POS = {3, 5}
 # Middle IF that share comparison
 MIDDLE_IF_POS = {4, 6}
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
 
 
 def fmt_salary(val):
@@ -182,8 +182,10 @@ def find_existing_waiver_report(player_id, save_name, raw_args=""):
     path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
     if not path.exists():
         return None
-    last_import = get_last_import_time()
-    if last_import is None or path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
+    last_import = get_last_import_iso_for_save(save_name)
+    if not last_import:
+        return None
+    if path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
         return str(path)
     return None
 
@@ -515,26 +517,29 @@ def _build_candidate_header(p, adv, last_import, generated_at):
 
 
 def _build_ratings_section(p):
+    tip = (
+        '<span style="cursor:help;color:#7f8c8d;font-size:10px;margin-left:3px;vertical-align:super" '
+        'title="Trade only">†</span>'
+    )
     scores = [
-        ("Offense", p.get("rating_offense")),
-        ("Contact", p.get("rating_contact_quality")),
-        ("Discipline", p.get("rating_discipline")),
-        ("Defense", p.get("rating_defense")),
-        ("Baserunning", p.get("rating_baserunning")),
-        ("Potential", p.get("rating_potential")),
-        ("Durability", p.get("rating_durability")),
-        ("Development", p.get("rating_development")),
-        ("Clubhouse", p.get("rating_clubhouse")),
+        ("offense", "Offense", p.get("rating_offense")),
+        ("contact", "Contact", p.get("rating_contact_quality")),
+        ("discipline", "Discipline", p.get("rating_discipline")),
+        ("defense", "Defense", p.get("rating_defense")),
+        ("baserunning", "Baserunning", p.get("rating_baserunning")),
+        ("durability", "Durability", p.get("rating_durability")),
+        ("potential", f"Potential{tip}", p.get("rating_potential")),
+        ("clubhouse", f"Clubhouse{tip}", p.get("rating_clubhouse")),
     ]
     rows = ""
-    for label, val in scores:
+    for _key, label_html, val in scores:
         if val is None:
             continue
         v = float(val)
         bar_class = "bar-green" if v >= 70 else "bar-yellow" if v >= 40 else "bar-red"
         c = score_color(v)
         rows += (
-            f"<tr><td class='left'>{label}</td>"
+            f"<tr><td class='left'>{label_html}</td>"
             f"<td><div class='bar-bg'><div class='bar-fill {bar_class}' "
             f"style='width:{v}%'></div></div></td>"
             f"<td style='font-weight:bold;color:{c}'>{v:.0f}</td></tr>\n"
@@ -542,10 +547,11 @@ def _build_ratings_section(p):
     return f"""
 <div class="section">
   <div class="section-title">Rating Breakdown</div>
-  <table style="width:auto;min-width:320px">
+  <table style="width:auto;min-width:280px">
     <thead><tr><th class="left">Dimension</th><th style="width:190px">Score</th><th>Value</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  <p style="font-size:10px;color:#888;margin:6px 0 0 0">† Trade only</p>
 </div>"""
 
 
@@ -1382,7 +1388,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
     my_team_name = data.pop("_my_team_name")
 
     # Build HTML
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     css = get_report_css("1200px")
     header_html = _build_candidate_header(candidate, adv, last_import, generated_at)

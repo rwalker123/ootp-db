@@ -26,11 +26,16 @@ from ootp_db_constants import (
     SPLIT_CAREER_FIELDING_SIM_ERA,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
 # lineup_optimizer uses WOBA_HP as local alias (other modules use WOBA_HBP)
 WOBA_HP = WOBA_HBP
@@ -79,12 +84,6 @@ MIN_POS_GAMES = 5                 # minimum career games at position (any level)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
-
 
 def letter_grade(score):
     for threshold, grade in ((90,"A+"),(80,"A"),(70,"B+"),(60,"B"),(50,"C+"),(40,"C"),(30,"D")):
@@ -419,7 +418,7 @@ def platoon_score(player, hand):
     - hand="R" (opponent is RHP): use rating_now_rhp × confidence_rhp
     - no hand: return sort_score (rating_now × confidence, overall)
 
-    confidence_lhp/rhp encodes the PA-ramp from ratings.py using
+    confidence_lhp/rhp encodes the PA-ramp from the ratings package using
     PLATOON_LHP_PA_THRESHOLD / PLATOON_RHP_PA_THRESHOLD, so a player with
     6 PA vs LHP gets near-zero confidence and won't beat an established hitter.
     """
@@ -1237,7 +1236,7 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
         p["forced"] = False
 
     # Sort score: rating_now × confidence from player_ratings.
-    # Precomputed in ratings.py — no regression needed here.
+    # Precomputed in ratings.compute — no regression needed here.
     for p in batters:
         rating_now = p.get("rating_now")
         confidence = p.get("confidence")
@@ -1429,7 +1428,7 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
         )
         report_dir = get_reports_dir(save_name, "lineups")
         report_path = report_dir / report_filename("lineup_" + team_abbr.lower(), args_key)
-        last_import = get_last_import_time()
+        last_import = get_last_import_iso_for_save(save_name)
         if report_path.exists() and last_import:
             if report_path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
                 return str(report_path), None
