@@ -835,7 +835,7 @@ def compute_pitcher_ratings(engine):
         if col in df.columns:
             pctiles[col] = percentile_rank(df[col])
 
-    # Get league FIP constant
+    # Get league FIP constant (NULL when no rows match export league/level keys or IP=0)
     with engine.connect() as conn:
         r = conn.execute(text(f"""
             SELECT SUM(er)*9.0/SUM(ip) as era,
@@ -844,7 +844,12 @@ def compute_pitcher_ratings(engine):
             FROM team_pitching_stats
             WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
         """)).fetchone()
-        cfip = float(r[1])
+        cfip_raw = r[1] if r else None
+        cfip = (
+            float(cfip_raw)
+            if cfip_raw is not None and not (isinstance(cfip_raw, float) and pd.isna(cfip_raw))
+            else 4.0
+        )
 
     trend_data = get_trend_metrics_pitching(trend, cfip)
 

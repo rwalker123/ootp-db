@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from pipeline_warnings import add_pipeline_warnings, reset_pipeline_warnings
 from shared_css import (
     create_postgres_server_engine,
     db_name_from_save,
@@ -389,6 +390,8 @@ def main():
         list_saves()
         return
 
+    reset_pipeline_warnings()
+
     # Join all remaining args to support save names with spaces
     # e.g. ./import.sh Bless You Boys  →  "Bless You Boys"
     arg = " ".join(sys.argv[1:])
@@ -550,6 +553,36 @@ def main():
     print(f"Save '{save_name}' → database '{db_name}'")
     if ootp_version is not None:
         print(f"OOTP version (from path): {ootp_version}")
+
+    imp_warn: list[str] = []
+    with engine.connect() as conn:
+        total_pa = conn.execute(text("SELECT COALESCE(SUM(pa), 0) FROM team_batting_stats")).scalar()
+        n_ab = conn.execute(
+            text("SELECT COUNT(*) FROM players_at_bat_batting_stats")
+        ).scalar()
+    try:
+        total_pa = int(total_pa or 0)
+    except (TypeError, ValueError):
+        total_pa = 0
+    try:
+        n_ab = int(n_ab or 0)
+    except (TypeError, ValueError):
+        n_ab = 0
+    if total_pa == 0:
+        imp_warn.append(
+            "team_batting_stats: total PA is 0 — current-season team batting lines are empty "
+            "until games are played and exported (expected on a brand-new sim before Opening Day)."
+        )
+    if n_ab == 0:
+        imp_warn.append(
+            "players_at_bat_batting_stats has no rows — no per-at-bat Statcast-style data until "
+            "the regular season has plate appearances in the export."
+        )
+    if imp_warn:
+        add_pipeline_warnings(imp_warn)
+        print("\n⚠ Import: data limitations:")
+        for msg in imp_warn:
+            print(f"  • {msg}")
 
 
 if __name__ == "__main__":
