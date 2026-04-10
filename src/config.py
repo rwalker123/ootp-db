@@ -1,6 +1,6 @@
 """Rating engine configuration — tunable constants.
 
-Edit this file to adjust scoring behaviour without touching src/ratings/ compute logic.
+Edit this file to adjust scoring behaviour without touching src/ratings/compute logic.
 All values are project-wide defaults; individual skill calls can pass overrides.
 """
 

@@ -14,11 +14,17 @@ from ootp_db_constants import (
     SPLIT_CAREER_OVERALL,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+    load_saves_registry,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
 # Positions considered "pitcher" for group comparison
 PITCHER_POS = {1}
@@ -28,12 +34,6 @@ OF_POS = {7, 8, 9}
 CORNER_IF_POS = {3, 5}
 # Middle IF that share comparison
 MIDDLE_IF_POS = {4, 6}
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
 
 
 def fmt_salary(val):
@@ -182,8 +182,10 @@ def find_existing_waiver_report(player_id, save_name, raw_args=""):
     path = reports_dir / report_filename(f"waiver_{player_id}", dict(raw_args=raw_args.strip().lower()))
     if not path.exists():
         return None
-    last_import = get_last_import_time()
-    if last_import is None or path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
+    last_import = get_last_import_iso_for_save(save_name)
+    if not last_import:
+        return None
+    if path.stat().st_mtime > datetime.fromisoformat(last_import).timestamp():
         return str(path)
     return None
 
@@ -1386,7 +1388,7 @@ def generate_waiver_claim_report(save_name, first_name, last_name, raw_args=""):
     my_team_name = data.pop("_my_team_name")
 
     # Build HTML
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     css = get_report_css("1200px")
     header_html = _build_candidate_header(candidate, adv, last_import, generated_at)

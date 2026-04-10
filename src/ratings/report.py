@@ -3,8 +3,6 @@
 import json
 import sys
 from datetime import datetime
-from pathlib import Path
-
 from config import (
     INJURY_DURABLE_MAX,
     INJURY_FRAGILE_MAX,
@@ -16,13 +14,10 @@ from config import (
     TRAIT_POOR_MAX,
 )
 from report_write import report_filename, write_report_html
-from shared_css import get_report_css, get_reports_dir, get_write_engine
+from shared_css import get_engine, get_last_import_iso_for_save, get_report_css, get_reports_dir
 
 from .grades import letter_grade
-from .queries import query_player_rating
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_LAST_IMPORT_PATH = _PROJECT_ROOT / ".last_import"
+from .queries import lookup_player_id_for_rating_report, query_player_rating
 
 
 def find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers=None):
@@ -31,16 +26,10 @@ def find_existing_rating_report(save_name, first_name, last_name, engine, focus_
     Returns the path string if the report is current, or None if it needs
     to be (re)generated.
     """
-    from sqlalchemy import text as sa_text
-
     with engine.connect() as conn:
-        row = conn.execute(
-            sa_text("SELECT player_id FROM players WHERE first_name = :f AND last_name = :l"),
-            dict(f=first_name, l=last_name),
-        ).fetchone()
-        if not row:
-            return None
-        player_id = row[0]
+        player_id = lookup_player_id_for_rating_report(conn, first_name, last_name)
+    if player_id is None:
+        return None
 
     args_key = {"focus": sorted(m.lower().strip(",") for m in focus_modifiers) if focus_modifiers else []}
     report_path = get_reports_dir(save_name, "ratings") / report_filename(f"rating_{player_id}", args_key)
@@ -48,11 +37,12 @@ def find_existing_rating_report(save_name, first_name, last_name, engine, focus_
     if not report_path.exists():
         return None
 
-    if not _LAST_IMPORT_PATH.exists():
-        return str(report_path)
+    last_import_iso = get_last_import_iso_for_save(save_name)
+    if not last_import_iso:
+        return None
 
     report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
-    import_time = datetime.fromisoformat(_LAST_IMPORT_PATH.read_text().strip())
+    import_time = datetime.fromisoformat(last_import_iso)
 
     if report_mtime >= import_time:
         return str(report_path)
@@ -60,10 +50,9 @@ def find_existing_rating_report(save_name, first_name, last_name, engine, focus_
     return None
 
 
-def get_last_import_time():
-    if _LAST_IMPORT_PATH.exists():
-        return _LAST_IMPORT_PATH.read_text().strip()
-    return None
+def get_last_import_time(save_name: str):
+    """Registry-backed last CSV import time for *save_name* (ISO format)."""
+    return get_last_import_iso_for_save(save_name)
 
 
 def generate_rating_report(save_name, first_name, last_name, focus_modifiers=None):
@@ -73,13 +62,13 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 
     Returns (path_str, data_dict) where data_dict is None on a cache hit.
     """
-    engine = get_write_engine(save_name)
+    engine = get_engine(save_name)
 
     existing = find_existing_rating_report(save_name, first_name, last_name, engine, focus_modifiers)
     if existing:
         return existing, None
 
-    last_import = get_last_import_time()
+    last_import = get_last_import_time(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     data = query_player_rating(save_name, first_name, last_name, focus_modifiers)

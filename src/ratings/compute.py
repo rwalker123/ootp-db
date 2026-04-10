@@ -16,10 +16,7 @@ from config import (
     BATTER_WEIGHT_DURABILITY,
     BATTER_WEIGHT_OFFENSE,
     BATTER_WEIGHT_POTENTIAL,
-    CATCHER_MIN_CS_ATTEMPTS,
     CEILING_GAP_THRESHOLD,
-    DEFENSE_BAT_FIRST_MULTIPLIER,
-    DEFENSE_PREMIUM_MULTIPLIER,
     DEVELOPMENT_EXPONENT,
     DEVELOPMENT_MAX_AGE,
     DEVELOPMENT_MIN_AGE,
@@ -28,7 +25,6 @@ from config import (
     DEVELOPMENT_TRAIT_WEIGHT_ADAPTABILITY,
     DEVELOPMENT_TRAIT_WEIGHT_INTELLIGENCE,
     DEVELOPMENT_TRAIT_WEIGHT_WORK_ETHIC,
-    FIELDING_MIN_GAMES,
     INJURY_OVERALL_DEDUCTION,
     INJURY_PRONE_THRESHOLD,
     IP_REGRESSION_THRESHOLD,
@@ -64,29 +60,13 @@ from ootp_db_constants import (
     MLB_LEAGUE_ID,
     MLB_LEVEL_ID,
     POS_PITCHER,
-    POS_CATCHER,
-    POS_FIRST_BASE as POS_1B,
-    POS_SECOND_BASE as POS_2B,
-    POS_THIRD_BASE as POS_3B,
-    POS_SHORTSTOP as POS_SS,
-    POS_LEFT_FIELD as POS_LF,
-    POS_CENTER_FIELD as POS_CF,
-    POS_RIGHT_FIELD as POS_RF,
     SPLIT_CAREER_OVERALL,
     SPLIT_TEAM_PITCHING_OVERALL,
 )
 from shared_css import get_write_engine
 
-from .constants import (
-    BATTER_WEIGHTS,
-    DP_SCALE,
-    LOW_DEFENSE_POS,
-    PITCHER_WEIGHTS,
-    POS_FIELD_COL,
-    PREMIUM_DEFENSE_POS,
-    SCALE_RANGE,
-    ZR_HALF_RANGE,
-)
+from .constants import BATTER_WEIGHTS, PITCHER_WEIGHTS, SCALE_RANGE
+from .defense_blend import defense_score_from_rating_and_stats
 from .grades import letter_grade
 
 
@@ -379,88 +359,7 @@ def score_defense(row, fielding_row, position):
       CF:        ZR 40% | FPct 10% | Arm 20% | PO/G 30%
       LF / RF:   ZR 40% | FPct 20% | Arm 40%
     """
-    # ── Component 1: OOTP talent rating ─────────────────────────────────────
-    pos_col = POS_FIELD_COL.get(position)
-    if pos_col and fielding_row is not None and pos_col in fielding_row:
-        field_rating = fielding_row[pos_col]
-        if pd.notna(field_rating) and field_rating > 0:
-            rating_score = clamp((field_rating - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100)
-        else:
-            rating_score = 50.0
-    else:
-        rating_score = 50.0
-
-    # ── Component 2: Actual fielding stats ───────────────────────────────────
-    fld_g = row.get("fld_g") if hasattr(row, "get") else None
-    if fld_g is None or pd.isna(fld_g):
-        fld_g = 0
-    fld_g = int(fld_g)
-
-    if fld_g < FIELDING_MIN_GAMES:
-        # Not enough data — fall back to rating only
-        score = rating_score
-    else:
-        components = []   # list of (score_0_100, weight)
-
-        def _fval(key, default=0.0):
-            """Safely extract a float from row, returning default for NaN/None."""
-            v = row.get(key)
-            return float(v) if (v is not None and not pd.isna(v)) else default
-
-        # ZR — position-specific scaling so ±half_range maps to 0/100
-        half_range = ZR_HALF_RANGE.get(position, 5.0)
-        zr_score = clamp(50.0 + _fval("fld_zr") / half_range * 50.0)
-
-        # FPct — (tc-e)/tc; good ≥.985, poor ≤.960
-        tc = _fval("fld_tc")
-        e  = _fval("fld_e")
-        fpct_score = clamp((((tc - e) / tc) - 0.950) / 0.035 * 100) if tc > 0 else 50.0
-
-        if position == POS_CATCHER:
-            sba = _fval("fld_sba")
-            rto = _fval("fld_rto")
-            total_att = sba + rto
-            cs_score = clamp(rto / total_att / 0.35 * 100) if total_att >= CATCHER_MIN_CS_ATTEMPTS else 50.0
-
-            framing = _fval("fld_framing")
-            framing_score = clamp(50.0 + framing / 12.0 * 50.0)
-
-            components = [(zr_score, 0.30), (fpct_score, 0.15),
-                          (cs_score, 0.30), (framing_score, 0.25)]
-
-        elif position in (POS_2B, POS_SS):
-            dp_per_150 = _fval("fld_dp") / fld_g * 150
-            dp_min, dp_max = DP_SCALE[position]
-            dp_score = clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
-            components = [(zr_score, 0.40), (fpct_score, 0.20), (dp_score, 0.40)]
-
-        elif position in (POS_3B, POS_1B):
-            dp_per_150 = _fval("fld_dp") / fld_g * 150
-            dp_min, dp_max = DP_SCALE[position]
-            dp_score = clamp((dp_per_150 - dp_min) / (dp_max - dp_min) * 100)
-            components = [(zr_score, 0.40), (fpct_score, 0.30), (dp_score, 0.30)]
-
-        elif position == POS_CF:
-            arm_score = clamp(50.0 + _fval("fld_arm") * 10.0)
-            po_score  = clamp((_fval("fld_po") / fld_g - 0.9) / 2.0 * 100)
-            components = [(zr_score, 0.40), (fpct_score, 0.10), (arm_score, 0.20), (po_score, 0.30)]
-
-        else:  # LF, RF
-            arm_score = clamp(50.0 + _fval("fld_arm") * 10.0)
-            components = [(zr_score, 0.40), (fpct_score, 0.20), (arm_score, 0.40)]
-
-        total_w = sum(w for _, w in components)
-        stats_score = sum(s * w for s, w in components) / total_w if total_w > 0 else 50.0
-
-        score = rating_score * 0.50 + stats_score * 0.50
-
-    # ── Position multiplier ──────────────────────────────────────────────────
-    if position in PREMIUM_DEFENSE_POS:
-        score = min(100, score * DEFENSE_PREMIUM_MULTIPLIER)
-    elif position in LOW_DEFENSE_POS:
-        score = score * DEFENSE_BAT_FIRST_MULTIPLIER
-
-    return score
+    return defense_score_from_rating_and_stats(fielding_row, row, position)
 
 
 def score_baserunning(batting_row):

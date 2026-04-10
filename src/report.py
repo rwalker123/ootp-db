@@ -16,18 +16,16 @@ from ootp_db_constants import (
     SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
-
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
 
 
 def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
@@ -1055,9 +1053,9 @@ def find_existing_report(save_name, first_name, last_name, raw_args=""):
     if not report_path.exists():
         return None
 
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
     if not last_import:
-        return str(report_path)
+        return None
 
     # Check if report was generated after last import
     report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime)
@@ -1081,7 +1079,7 @@ def generate_player_report(save_name, first_name, last_name, raw_args=""):
 
     engine = get_engine(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
 
     with engine.connect() as conn:
         # Look up player — prefer the one with the most MLB career activity (PA + IP)

@@ -9,8 +9,11 @@ from config import (
     BATTER_WEIGHT_OFFENSE,
     BATTER_WEIGHT_POTENTIAL,
     BATTER_WEIGHT_BASERUNNING,
+    DEFENSE_BAT_FIRST_MULTIPLIER,
+    DEFENSE_PREMIUM_MULTIPLIER,
     OOTP_RATING_SCALE_MAX,
     OOTP_RATING_SCALE_MIN,
+    SCORE_MAX,
     PITCHER_WEIGHT_CLUBHOUSE,
     PITCHER_WEIGHT_COMMAND,
     PITCHER_WEIGHT_CONTACT_SUPPRESSION,
@@ -34,10 +37,18 @@ from ootp_db_constants import (
 # Pre-computed scale range for (val - min) / range conversions.
 SCALE_RANGE = OOTP_RATING_SCALE_MAX - OOTP_RATING_SCALE_MIN
 
-# Positions where defense matters most (get 1.3x defense weight)
+# Positions where defense score is scaled up (premium) or down (bat-first) in batch + focus reports.
 PREMIUM_DEFENSE_POS = {POS_CATCHER, POS_SS, POS_2B, POS_CF}
-# Positions where defense matters least (get 0.7x)
 LOW_DEFENSE_POS = {POS_1B, POS_LF, POS_RF}
+
+
+def apply_defense_position_score_multiplier(score: float, position: int) -> float:
+    """Apply the same premium / low-defense scaling as :func:`score_defense` in ``compute``."""
+    if position in PREMIUM_DEFENSE_POS:
+        return min(float(SCORE_MAX), float(score) * DEFENSE_PREMIUM_MULTIPLIER)
+    if position in LOW_DEFENSE_POS:
+        return float(score) * DEFENSE_BAT_FIRST_MULTIPLIER
+    return float(score)
 
 # ZR scoring: score = clamp(50 + zr / half_range * 50)
 ZR_HALF_RANGE = {

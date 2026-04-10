@@ -16,11 +16,17 @@ from ootp_db_constants import (
     SPLIT_CAREER_OVERALL, SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
 )
 from report_write import write_report_html, report_filename
-from shared_css import db_name_from_save, get_engine, get_report_css, get_reports_dir, load_saves_registry
+from shared_css import (
+    db_name_from_save,
+    get_engine,
+    get_last_import_iso_for_save,
+    get_report_css,
+    get_reports_dir,
+    load_saves_registry,
+)
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LAST_IMPORT_PATH = PROJECT_ROOT / ".last_import"
 
 _PLAYER_KEYS = [
     "player_id", "first_name", "last_name", "position",
@@ -40,12 +46,6 @@ _PLAYER_KEYS = [
     "salary5", "salary6", "salary7", "salary8", "salary9",
     "mlb_service_years",
 ]
-
-
-def get_last_import_time():
-    if LAST_IMPORT_PATH.exists():
-        return LAST_IMPORT_PATH.read_text().strip()
-    return None
 
 
 def letter_grade(score):
@@ -798,7 +798,7 @@ def generate_contract_extension_report(save_name, first_name, last_name, raw_arg
     Returns (path_str, data_dict) on generation, or (path_str, None) on cache hit.
     Returns (None, None) if the player is not found.
     """
-    last_import = get_last_import_time()
+    last_import = get_last_import_iso_for_save(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # ── Lightweight player lookup for cache key ──────────────────────────

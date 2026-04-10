@@ -92,6 +92,22 @@ def load_saves_registry() -> dict:
     return {"saves": {}}
 
 
+def get_last_import_iso_for_save(save_name: str) -> str | None:
+    """Return the last CSV import timestamp for *save_name* from the saves registry.
+
+    Same ``last_import`` ISO-like string (no timezone) written by ``import.py``.
+    Returns None if the save is missing from the registry or has no recorded import.
+    """
+    entry = load_saves_registry().get("saves", {}).get(save_name)
+    if not entry:
+        return None
+    li = entry.get("last_import")
+    if not li or not isinstance(li, str):
+        return None
+    s = li.strip()
+    return s or None
+
+
 def get_engine(save_name: str):
     """Read-only SQLAlchemy engine for the save's database (queries, reports, MCP).
 

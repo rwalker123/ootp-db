@@ -20,9 +20,6 @@ from config import (
     ARCHETYPE_SPEED_SB,
     ARCHETYPE_SPEED_XBA_MIN,
     ARCHETYPE_SPEED_XSLG_MAX,
-    DEFENSE_BAT_FIRST_MULTIPLIER,
-    DEFENSE_PREMIUM_MULTIPLIER,
-    OOTP_RATING_SCALE_MIN,
     PITCHER_WEIGHT_CLUBHOUSE,
     PITCHER_WEIGHT_COMMAND,
     PITCHER_WEIGHT_CONTACT_SUPPRESSION,
@@ -47,13 +44,35 @@ from ootp_db_constants import (
 )
 from shared_css import get_engine
 
-from .constants import (
-    BATTER_WEIGHTS,
-    LOW_DEFENSE_POS,
-    POS_FIELD_COL,
-    PREMIUM_DEFENSE_POS,
-    SCALE_RANGE,
-)
+from .constants import BATTER_WEIGHTS
+from .defense_blend import defense_score_from_rating_and_stats
+
+
+# Same year / league / level slice as batch ``fielding_cur``, parameterized by player and position.
+_FOCUS_POSITION_FIELDING_STATS_SQL = """
+SELECT
+    COALESCE(SUM(pcfs.g), 0) AS fld_g,
+    COALESCE(SUM(pcfs.tc), 0) AS fld_tc,
+    COALESCE(SUM(pcfs.po), 0) AS fld_po,
+    COALESCE(SUM(pcfs.a), 0) AS fld_a,
+    COALESCE(SUM(pcfs.e), 0) AS fld_e,
+    COALESCE(SUM(pcfs.dp), 0) AS fld_dp,
+    COALESCE(SUM(pcfs.pb), 0) AS fld_pb,
+    COALESCE(SUM(pcfs.sba), 0) AS fld_sba,
+    COALESCE(SUM(pcfs.rto), 0) AS fld_rto,
+    COALESCE(SUM(pcfs.framing), 0) AS fld_framing,
+    COALESCE(SUM(pcfs.arm), 0) AS fld_arm,
+    COALESCE(SUM(pcfs.zr), 0) AS fld_zr
+FROM players_career_fielding_stats pcfs
+WHERE pcfs.player_id = :pid
+  AND pcfs.league_id = :lid
+  AND pcfs.level_id = :lvl
+  AND pcfs.position = :pos
+  AND pcfs.year = (
+      SELECT MAX(year) FROM players_career_fielding_stats
+      WHERE league_id = :lid AND level_id = :lvl
+  )
+"""
 
 
 def classify_batter_archetype(adv):
@@ -115,6 +134,28 @@ def classify_batter_archetype(adv):
     return None, None, None
 
 
+def lookup_player_id_for_rating_report(conn, first_name, last_name):
+    """Resolve player_id the same way as :func:`query_player_rating` (MLB ``player_ratings`` row).
+
+    Uses ``ORDER BY pr.player_id LIMIT 1`` so duplicate names pick a stable row.
+    Returns None if no rated player matches.
+    """
+    from sqlalchemy import text as sa_text
+
+    row = conn.execute(
+        sa_text(
+            "SELECT pr.player_id FROM player_ratings pr "
+            "JOIN players p ON p.player_id = pr.player_id "
+            "WHERE pr.first_name = :first AND pr.last_name = :last "
+            "ORDER BY pr.player_id LIMIT 1"
+        ),
+        dict(first=first_name, last=last_name),
+    ).fetchone()
+    if not row:
+        return None
+    return int(row[0])
+
+
 def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     """Query and compute all data needed for a player rating report.
 
@@ -144,7 +185,8 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         _rating_from = (
             " FROM player_ratings pr "
             "JOIN players p ON p.player_id = pr.player_id "
-            "WHERE pr.first_name = :first AND pr.last_name = :last"
+            "WHERE pr.first_name = :first AND pr.last_name = :last "
+            "ORDER BY pr.player_id LIMIT 1"
         )
         try:
             row = conn.execute(sa_text(
@@ -260,23 +302,24 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         if target_pos is not None:
             with engine.connect() as conn:
                 from sqlalchemy import text as sa_text
-                field_row = conn.execute(sa_text(
-                    "SELECT * FROM players_fielding WHERE player_id = :pid"
-                ), dict(pid=player_id)).fetchone()
-                if field_row:
-                    field_dict = dict(zip(field_row._mapping.keys(), field_row))
-                    pos_col = POS_FIELD_COL.get(target_pos)
-                    if pos_col and pos_col in field_dict:
-                        field_rating = field_dict.get(pos_col) or 0
-                        raw_score = (
-                            min(100.0, max(0.0, (field_rating - OOTP_RATING_SCALE_MIN) / SCALE_RANGE * 100))
-                            if field_rating > 0 else 50.0
-                        )
-                        scores["defense"] = raw_score
-                        if target_pos in PREMIUM_DEFENSE_POS:
-                            base_weights["defense"] = min(base_weights["defense"] * DEFENSE_PREMIUM_MULTIPLIER, 0.95)
-                        elif target_pos in LOW_DEFENSE_POS:
-                            base_weights["defense"] *= DEFENSE_BAT_FIRST_MULTIPLIER
+                field_row = conn.execute(
+                    sa_text("SELECT * FROM players_fielding WHERE player_id = :pid"),
+                    dict(pid=player_id),
+                ).fetchone()
+                field_dict = dict(field_row._mapping) if field_row else {}
+                stats_row = conn.execute(
+                    sa_text(_FOCUS_POSITION_FIELDING_STATS_SQL),
+                    dict(
+                        pid=player_id,
+                        lid=MLB_LEAGUE_ID,
+                        lvl=MLB_LEVEL_ID,
+                        pos=target_pos,
+                    ),
+                ).mappings().fetchone()
+                fld_stats = dict(stats_row) if stats_row else {}
+                scores["defense"] = defense_score_from_rating_and_stats(
+                    field_dict, fld_stats, target_pos
+                )
 
     focus_map = {
         "defense": ("defense", 0.15), "fielding": ("defense", 0.15),
