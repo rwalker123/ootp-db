@@ -13,16 +13,35 @@ def _load_defense_blend():
         p = str(_SRC)
         if p not in sys.path:
             sys.path.insert(0, p)
+        from config import OOTP_RATING_SCALE_MIN
         from ootp_db_constants import POS_SHORTSTOP as POS_SS
 
+        from ratings.constants import SCALE_RANGE, apply_defense_position_score_multiplier
         from ratings.defense_blend import defense_score_from_rating_and_stats
 
-        return POS_SS, defense_score_from_rating_and_stats
+        return (
+            POS_SS,
+            defense_score_from_rating_and_stats,
+            OOTP_RATING_SCALE_MIN,
+            SCALE_RANGE,
+            apply_defense_position_score_multiplier,
+        )
     finally:
         sys.path[:] = original
 
 
-POS_SS, defense_score_from_rating_and_stats = _load_defense_blend()
+(
+    POS_SS,
+    defense_score_from_rating_and_stats,
+    _OOTP_RATING_SCALE_MIN,
+    _SCALE_RANGE,
+    _apply_defense_premium,
+) = _load_defense_blend()
+
+
+def _normalized_fielding_score(raw_ootp_rating: float) -> float:
+    """Mirror ``_clamp_num`` + scale step in ``defense_blend._rating_from_fielding_column``."""
+    return max(0.0, min(100.0, (raw_ootp_rating - _OOTP_RATING_SCALE_MIN) / _SCALE_RANGE * 100.0))
 
 
 class TestDefenseBlend(unittest.TestCase):
@@ -31,13 +50,16 @@ class TestDefenseBlend(unittest.TestCase):
         fielding = {"fielding_rating_pos6": 50}
         stats = {"fld_g": 0}
         s = defense_score_from_rating_and_stats(fielding, stats, POS_SS)
-        # Rating (50-20)/60*100 = 50; premium 1.3 → 65
-        self.assertAlmostEqual(s, 65.0, places=5)
+        baseline = _normalized_fielding_score(50.0)
+        expected = _apply_defense_premium(baseline, POS_SS)
+        self.assertAlmostEqual(s, expected, places=5)
 
     def test_empty_fielding_defaults_rating_fifty(self):
         stats = {"fld_g": 0}
         s = defense_score_from_rating_and_stats({}, stats, POS_SS)
-        self.assertAlmostEqual(s, 65.0, places=5)
+        # Missing column path uses a fixed 50 on the 0–100 axis (not raw OOTP scale).
+        expected = _apply_defense_premium(50.0, POS_SS)
+        self.assertAlmostEqual(s, expected, places=5)
 
     def test_ss_with_enough_games_blends_stats(self):
         fielding = {"fielding_rating_pos6": 50}
