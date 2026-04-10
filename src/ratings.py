@@ -4,7 +4,7 @@
 Computes composite 0-100 ratings for all MLB players by combining:
 - Advanced stats (from batter/pitcher_advanced_stats tables)
 - OOTP ratings (potential, fielding, running)
-- Personality traits (work ethic, intelligence, leadership)
+- Personality traits (work ethic, intelligence, adaptability, leadership)
 - Injury proneness
 - Career trajectory trends
 
@@ -25,7 +25,6 @@ from config import (
     BATTER_WEIGHT_CLUBHOUSE,
     BATTER_WEIGHT_CONTACT,
     BATTER_WEIGHT_DEFENSE,
-    BATTER_WEIGHT_DEVELOPMENT,
     BATTER_WEIGHT_DISCIPLINE,
     BATTER_WEIGHT_DURABILITY,
     BATTER_WEIGHT_OFFENSE,
@@ -37,6 +36,11 @@ from config import (
     DEVELOPMENT_EXPONENT,
     DEVELOPMENT_MAX_AGE,
     DEVELOPMENT_MIN_AGE,
+    DEVELOPMENT_REALIZATION_MULT_MAX,
+    DEVELOPMENT_REALIZATION_MULT_MIN,
+    DEVELOPMENT_TRAIT_WEIGHT_ADAPTABILITY,
+    DEVELOPMENT_TRAIT_WEIGHT_INTELLIGENCE,
+    DEVELOPMENT_TRAIT_WEIGHT_WORK_ETHIC,
     FIELDING_MIN_GAMES,
     INJURY_DURABLE_MAX,
     INJURY_FRAGILE_MAX,
@@ -56,7 +60,6 @@ from config import (
     PITCHER_WEIGHT_CLUBHOUSE,
     PITCHER_WEIGHT_COMMAND,
     PITCHER_WEIGHT_CONTACT_SUPPRESSION,
-    PITCHER_WEIGHT_DEVELOPMENT,
     PITCHER_WEIGHT_DOMINANCE,
     PITCHER_WEIGHT_DURABILITY,
     PITCHER_WEIGHT_POTENTIAL,
@@ -241,7 +244,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     with engine.connect() as conn:
         from sqlalchemy import text as sa_text
 
-        row = conn.execute(sa_text(
+        _rating_sql = (
             "SELECT pr.player_id, pr.first_name, pr.last_name, pr.team_abbr, pr.position, "
             "pr.age, pr.oa, pr.pot, pr.player_type, pr.rating_overall, "
             "pr.rating_offense, pr.rating_contact_quality, pr.rating_discipline, "
@@ -253,15 +256,27 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
             "p.bats, p.throws, "
             "p.prone_leg, p.prone_back, p.prone_arm, "
             "p.personality_work_ethic, p.personality_intelligence, p.personality_leader, "
-            "p.personality_greed, p.personality_loyalty, p.personality_play_for_winner "
-            "FROM player_ratings pr "
+            "p.personality_greed, p.personality_loyalty, p.personality_play_for_winner"
+        )
+        _rating_from = (
+            " FROM player_ratings pr "
             "JOIN players p ON p.player_id = pr.player_id "
             "WHERE pr.first_name = :first AND pr.last_name = :last"
-        ), dict(first=first_name, last=last_name)).fetchone()
+        )
+        try:
+            row = conn.execute(sa_text(
+                _rating_sql + ", p.personality_adaptability " + _rating_from
+            ), dict(first=first_name, last=last_name)).fetchone()
+        except Exception:
+            row = conn.execute(sa_text(_rating_sql + _rating_from), dict(first=first_name, last=last_name)).fetchone()
 
         if not row:
             return None
 
+        vals = list(row._mapping.values()) if hasattr(row, "_mapping") else list(row)
+        adaptability = None
+        if len(vals) == 40:
+            adaptability = vals.pop()
         (player_id, first, last, team_abbr, position, age, oa, pot, player_type,
          rating_overall, r_offense, r_contact, r_discipline, r_defense, r_potential,
          r_durability, r_development, r_clubhouse, r_baserunning,
@@ -269,7 +284,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
          wrc_plus_or_fip, war, prone_overall,
          rating_now, rating_ceiling, confidence,
          bats, throws, prone_leg, prone_back, prone_arm,
-         work_ethic, intelligence, leader, greed, loyalty, play_for_winner) = row
+         work_ethic, intelligence, leader, greed, loyalty, play_for_winner) = vals
 
         # Position rank by Performance Rating (rating_now)
         rank_row = conn.execute(sa_text(
@@ -309,37 +324,36 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
 
     if is_pitcher:
         base_weights = dict(
-            offense=0.30, contact_quality=0.15, discipline=0.15,
-            defense=0.10, potential=0.15, durability=0.05,
-            development=0.03, clubhouse=0.02, baserunning=0.05,
+            offense=PITCHER_WEIGHT_RUN_PREVENTION,
+            contact_quality=PITCHER_WEIGHT_CONTACT_SUPPRESSION,
+            discipline=PITCHER_WEIGHT_DOMINANCE,
+            defense=PITCHER_WEIGHT_COMMAND,
+            potential=PITCHER_WEIGHT_POTENTIAL,
+            durability=PITCHER_WEIGHT_DURABILITY,
+            clubhouse=PITCHER_WEIGHT_CLUBHOUSE,
+            baserunning=PITCHER_WEIGHT_ROLE_VALUE,
         )
         component_labels = [
             ("offense", "Run Prevention"),
             ("contact_quality", "Contact Suppression"),
             ("discipline", "Dominance"),
             ("defense", "Command"),
-            ("potential", "Potential"),
             ("durability", "Durability"),
-            ("development", "Development"),
-            ("clubhouse", "Clubhouse"),
             ("baserunning", "Role Value"),
+            ("potential", "Potential"),
+            ("clubhouse", "Clubhouse"),
         ]
     else:
-        base_weights = dict(
-            offense=0.30, contact_quality=0.15, discipline=0.10,
-            defense=0.15, potential=0.15, durability=0.05,
-            development=0.03, clubhouse=0.02, baserunning=0.05,
-        )
+        base_weights = dict(BATTER_WEIGHTS)
         component_labels = [
             ("offense", "Offense"),
             ("contact_quality", "Contact Quality"),
             ("discipline", "Discipline"),
             ("defense", "Defense"),
-            ("potential", "Potential"),
             ("durability", "Durability"),
-            ("development", "Development"),
-            ("clubhouse", "Clubhouse"),
             ("baserunning", "Baserunning"),
+            ("potential", "Potential"),
+            ("clubhouse", "Clubhouse"),
         ]
 
     scores = dict(
@@ -401,7 +415,8 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         "discipline": ("discipline", 0.15),
         "offense": ("offense", 0.15), "hitting": ("offense", 0.15),
         "speed": ("baserunning", 0.15), "baserunning": ("baserunning", 0.15),
-        "development": ("development", 0.15), "work": ("development", 0.15), "ethic": ("development", 0.15),
+        "development": ("potential", 0.15), "work": ("potential", 0.15), "ethic": ("potential", 0.15),
+        "adaptability": ("potential", 0.15), "iq": ("potential", 0.15),
         "clubhouse": ("clubhouse", 0.15), "leadership": ("clubhouse", 0.15),
         "dominance": ("discipline", 0.15), "strikeouts": ("discipline", 0.15),
         "command": ("defense", 0.15), "control": ("defense", 0.15),
@@ -540,6 +555,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
     prone_arm_v = int(prone_arm) if prone_arm is not None else 100
     we_v = int(work_ethic) if work_ethic is not None else 100
     iq_v = int(intelligence) if intelligence is not None else 100
+    adapt_v = int(adaptability) if adaptability is not None else 100
     leader_v = int(leader) if leader is not None else 100
     greed_v = int(greed) if greed is not None else 100
     loyalty_v = int(loyalty) if loyalty is not None else 100
@@ -584,6 +600,7 @@ def query_player_rating(save_name, first_name, last_name, focus_modifiers=None):
         prone_arm_v=prone_arm_v,
         we_v=we_v,
         iq_v=iq_v,
+        adapt_v=adapt_v,
         leader_v=leader_v,
         greed_v=greed_v,
         loyalty_v=loyalty_v,
@@ -656,6 +673,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     prone_arm_v = data["prone_arm_v"]
     we_v = data["we_v"]
     iq_v = data["iq_v"]
+    adapt_v = data["adapt_v"]
     leader_v = data["leader_v"]
     greed_v = data["greed_v"]
     loyalty_v = data["loyalty_v"]
@@ -755,13 +773,19 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         flag_pills += '<span class="flag flag-blue">📈 High Ceiling</span>'
     flags_html = f'<div class="flags">{flag_pills}</div>' if flag_pills else ""
 
-    # Sub-score table rows
+    _trade_only_tip = (
+        '<span style="cursor:help;color:#7f8c8d;font-size:11px;margin-left:3px;vertical-align:super" '
+        'title="Trade only">†</span>'
+    )
     sub_rows = ""
     for key, label in component_labels:
         sc = scores[key]
-        w_pct = weights[key] * 100
-        sub_rows += (f'<tr><td class="left">{label}</td>'
-                     f'<td>{w_pct:.0f}%</td>'
+        w_cell = f"{weights[key] * 100:.0f}%"
+        label_html = label
+        if key in ("potential", "clubhouse"):
+            label_html = f"{label}{_trade_only_tip}"
+        sub_rows += (f'<tr><td class="left">{label_html}</td>'
+                     f'<td>{w_cell}</td>'
                      f'<td class="score-num">{sc:.1f}</td>'
                      f'<td>{bar_html(sc)}</td></tr>')
 
@@ -779,8 +803,10 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
     dev_rows = (
         f'<tr><td class="left">Work Ethic</td><td>{we_v}</td>'
         f'<td style="color:{trait_color(we_v)};font-weight:bold">{trait_label(we_v)}</td></tr>'
-        f'<tr><td class="left">Intelligence</td><td>{iq_v}</td>'
+        f'<tr><td class="left">Baseball IQ</td><td>{iq_v}</td>'
         f'<td style="color:{trait_color(iq_v)};font-weight:bold">{trait_label(iq_v)}</td></tr>'
+        f'<tr><td class="left">Adaptability</td><td>{adapt_v}</td>'
+        f'<td style="color:{trait_color(adapt_v)};font-weight:bold">{trait_label(adapt_v)}</td></tr>'
     )
     club_rows = (
         f'<tr><td class="left">Leadership</td><td>{leader_v}</td>'
@@ -855,6 +881,7 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
   <td>{bar_html(final_rating)}</td>
   </tr>
   </table>
+  <p style="font-size:11px;color:#888;margin:6px 0 0 0">† Trade only</p>
 </div>
 
 <div class="section">
@@ -866,7 +893,8 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
 </div>
 
 <div class="section">
-  <div class="section-title">Development</div>
+  <div class="section-title">Development Potential</div>
+  <p style="font-size:12px;color:#666;margin:0 0 8px 0">Work ethic, baseball IQ, and adaptability scale the <b>Potential</b> component in the Trade/Contract rating (along with OA/POT gap and age).</p>
   <table>
   <tr><th class="left">Trait</th><th>Value</th><th>Label</th></tr>
   {dev_rows}
@@ -1048,7 +1076,6 @@ BATTER_WEIGHTS = {
     "defense":         BATTER_WEIGHT_DEFENSE,
     "potential":       BATTER_WEIGHT_POTENTIAL,
     "durability":      BATTER_WEIGHT_DURABILITY,
-    "development":     BATTER_WEIGHT_DEVELOPMENT,
     "clubhouse":       BATTER_WEIGHT_CLUBHOUSE,
     "baserunning":     BATTER_WEIGHT_BASERUNNING,
 }
@@ -1060,7 +1087,6 @@ PITCHER_WEIGHTS = {
     "command":             PITCHER_WEIGHT_COMMAND,
     "potential":           PITCHER_WEIGHT_POTENTIAL,
     "durability":          PITCHER_WEIGHT_DURABILITY,
-    "development":         PITCHER_WEIGHT_DEVELOPMENT,
     "clubhouse":           PITCHER_WEIGHT_CLUBHOUSE,
     "role_value":          PITCHER_WEIGHT_ROLE_VALUE,
 }
@@ -1088,13 +1114,23 @@ def load_batter_data(engine):
     """Load all data needed for batter ratings."""
     stats = pd.read_sql("SELECT * FROM batter_advanced_stats", engine)
 
-    players = pd.read_sql(f"""
-        SELECT player_id, age, position, prone_overall,
-               personality_work_ethic, personality_intelligence, personality_leader,
-               personality_greed, personality_loyalty
-        FROM players
-        WHERE player_id IN (SELECT player_id FROM batter_advanced_stats)
-    """, engine)
+    try:
+        players = pd.read_sql(f"""
+            SELECT player_id, age, position, prone_overall,
+                   personality_work_ethic, personality_intelligence, personality_leader,
+                   personality_greed, personality_loyalty, personality_adaptability
+            FROM players
+            WHERE player_id IN (SELECT player_id FROM batter_advanced_stats)
+        """, engine)
+    except Exception:
+        players = pd.read_sql(f"""
+            SELECT player_id, age, position, prone_overall,
+                   personality_work_ethic, personality_intelligence, personality_leader,
+                   personality_greed, personality_loyalty
+            FROM players
+            WHERE player_id IN (SELECT player_id FROM batter_advanced_stats)
+        """, engine)
+        players["personality_adaptability"] = pd.NA
 
     value = pd.read_sql(f"""
         SELECT player_id, oa, pot, oa_rating, pot_rating
@@ -1197,13 +1233,23 @@ def load_pitcher_data(engine):
     """Load all data needed for pitcher ratings."""
     stats = pd.read_sql("SELECT * FROM pitcher_advanced_stats", engine)
 
-    players = pd.read_sql(f"""
-        SELECT player_id, age, position, prone_overall,
-               personality_work_ethic, personality_intelligence, personality_leader,
-               personality_greed, personality_loyalty
-        FROM players
-        WHERE player_id IN (SELECT player_id FROM pitcher_advanced_stats)
-    """, engine)
+    try:
+        players = pd.read_sql(f"""
+            SELECT player_id, age, position, prone_overall,
+                   personality_work_ethic, personality_intelligence, personality_leader,
+                   personality_greed, personality_loyalty, personality_adaptability
+            FROM players
+            WHERE player_id IN (SELECT player_id FROM pitcher_advanced_stats)
+        """, engine)
+    except Exception:
+        players = pd.read_sql(f"""
+            SELECT player_id, age, position, prone_overall,
+                   personality_work_ethic, personality_intelligence, personality_leader,
+                   personality_greed, personality_loyalty
+            FROM players
+            WHERE player_id IN (SELECT player_id FROM pitcher_advanced_stats)
+        """, engine)
+        players["personality_adaptability"] = pd.NA
 
     value = pd.read_sql(f"""
         SELECT player_id, oa, pot, oa_rating, pot_rating
@@ -1503,20 +1549,46 @@ def compute_ceiling_score(value_row):
     return clamp((pot - oa) * 5)
 
 
-def score_potential(value_row, age, _current_metric=None, _prev_metric=None):
-    """Potential score: ceiling gap discounted by age-decay credit.
+def score_development_traits(player_row):
+    """0–100 blend of work ethic, intelligence, adaptability.
 
-    Growth credit follows a configurable power curve from DEVELOPMENT_MIN_AGE
-    (full credit = 1.0) to DEVELOPMENT_MAX_AGE (zero credit). Ages below the
-    minimum are treated as the minimum; ages at or above the maximum return 0.
-    Curve shape is controlled by DEVELOPMENT_EXPONENT (same pattern as
-    REGRESSION_EXPONENT): 0.5=sqrt generous, 1.0=linear, 2.0=steep.
+    Stored as rating_development for display; also drives the multiplier inside
+    score_potential(). OOTP traits are on a 0–200 scale → halved then clamped.
+    """
+    we = player_row.get("personality_work_ethic", 100)
+    iq = player_row.get("personality_intelligence", 100)
+    ad = player_row.get("personality_adaptability", 100)
+    if pd.isna(we) or we is None:
+        we = 100
+    if pd.isna(iq) or iq is None:
+        iq = 100
+    if pd.isna(ad) or ad is None:
+        ad = 100
+    t_we = clamp(float(we) / 2)
+    t_iq = clamp(float(iq) / 2)
+    t_ad = clamp(float(ad) / 2)
+    return (
+        t_we * DEVELOPMENT_TRAIT_WEIGHT_WORK_ETHIC
+        + t_iq * DEVELOPMENT_TRAIT_WEIGHT_INTELLIGENCE
+        + t_ad * DEVELOPMENT_TRAIT_WEIGHT_ADAPTABILITY
+    )
 
-    The trend (year-over-year metric change) was previously blended in here but
-    that signal belongs in score_development(). Keeping this dimension focused
-    on ceiling-vs-age keeps the two columns interpretable independently.
+
+def score_potential(value_row, age, player_row, _current_metric=None, _prev_metric=None):
+    """Trade upside: OA/POT ceiling × development realization × age runway.
+
+    Realization maps trait score to [DEVELOPMENT_REALIZATION_MULT_MIN, MAX] so
+    elite traits can sit above the naive ceiling gap and poor traits below it.
+    Age credit (growth runway) uses DEVELOPMENT_MIN_AGE / DEVELOPMENT_MAX_AGE /
+    DEVELOPMENT_EXPONENT — same curve as before, applied after ceiling×traits.
     """
     ceiling = compute_ceiling_score(value_row)
+    d_traits = score_development_traits(player_row)
+    mult = (
+        DEVELOPMENT_REALIZATION_MULT_MIN
+        + (d_traits / 100.0)
+        * (DEVELOPMENT_REALIZATION_MULT_MAX - DEVELOPMENT_REALIZATION_MULT_MIN)
+    )
 
     if pd.isna(age):
         age = DEVELOPMENT_MAX_AGE
@@ -1531,7 +1603,7 @@ def score_potential(value_row, age, _current_metric=None, _prev_metric=None):
     else:
         growth_credit = (years_remaining / years_total) ** DEVELOPMENT_EXPONENT
 
-    return ceiling * growth_credit
+    return clamp(ceiling * mult * growth_credit)
 
 
 def score_durability(player_row):
@@ -1540,20 +1612,6 @@ def score_durability(player_row):
     if pd.isna(prone):
         prone = 100
     return clamp(100 - prone / 2)
-
-
-def score_development(player_row):
-    """Development score from Work Ethic and Intelligence.
-    Drives development speed, ceiling achievement, slump resistance, and longevity.
-    Age-flat — score_potential() already weights ceiling gap more for young players.
-    """
-    we = player_row.get("personality_work_ethic", 100)
-    iq = player_row.get("personality_intelligence", 100)
-    if pd.isna(we):
-        we = 100
-    if pd.isna(iq):
-        iq = 100
-    return clamp(we / 2) * 0.50 + clamp(iq / 2) * 0.50
 
 
 def score_clubhouse(player_row):
@@ -1718,9 +1776,9 @@ def compute_batter_ratings(engine):
         s_discipline = score_discipline(row, career_pa)
         s_defense = score_defense(row, row, pos)
         s_baserunning = score_baserunning(row)
-        s_potential = score_potential(row, age, trend_current, trend_prev)
+        s_development = score_development_traits(row)
+        s_potential = score_potential(row, age, row, trend_current, trend_prev)
         s_durability = score_durability(row)
-        s_development = score_development(row)
         s_clubhouse = score_clubhouse(row)
 
         # Split offense scores (vs LHP / vs RHP)
@@ -1757,8 +1815,7 @@ def compute_batter_ratings(engine):
         # Weights are renormalized so they still sum to 1.0.
         now_total_weight = (
             BATTER_WEIGHT_OFFENSE + BATTER_WEIGHT_CONTACT + BATTER_WEIGHT_DISCIPLINE +
-            BATTER_WEIGHT_DEFENSE + BATTER_WEIGHT_DURABILITY + BATTER_WEIGHT_DEVELOPMENT +
-            BATTER_WEIGHT_CLUBHOUSE + BATTER_WEIGHT_BASERUNNING
+            BATTER_WEIGHT_DEFENSE + BATTER_WEIGHT_DURABILITY + BATTER_WEIGHT_BASERUNNING
         )
         rating_now = clamp((
             s_offense    * BATTER_WEIGHT_OFFENSE     +
@@ -1766,8 +1823,6 @@ def compute_batter_ratings(engine):
             s_discipline * BATTER_WEIGHT_DISCIPLINE   +
             s_defense    * BATTER_WEIGHT_DEFENSE      +
             s_durability * BATTER_WEIGHT_DURABILITY   +
-            s_development * BATTER_WEIGHT_DEVELOPMENT +
-            s_clubhouse  * BATTER_WEIGHT_CLUBHOUSE    +
             s_baserunning * BATTER_WEIGHT_BASERUNNING
         ) / now_total_weight)
 
@@ -1778,8 +1833,6 @@ def compute_batter_ratings(engine):
             s_discipline  * BATTER_WEIGHT_DISCIPLINE   +
             s_defense     * BATTER_WEIGHT_DEFENSE      +
             s_durability  * BATTER_WEIGHT_DURABILITY   +
-            s_development * BATTER_WEIGHT_DEVELOPMENT  +
-            s_clubhouse   * BATTER_WEIGHT_CLUBHOUSE    +
             s_baserunning * BATTER_WEIGHT_BASERUNNING
         ) / now_total_weight)
         rating_now_rhp = clamp((
@@ -1788,8 +1841,6 @@ def compute_batter_ratings(engine):
             s_discipline  * BATTER_WEIGHT_DISCIPLINE   +
             s_defense     * BATTER_WEIGHT_DEFENSE      +
             s_durability  * BATTER_WEIGHT_DURABILITY   +
-            s_development * BATTER_WEIGHT_DEVELOPMENT  +
-            s_clubhouse   * BATTER_WEIGHT_CLUBHOUSE    +
             s_baserunning * BATTER_WEIGHT_BASERUNNING
         ) / now_total_weight)
 
@@ -1801,7 +1852,6 @@ def compute_batter_ratings(engine):
             s_defense * BATTER_WEIGHTS["defense"] +
             s_potential * BATTER_WEIGHTS["potential"] +
             s_durability * BATTER_WEIGHTS["durability"] +
-            s_development * BATTER_WEIGHTS["development"] +
             s_clubhouse * BATTER_WEIGHTS["clubhouse"] +
             s_baserunning * BATTER_WEIGHTS["baserunning"]
         )
@@ -1958,9 +2008,9 @@ def compute_pitcher_ratings(engine):
         s_dominance = score_dominance(row)
         s_suppress = score_contact_suppression(player_pctiles)
         s_command = score_command(row)
-        s_potential = score_potential(row, age, pot_current, pot_prev)
+        s_development = score_development_traits(row)
+        s_potential = score_potential(row, age, row, pot_current, pot_prev)
         s_durability = score_durability(row)
-        s_development = score_development(row)
         s_clubhouse = score_clubhouse(row)
         s_role = score_role_value(row)
 
@@ -1972,8 +2022,7 @@ def compute_pitcher_ratings(engine):
         now_total_weight = (
             PITCHER_WEIGHT_RUN_PREVENTION + PITCHER_WEIGHT_DOMINANCE +
             PITCHER_WEIGHT_CONTACT_SUPPRESSION + PITCHER_WEIGHT_COMMAND +
-            PITCHER_WEIGHT_DURABILITY + PITCHER_WEIGHT_DEVELOPMENT +
-            PITCHER_WEIGHT_CLUBHOUSE + PITCHER_WEIGHT_ROLE_VALUE
+            PITCHER_WEIGHT_DURABILITY + PITCHER_WEIGHT_ROLE_VALUE
         )
         rating_now = clamp((
             s_run_prev   * PITCHER_WEIGHT_RUN_PREVENTION      +
@@ -1981,8 +2030,6 @@ def compute_pitcher_ratings(engine):
             s_suppress   * PITCHER_WEIGHT_CONTACT_SUPPRESSION +
             s_command    * PITCHER_WEIGHT_COMMAND             +
             s_durability * PITCHER_WEIGHT_DURABILITY          +
-            s_development * PITCHER_WEIGHT_DEVELOPMENT        +
-            s_clubhouse  * PITCHER_WEIGHT_CLUBHOUSE           +
             s_role       * PITCHER_WEIGHT_ROLE_VALUE
         ) / now_total_weight)
 
@@ -1993,7 +2040,6 @@ def compute_pitcher_ratings(engine):
             s_command * PITCHER_WEIGHTS["command"] +
             s_potential * PITCHER_WEIGHTS["potential"] +
             s_durability * PITCHER_WEIGHTS["durability"] +
-            s_development * PITCHER_WEIGHTS["development"] +
             s_clubhouse * PITCHER_WEIGHTS["clubhouse"] +
             s_role * PITCHER_WEIGHTS["role_value"]
         )

@@ -515,26 +515,29 @@ def _build_candidate_header(p, adv, last_import, generated_at):
 
 
 def _build_ratings_section(p):
+    tip = (
+        '<span style="cursor:help;color:#7f8c8d;font-size:10px;margin-left:3px;vertical-align:super" '
+        'title="Trade only">†</span>'
+    )
     scores = [
-        ("Offense", p.get("rating_offense")),
-        ("Contact", p.get("rating_contact_quality")),
-        ("Discipline", p.get("rating_discipline")),
-        ("Defense", p.get("rating_defense")),
-        ("Baserunning", p.get("rating_baserunning")),
-        ("Potential", p.get("rating_potential")),
-        ("Durability", p.get("rating_durability")),
-        ("Development", p.get("rating_development")),
-        ("Clubhouse", p.get("rating_clubhouse")),
+        ("offense", "Offense", p.get("rating_offense")),
+        ("contact", "Contact", p.get("rating_contact_quality")),
+        ("discipline", "Discipline", p.get("rating_discipline")),
+        ("defense", "Defense", p.get("rating_defense")),
+        ("baserunning", "Baserunning", p.get("rating_baserunning")),
+        ("durability", "Durability", p.get("rating_durability")),
+        ("potential", f"Potential{tip}", p.get("rating_potential")),
+        ("clubhouse", f"Clubhouse{tip}", p.get("rating_clubhouse")),
     ]
     rows = ""
-    for label, val in scores:
+    for _key, label_html, val in scores:
         if val is None:
             continue
         v = float(val)
         bar_class = "bar-green" if v >= 70 else "bar-yellow" if v >= 40 else "bar-red"
         c = score_color(v)
         rows += (
-            f"<tr><td class='left'>{label}</td>"
+            f"<tr><td class='left'>{label_html}</td>"
             f"<td><div class='bar-bg'><div class='bar-fill {bar_class}' "
             f"style='width:{v}%'></div></div></td>"
             f"<td style='font-weight:bold;color:{c}'>{v:.0f}</td></tr>\n"
@@ -542,10 +545,11 @@ def _build_ratings_section(p):
     return f"""
 <div class="section">
   <div class="section-title">Rating Breakdown</div>
-  <table style="width:auto;min-width:320px">
+  <table style="width:auto;min-width:280px">
     <thead><tr><th class="left">Dimension</th><th style="width:190px">Score</th><th>Value</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  <p style="font-size:10px;color:#888;margin:6px 0 0 0">† Trade only</p>
 </div>"""
 
 

@@ -639,17 +639,17 @@ or comparing players.**
 `oa` (OOTP overall), `pot` (OOTP potential), `player_type` ("batter" or "pitcher")
 
 **Composite ratings (0–100 scale):**
-- `rating_overall` — primary composite score; blends current production + age-weighted upside; use this to rank players by asset value
-- `rating_now` — current production only (potential excluded, remaining weights renormalized); use this to rank players by what they can do today
+- `rating_overall` — primary composite score; blends current production + trade upside (potential) + clubhouse; use this to rank players by asset value
+- `rating_now` — **Performance** rating: on-field dimensions + durability + baserunning (batters) or role value (pitchers); excludes potential, clubhouse, and development traits (weights renormalized)
 - `rating_ceiling` — raw ceiling gap score (0–100), age-independent; `(pot - oa) * 5`; use this to find upside; compute `rating_ceiling - rating_now` for the biggest gap players
 - `rating_offense` — hitting value
 - `rating_contact_quality` — contact + exit velocity
 - `rating_discipline` — walk/strikeout approach
 - `rating_defense` — fielding at primary position
-- `rating_potential` — age-discounted ceiling score (ceiling × growth_credit); shaped by DEVELOPMENT_EXPONENT/MIN_AGE/MAX_AGE in config.py
+- `rating_potential` — **Trade** upside: `rating_ceiling` × development-trait realization multiplier × age runway (`DEVELOPMENT_REALIZATION_MULT_*`, `DEVELOPMENT_TRAIT_WEIGHT_*`, `DEVELOPMENT_MIN_AGE` / `DEVELOPMENT_MAX_AGE` / `DEVELOPMENT_EXPONENT` in `config.py`)
 - `rating_durability` — injury resistance
-- `rating_development` — recent trajectory trend
-- `rating_clubhouse` — personality/leadership
+- `rating_development` — 0–100 trait blend (work ethic, intelligence / baseball IQ, adaptability); drives the multiplier inside `rating_potential` and is **not** a separate additive weight in `rating_overall`
+- `rating_clubhouse` — personality/leadership (Trade/Contract only — not in `rating_now`)
 - `rating_baserunning` — speed and baserunning
 
 **Confidence:** `confidence` (float, 0.0–1.0) — how much statistical backing the rating has.
