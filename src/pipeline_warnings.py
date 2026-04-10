@@ -11,7 +11,13 @@ WARNING_PATH = PROJECT_ROOT / "pipeline_warnings.json"
 
 
 def reset_pipeline_warnings() -> None:
-    WARNING_PATH.write_text(json.dumps(dict(warnings=[]), indent=2))
+    try:
+        WARNING_PATH.write_text(
+            json.dumps(dict(warnings=[]), indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def add_pipeline_warnings(msgs: list[str]) -> None:

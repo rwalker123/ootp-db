@@ -334,7 +334,12 @@ async function loadSaves() {
   const runningKey = JSON.stringify(data.running);
   const activeKey = data.active || '';
   const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k,
-    (v.csv_mtime || '') + '|' + (v.my_team_id || '') + '|' + (v.last_import || '') + '|' + (v.import_status || '') + '|' + ((v.import_warnings || []).length || 0),
+    (v.csv_mtime || '') + '|' +
+      (v.my_team_id || '') + '|' +
+      (v.last_import || '') + '|' +
+      (v.last_successful_import || '') + '|' +
+      (v.import_status || '') + '|' +
+      JSON.stringify(v.import_warnings || []),
   ])));
   const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey || savesKey !== _lastSavesKey;
   _lastRunningKey = runningKey;

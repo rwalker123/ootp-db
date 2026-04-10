@@ -837,13 +837,28 @@ def compute_pitcher_ratings(engine):
 
     # Get league FIP constant (NULL when no rows match export league/level keys or IP=0)
     with engine.connect() as conn:
-        r = conn.execute(text(f"""
-            SELECT SUM(er)*9.0/SUM(ip) as era,
-                   (SUM(er)*9.0/SUM(ip)) -
-                   ((13.0*SUM(hra) + 3.0*(SUM(bb)+SUM(hp)) - 2.0*SUM(k)) / SUM(ip)) as cfip
-            FROM team_pitching_stats
-            WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
-        """)).fetchone()
+        r = conn.execute(
+            text("""
+            SELECT sum_er * 9.0 / NULLIF(ip_sum, 0) AS era,
+                   (sum_er * 9.0 / NULLIF(ip_sum, 0)) -
+                   ((13.0 * sum_hra + 3.0 * (sum_bb + sum_hp) - 2.0 * sum_k) / NULLIF(ip_sum, 0)) AS cfip
+            FROM (
+                SELECT SUM(er) AS sum_er,
+                       SUM(ip) AS ip_sum,
+                       SUM(hra) AS sum_hra,
+                       SUM(bb) AS sum_bb,
+                       SUM(hp) AS sum_hp,
+                       SUM(k) AS sum_k
+                FROM team_pitching_stats
+                WHERE league_id = :league_id AND level_id = :level_id AND split_id = :split_id
+            ) t
+            """),
+            dict(
+                league_id=MLB_LEAGUE_ID,
+                level_id=MLB_LEVEL_ID,
+                split_id=SPLIT_TEAM_PITCHING_OVERALL,
+            ),
+        ).fetchone()
         cfip_raw = r[1] if r else None
         cfip = (
             float(cfip_raw)

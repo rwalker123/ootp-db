@@ -99,15 +99,23 @@ def get_league_batting_averages(engine, year):
     """Compute league-wide batting averages from team stats."""
     # COALESCE: if no rows match the WHERE (e.g. non-203 league_id), SQLite SUM is NULL
     # for all columns — arithmetic would otherwise raise TypeError / divide-by-zero.
-    df = pd.read_sql(f"""
+    df = pd.read_sql(
+        text("""
         SELECT COALESCE(SUM(pa), 0) AS pa, COALESCE(SUM(ab), 0) AS ab, COALESCE(SUM(h), 0) AS h,
                COALESCE(SUM(d), 0) AS d, COALESCE(SUM(t), 0) AS t, COALESCE(SUM(hr), 0) AS hr,
                COALESCE(SUM(bb), 0) AS bb, COALESCE(SUM(k), 0) AS k,
                COALESCE(SUM(hp), 0) AS hp, COALESCE(SUM(sf), 0) AS sf, COALESCE(SUM(sh), 0) AS sh,
                COALESCE(SUM(r), 0) AS r, COALESCE(SUM(ibb), 0) AS ibb, COALESCE(SUM(tb), 0) AS tb
         FROM team_batting_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_BATTING_OVERALL}
-    """, engine)
+        WHERE league_id = :league_id AND level_id = :level_id AND split_id = :split_id
+        """),
+        engine,
+        params=dict(
+            league_id=MLB_LEAGUE_ID,
+            level_id=MLB_LEVEL_ID,
+            split_id=SPLIT_TEAM_BATTING_OVERALL,
+        ),
+    )
     row = df.iloc[0]
     pa, ab, h, d, t, hr = map(float, (row.pa, row.ab, row.h, row.d, row.t, row.hr))
     bb, k, hp, sf, _, r, ibb, tb = map(
@@ -136,15 +144,23 @@ def get_league_batting_averages(engine, year):
 
 def get_league_pitching_averages(engine, year):
     """Compute league-wide pitching averages from team stats."""
-    df = pd.read_sql(f"""
+    df = pd.read_sql(
+        text("""
         SELECT COALESCE(SUM(ip), 0) AS ip, COALESCE(SUM(er), 0) AS er, COALESCE(SUM(k), 0) AS k,
                COALESCE(SUM(bb), 0) AS bb, COALESCE(SUM(hp), 0) AS hp, COALESCE(SUM(hra), 0) AS hra,
                COALESCE(SUM(ha), 0) AS ha, COALESCE(SUM(bf), 0) AS bf,
                COALESCE(SUM(gb), 0) AS gb, COALESCE(SUM(fb), 0) AS fb, COALESCE(SUM(ab), 0) AS ab,
                COALESCE(SUM(sf), 0) AS sf
         FROM team_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
-    """, engine)
+        WHERE league_id = :league_id AND level_id = :level_id AND split_id = :split_id
+        """),
+        engine,
+        params=dict(
+            league_id=MLB_LEAGUE_ID,
+            level_id=MLB_LEVEL_ID,
+            split_id=SPLIT_TEAM_PITCHING_OVERALL,
+        ),
+    )
     row = df.iloc[0]
     ip, er, k, bb, hp, hra, ha, bf, gb, fb, ab, sf = map(
         float,
