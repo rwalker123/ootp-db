@@ -33,6 +33,9 @@ PYEOF
 - **Always** use heredoc (`<< 'PYEOF'`) syntax, never `-c` with inline strings
 - **Never** use Python dicts (`{"key": val}`) or f-strings with braces in heredocs — 
   the shell flags curly braces as suspicious. Use `dict(key=val)` instead of `{"key": val}`.
+- **Never use `ILIKE` in SQL** — `ILIKE` is PostgreSQL-only and will fail on SQLite.
+  Use `LIKE` instead; SQLite's `LIKE` is already case-insensitive for ASCII characters.
+  This applies everywhere, including team name lookups in skill query modules.
 - **Never read `.env` directly** — it contains API keys. All DB config is accessed via
   `get_engine(save_name)` and `load_saves_registry()`. Never `cat .env`, never open it.
 - **`players_contract` salary columns** are named `salary0` through `salary14` (one per contract

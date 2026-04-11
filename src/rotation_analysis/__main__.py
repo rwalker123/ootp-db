@@ -32,7 +32,7 @@ def main():
     )
 
     # Parse openers=N or bare "opener"
-    m = re.search(r'openers?\s*=\s*(\d)', raw_lower)
+    m = re.search(r'openers?\s*=\s*(\d+)', raw_lower)
     n_openers = int(m.group(1)) if m else (1 if "opener" in raw_lower else 0)
 
     # Parse excluded names: "without <name>"

@@ -1360,7 +1360,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "balanced",
             )
             # openers=N or bare "opener"
-            _ra_openers_m = _re.search(r'openers?\s*=\s*(\d)', _ra_raw)
+            _ra_openers_m = _re.search(r'openers?\s*=\s*(\d+)', _ra_raw)
             _ra_openers = int(_ra_openers_m.group(1)) if _ra_openers_m else (
                 1 if _re.search(r'\bopener\b', _ra_raw) else 0
             )

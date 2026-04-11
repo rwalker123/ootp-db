@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from report_write import args_hash, report_filename, write_report_html
+from report_write import report_filename, write_report_html
 from shared_css import (
     get_engine,
     get_last_import_iso_for_save,
@@ -96,7 +96,7 @@ def _fmt_ip(val):
 # HTML row builders
 # ---------------------------------------------------------------------------
 
-def _rotation_row(slot_num, pitcher, show_flags=True):
+def _rotation_row(slot_num, pitcher):
     """Return an HTML <tr> for a rotation card row."""
     name  = html_mod.escape(f"{pitcher.get('first_name','')} {pitcher.get('last_name','')}".strip())
     hand  = THROWS_LABEL.get(pitcher.get("throws"), "?")
@@ -144,7 +144,7 @@ def _rotation_row(slot_num, pitcher, show_flags=True):
         <td style="color:{_era_color(era)};font-weight:bold">{_fmt(era)}</td>
         <td style="color:#555">{_fmt_ip(ip)}</td>
         <td style="color:#555">{gs}</td>
-        <td style="color:{_kpct_color(stats.get('k_pct'))};font-weight:bold">{_fmt_pct(k_bb)}</td>
+        <td style="color:{_kpct_color(k_bb)};font-weight:bold">{_fmt_pct(k_bb)}</td>
         <td style="color:{_whip_color(whip)};font-weight:bold">{_fmt(whip)}</td>
         <td style="background:#e8f5e9;color:{_score_color(score)};font-weight:bold">{score:.0f}</td>
       </tr>"""

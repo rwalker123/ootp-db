@@ -67,7 +67,7 @@ def resolve_team(conn, team_query):
     if team_query:
         rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
-            "WHERE (nickname ILIKE :q OR name ILIKE :q OR abbr ILIKE :q) "
+            "WHERE (nickname LIKE :q OR name LIKE :q OR abbr LIKE :q) "
             f"AND league_id = {MLB_LEAGUE_ID} ORDER BY name, team_id"
         ), dict(q=f"%{team_query}%")).fetchall()
         if not rows:
@@ -117,7 +117,9 @@ def load_starter_pool(conn, team_id):
         WHERE p.league_id = {MLB_LEAGUE_ID}
           AND (prs.player_id IS NULL
                OR (prs.is_on_waivers = 0
-                   AND COALESCE(prs.designated_for_assignment, 0) = 0))
+                   AND COALESCE(prs.designated_for_assignment, 0) = 0
+                   AND COALESCE(prs.is_on_dl, 0) = 0
+                   AND COALESCE(prs.is_on_dl60, 0) = 0))
           AND (
             p.role = {ROLE_SP}
             OR (
@@ -146,7 +148,9 @@ def load_relief_corps(conn, team_id):
         WHERE p.league_id = {MLB_LEAGUE_ID}
           AND (prs.player_id IS NULL
                OR (prs.is_on_waivers = 0
-                   AND COALESCE(prs.designated_for_assignment, 0) = 0))
+                   AND COALESCE(prs.designated_for_assignment, 0) = 0
+                   AND COALESCE(prs.is_on_dl, 0) = 0
+                   AND COALESCE(prs.is_on_dl60, 0) = 0))
           AND p.role IN ({ROLE_RP}, {ROLE_CL})
         ORDER BY p.last_name, p.first_name
     """), dict(tid=team_id)).fetchall()
@@ -225,6 +229,7 @@ def load_career_stats(conn, player_ids):
         WHERE player_id IN ({clause})
           AND split_id = {SPLIT_CAREER_OVERALL}
           AND level_id = {MLB_LEVEL_ID}
+          AND league_id = {MLB_LEAGUE_ID}
         GROUP BY player_id
     """)).fetchall()
     return {
@@ -493,7 +498,7 @@ def pick_opener_slots(rotation, n):
                                 # negative = FIP > xFIP (regression risk → more benefit from opener)
         # Primary: worst FIP (highest = most room to benefit)
         # Secondary: largest FIP-xFIP regression gap (FIP > xFIP → regression risk → prioritize)
-        return (-fip, max(0, -(fip_gap)))   # negate fip for ascending sort
+        return (fip, max(0, -(fip_gap)))   # highest FIP first; regression gap as tiebreaker
 
     candidates = sorted(enumerate(rotation), key=slot_priority, reverse=True)
     return sorted(idx for idx, _ in candidates[:n])
@@ -680,7 +685,7 @@ def query_rotation(save_name, team_query=None, mode="balanced",
     if mode not in ("balanced", "ace-first", "innings", "six-man"):
         mode = "balanced"
 
-    excluded_lower = set((n or "").lower() for n in (excluded_names or []))
+    excluded_names = excluded_names or []
     n_starters = SIX_MAN_SLOTS if six_man or mode == "six-man" else FIVE_MAN_SLOTS
 
     engine = get_engine(save_name)
@@ -692,11 +697,13 @@ def query_rotation(save_name, team_query=None, mode="balanced",
         starters_raw  = load_starter_pool(conn, team_id)
         relievers_raw = load_relief_corps(conn, team_id)
 
-        # Apply exclusions
-        starters_raw = [
-            p for p in starters_raw
-            if f"{p['first_name']} {p['last_name']}".lower() not in excluded_lower
-        ]
+        # Apply exclusions — use _match_name so "without Skubal" matches "Tarik Skubal"
+        excluded_ids = set()
+        for excl_query in (excluded_names or []):
+            match = _match_name(excl_query, starters_raw)
+            if match:
+                excluded_ids.add(match["player_id"])
+        starters_raw = [p for p in starters_raw if p["player_id"] not in excluded_ids]
         if not starters_raw:
             return None
 
