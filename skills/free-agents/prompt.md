@@ -28,6 +28,8 @@ The `<AGENT_FILLS_IN_...>` placeholders in code blocks are filled by you based o
 
 Search for free agents matching **"$ARGUMENTS"**.
 
+**If `$ARGUMENTS` is blank or empty** — show all free agents with no filters, ORDER BY `pr.rating_overall DESC`. Do not ask for criteria; run immediately.
+
 ### Step 1: Parse Criteria
 
 **Default player_type rule:** Unless the query explicitly mentions pitchers, SP, RP, closer,

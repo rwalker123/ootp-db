@@ -6,15 +6,19 @@ paths:
 ## Environment
 - Python 3.11+
 - Virtual environment at `.venv` (create with `python3 -m venv .venv`)
-- PostgreSQL assumed to be running locally
-- The target database is created automatically by the import script if it doesn't exist
+- SQLite is the default local database via `DATABASE_URL=sqlite`; PostgreSQL is optional if you provide a PostgreSQL URL
+- The target database for the configured backend is created automatically by the import script if it doesn't exist
 
 ## Dependencies
-All dependencies go in `requirements.txt`:
+Base dependencies in `requirements.txt`:
 - pandas
 - sqlalchemy
-- psycopg2-binary
 - python-dotenv
+- mcp
+- pre-commit
+
+PostgreSQL-only dependencies in `requirements-postgres.txt`:
+- psycopg2-binary
 
 ## Configuration
 All configuration is via a `.env` file in the project root. A `.env.example` should be 
@@ -95,10 +99,9 @@ module split (ratings model)`.
 ```bash
 # First time setup
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+.venv/bin/python3 -m pip install -r requirements.txt
 cp .env.example .env
-# edit .env — only POSTGRES_URL is required
+# edit .env — DATABASE_URL is required (POSTGRES_URL is legacy/backward-compat)
 
 # List available saves (auto-discovered)
 ./import.sh list
