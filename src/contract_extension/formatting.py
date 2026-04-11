@@ -99,9 +99,9 @@ def trait_color(val, invert=False):
         return "#888"
     v = int(val)
     if invert:
-        if v <= INJURY_DURABLE_MAX:
+        if v <= TRAIT_BELOW_AVG_MAX:
             return "#1a7a1a"
-        if v <= INJURY_NORMAL_MAX:
+        if v <= TRAIT_AVERAGE_MAX:
             return "#cc7700"
         return "#cc2222"
     else:

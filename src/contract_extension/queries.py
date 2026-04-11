@@ -17,9 +17,6 @@ from .formatting import (
     get_current_salary,
     get_years_remaining,
     injury_label,
-    _f1,
-    _f3,
-    _pct,
 )
 
 _PLAYER_KEYS = [

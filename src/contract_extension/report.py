@@ -2,7 +2,6 @@
 
 import html as html_mod
 from datetime import datetime
-from pathlib import Path
 
 from ootp_db_constants import POS_MAP
 from report_write import write_report_html, report_filename
@@ -14,7 +13,6 @@ from shared_css import (
 )
 
 from .formatting import (
-    arb_status_label,
     fmt_salary,
     get_current_salary,
     get_years_remaining,
