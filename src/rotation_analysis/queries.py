@@ -15,7 +15,6 @@ from ootp_db_constants import (
     ROLE_SP,
     ROLE_RP,
     ROLE_CL,
-    THROWS_MAP,
     SPLIT_CAREER_OVERALL,
 )
 from config import CAREER_STATS_LOOKBACK_YEARS
@@ -27,22 +26,15 @@ from .constants import (
     FIP_ELITE,
     FIP_POOR,
     FIVE_MAN_SLOTS,
-    INJURY_LOOKBACK_YEARS,
     LOW_CAREER_GS_NON_ACE,
     LOW_SAMPLE_IP,
-    MIN_DEPTH_STAMINA,
     MIN_SP_GS_CURRENT,
-    MIN_SP_GS_PRIOR,
     MIN_SWING_MAN_STAMINA,
     MODE_WEIGHTS,
-    OPENER_FIP_GOOD,
-    OPENER_FIP_POOR,
     OPENER_K_PCT_GOOD,
     OPENER_K_PCT_POOR,
     OPENER_MIN_IP,
     OPENER_OPPOSITE_HAND_BONUS,
-    OPENER_SHORT_IP_LABEL,
-    OPENER_SLOT_LUCK_THRESHOLD,
     OPENER_WHIP_GOOD,
     OPENER_WHIP_POOR,
     SIX_MAN_SLOTS,
@@ -67,9 +59,9 @@ def resolve_team(conn, team_query):
     if team_query:
         rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
-            "WHERE (nickname LIKE :q OR name LIKE :q OR abbr LIKE :q) "
+            "WHERE (LOWER(nickname) LIKE :q OR LOWER(name) LIKE :q OR LOWER(abbr) LIKE :q) "
             f"AND league_id = {MLB_LEAGUE_ID} ORDER BY name, team_id"
-        ), dict(q=f"%{team_query}%")).fetchall()
+        ), dict(q=f"%{team_query.lower()}%")).fetchall()
         if not rows:
             return None, None, None
         if len(rows) > 1:

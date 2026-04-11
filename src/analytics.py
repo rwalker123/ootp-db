@@ -697,7 +697,7 @@ def archive_to_history(engine, batter_df, pitcher_df, year):
                 with engine.begin() as conn:
                     for col in missing:
                         sql_type = type_map.get(str(df[col].dtype), "REAL")
-                        conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} {sql_type}"))
+                        conn.execute(text(f'ALTER TABLE {tbl} ADD COLUMN "{col}" {sql_type}'))
             with engine.begin() as conn:
                 conn.execute(text(f"DELETE FROM {tbl} WHERE year = :yr"), dict(yr=year))
         df.to_sql(tbl, engine, if_exists="append", index=False)

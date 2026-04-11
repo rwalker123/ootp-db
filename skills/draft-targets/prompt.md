@@ -55,7 +55,7 @@ sim advances:
 2. Current draft year = last_completed_year + 1 (team_history lags by one season)
 3. Compute offset = requested_year − current_draft_year
 4. Map to table: offset 0 → `draft_ratings`, offset 1 → `draft_ratings_1`, etc.
-4. If offset < 0 or > 3, tell the user that year is not available and stop.
+5. If offset < 0 or > 3, tell the user that year is not available and stop.
 
 **If `$ARGUMENTS` contains "next year" or "+1":** use `draft_ratings_1`.
 **If `$ARGUMENTS` contains "in 2 years" or "+2":** use `draft_ratings_2`.

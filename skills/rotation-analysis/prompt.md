@@ -77,13 +77,13 @@ Set variables: `TEAM`, `MODE`, `N_OPENERS`, `EXCLUDED` (list).
 Run the following Python command (fill in variables from Step 1):
 
 ```bash
-../.venv/bin/python3 -m rotation_analysis "$SAVE_NAME" $MODE ${N_OPENERS:+openers=$N_OPENERS} ${TEAM:+"$TEAM"} ${EXCLUDED:+without "$EXCLUDED"}
+( cd src && ../.venv/bin/python3 -m rotation_analysis "$SAVE_NAME" $MODE ${N_OPENERS:+openers=$N_OPENERS} ${TEAM:+"$TEAM"} ${EXCLUDED:+without "$EXCLUDED"} )
 ```
 
 Or, more reliably, use a heredoc to call the function directly:
 
 ```bash
-../.venv/bin/python3 << 'PYEOF'
+.venv/bin/python3 << 'PYEOF'
 import sys
 sys.path.insert(0, "src")
 from rotation_analysis import generate_rotation_report

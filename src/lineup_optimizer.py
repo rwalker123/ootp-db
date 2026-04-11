@@ -143,9 +143,9 @@ def resolve_team(conn, team_query):
     if team_query:
         rows = conn.execute(text(
             "SELECT team_id, name, nickname, abbr FROM teams "
-            "WHERE (nickname LIKE :q OR name LIKE :q) "
+            "WHERE (LOWER(nickname) LIKE :q OR LOWER(name) LIKE :q) "
             f"AND league_id = {MLB_LEAGUE_ID} ORDER BY name, team_id"
-        ), dict(q=f"%{team_query}%")).fetchall()
+        ), dict(q=f"%{team_query.lower()}%")).fetchall()
         if not rows:
             return None, None, None
         if len(rows) > 1:

@@ -48,7 +48,7 @@ def main():
     ]
 
     # Strip known tokens to isolate optional team name
-    stop = (r'(?:balanced|ace-first|innings|six-man|openers?\s*=\s*\d|\bopener\b'
+    stop = (r'(?:balanced|ace-first|innings|six-man|openers?\s*=\s*\d+|\bopener\b'
             r'|without\s+[A-Za-z][A-Za-z\s\-\']+'
             r'|(?:with|include)\s+[A-Za-z][A-Za-z\s\-\']+)')
     team_query = re.sub(stop, '', raw, flags=re.I).strip(" ,") or None

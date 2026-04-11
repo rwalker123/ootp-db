@@ -1384,7 +1384,7 @@ class Handler(SimpleHTTPRequestHandler):
             # team: strip known tokens to isolate optional team name
             _ra_stop = (
                 r'(?:balanced|ace-first|innings|six-man'
-                r'|openers?\s*=\s*\d|\bopener\b'
+                r'|openers?\s*=\s*\d+|\bopener\b'
                 r'|without\s+[A-Za-z][A-Za-z\s\-\']+'
                 r'|(?:with|include)\s+[A-Za-z][A-Za-z\s\-\']+)'
             )

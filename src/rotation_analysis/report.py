@@ -245,7 +245,7 @@ def _ootp_diff_row(diff):
 # Full HTML report
 # ---------------------------------------------------------------------------
 
-def build_html(data, raw_args=""):
+def build_html(data, raw_args="", save_name=""):
     """Build the complete HTML report for rotation analysis.
 
     data: dict returned by query_rotation()
@@ -333,7 +333,9 @@ def build_html(data, raw_args=""):
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ootp-generated" content="{now_iso}">
   <meta name="ootp-skill" content="rotation-analysis">
+  <meta name="ootp-args" content="{html_mod.escape(raw_args.strip())}">
   <meta name="ootp-args-display" content="{html_mod.escape(raw_args.strip())}">
+  <meta name="ootp-save" content="{html_mod.escape(save_name)}">
   <title>{html_mod.escape(report_title)}</title>
   <style>
     {css}
@@ -485,7 +487,7 @@ def generate_rotation_report(save_name, team_query=None, mode="balanced",
     if data is None:
         return None, None
 
-    html_content = build_html(data, raw_args=raw_args)
+    html_content = build_html(data, raw_args=raw_args, save_name=save_name)
     write_report_html(report_path, html_content)
 
     # Return a lightweight summary for the agent terminal output
