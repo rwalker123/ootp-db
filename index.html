@@ -35,6 +35,7 @@
   .db-status-ok { color: #2a7a2a; }
   .db-status-stale { color: #cc7700; }
   .db-status-partial { color: #cc7700; }
+  .db-status-warning { color: #d4a020; }
   .db-status-failed { color: #cc2200; }
   .ts-success { font-size: 10px; color: #2a7a2a; display: block; margin-top: 1px; }
   .ts { color: #888; }
@@ -164,6 +165,8 @@
   .import-log-header .log-status { color: #aaa; }
   .import-log-header .log-status.needs-input { color: #f0a030; }
   .import-log-header .log-status.failed { color: #f47c7c; }
+  .import-log-header .log-status.warning { color: #f0c060; }
+  .import-log-header .log-status.partial { color: #e8a030; }
   .import-log-header .log-controls { display: flex; gap: 6px; }
   .import-log-header .log-controls button {
     background: none; border: 1px solid #555; border-radius: 3px; color: #ccc;
@@ -330,7 +333,14 @@ async function loadSaves() {
 
   const runningKey = JSON.stringify(data.running);
   const activeKey = data.active || '';
-  const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k, (v.csv_mtime || '') + '|' + (v.my_team_id || '')])));
+  const savesKey = JSON.stringify(Object.fromEntries(Object.entries(data.saves).map(([k, v]) => [k,
+    (v.csv_mtime || '') + '|' +
+      (v.my_team_id || '') + '|' +
+      (v.last_import || '') + '|' +
+      (v.last_successful_import || '') + '|' +
+      (v.import_status || '') + '|' +
+      JSON.stringify(v.import_warnings || []),
+  ])));
   const structureChanged = runningKey !== _lastRunningKey || activeKey !== _lastActiveKey || savesKey !== _lastSavesKey;
   _lastRunningKey = runningKey;
   _lastActiveKey = activeKey;
@@ -347,7 +357,7 @@ async function loadSaves() {
       return !document.getElementById('logpanel-' + id);
     });
     if (missingPanel) renderSaves(data);
-    else updateLogsInPlace(logs);
+    else updateLogsInPlace(data);
   }
 
   // Update header
@@ -372,6 +382,58 @@ async function loadSaves() {
   }
 }
 
+/** Header label for finished import logs: uses registry import_status, else log content. */
+function importLogPanelStatus(name, lines, running, saves) {
+  if (running.includes(name)) {
+    return { text: 'Importing…', cls: '' };
+  }
+  const info = saves[name] || {};
+  const st = info.import_status;
+  if (st === 'failed') return { text: 'Failed', cls: 'failed' };
+  if (st === 'partial') return { text: 'Partial', cls: 'partial' };
+  if (st === 'warning') return { text: 'Warning', cls: 'warning' };
+  const warnByLog = lines.some(l =>
+    /^\s*⚠\s*(Analytics|Import):/.test(l) ||
+    (/⚠/.test(l) && /data\s+limitations/i.test(l))
+  );
+  if (warnByLog) return { text: 'Warning', cls: 'warning' };
+  return { text: 'Done', cls: '' };
+}
+
+/** Move ⚠ Import/Analytics blocks (and their bullet lines) to the end of the log for quick scanning. */
+function partitionWarningsToBottom(lines) {
+  if (!lines || !lines.length) return lines.slice();
+  const ranges = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*⚠\s*(Import|Analytics):/.test(lines[i])) {
+      const start = i;
+      i++;
+      while (i < lines.length && /^\s{2,}[•\u2022\u00b7\*\-]\s*/.test(lines[i])) {
+        i++;
+      }
+      ranges.push([start, i]);
+      i--;
+    }
+  }
+  if (!ranges.length) return lines.slice();
+  const inWarn = new Set();
+  for (const [a, b] of ranges) {
+    for (let k = a; k < b; k++) inWarn.add(k);
+  }
+  const main = [];
+  const foot = [];
+  for (let i = 0; i < lines.length; i++) {
+    (inWarn.has(i) ? foot : main).push(lines[i]);
+  }
+  while (main.length && main[main.length - 1] === '') main.pop();
+  const out = main.slice();
+  if (foot.length) {
+    if (out.length) out.push('', '— — —', '');
+    out.push(...foot);
+  }
+  return out;
+}
+
 function renderSaves(data) {
   const el = document.getElementById('saves-section');
   const { active, saves, discovered, running, logs = {} } = data;
@@ -385,13 +447,16 @@ function renderSaves(data) {
       : esc(name);
     const csvNewer = info.csv_mtime && info.last_import && info.csv_mtime > info.last_import;
     const hasCsvInfo = info.csv_mtime && info.last_import;
-    const importStatus = info.import_status; // ok | partial | failed | undefined (legacy)
+    const importStatus = info.import_status; // ok | warning | partial | failed | undefined (legacy)
     const failedSteps = (info.failed_steps || []).join(', ');
     let dbStatus = '';
     if (importStatus === 'failed') {
       dbStatus = `<span class="db-status db-status-failed" title="Import failed: ${esc(failedSteps)}">✗</span>`;
     } else if (importStatus === 'partial') {
       dbStatus = `<span class="db-status db-status-partial" title="Partial import — failed steps: ${esc(failedSteps)}">⚠</span>`;
+    } else if (importStatus === 'warning') {
+      const nw = (info.import_warnings || []).length;
+      dbStatus = `<span class="db-status db-status-warning" title="Import finished with data warnings (${nw}) — see log">⚠</span>`;
     } else if (hasCsvInfo) {
       dbStatus = csvNewer
         ? `<span class="db-status db-status-stale" title="New CSV data available">⚠</span>`
@@ -468,12 +533,13 @@ function renderSaves(data) {
   const logPanels = Object.entries(logs).map(([name, lines]) => {
     if (!lines.length) return '';
     const id = 'log-' + name.replace(/[^a-z0-9]/gi, '_');
-    const status = running.includes(name) ? 'Importing…' : 'Done';
-    const logText = lines.map(l => colorLogLine(l)).join('\n');
+    const st = importLogPanelStatus(name, lines, running, saves);
+    const displayLines = st.cls === 'warning' ? partitionWarningsToBottom(lines) : lines;
+    const logText = displayLines.map(l => colorLogLine(l)).join('\n');
     return `<div class="import-log" id="logpanel-${id}">
       <div class="import-log-header">
         <span class="log-title">${esc(name)}</span>
-        <span class="log-status">${status}</span>
+        <span class="log-status ${esc(st.cls)}">${esc(st.text)}</span>
         <span class="log-controls">
           <button onclick="logCopy('${id}')" title="Copy log" id="copy-${id}">⎘</button>
           <button onclick="logMinimize('${id}')" title="Minimize">−</button>
@@ -499,13 +565,12 @@ function renderSaves(data) {
     </div>`;
   }
 
-  // Auto-scroll log panels to bottom
-  el.querySelectorAll('.import-log-body').forEach(el => { el.scrollTop = el.scrollHeight; });
+  el.querySelectorAll('.import-log-body').forEach(body => { body.scrollTop = body.scrollHeight; });
 }
 
 function buildImportBtn(name, isActive, csvNewer, importStatus) {
   const setActiveBtn = `<button class="btn-action secondary" onclick="setActive(${jsStr(name)})">Set Active</button>`;
-  const needsAttention = csvNewer || importStatus === 'partial' || importStatus === 'failed';
+  const needsAttention = csvNewer || importStatus === 'partial' || importStatus === 'failed' || importStatus === 'warning';
   const refreshBtn = needsAttention
     ? `<button class="btn-action" onclick="importSave(${jsStr(name)})">↻ Refresh</button>`
     : `<button class="btn-action secondary" onclick="importSave(${jsStr(name)})" title="Re-import (data is current)">↻</button>`;
@@ -588,14 +653,25 @@ function cancelMyTeam(saveName, currentAbbr) {
   }
 }
 
-function updateLogsInPlace(logs) {
+function updateLogsInPlace(data) {
+  const logs = data.logs || {};
+  const saves = data.saves || {};
+  const running = data.running || [];
   for (const [name, lines] of Object.entries(logs)) {
     if (!lines.length) continue;
     const id = 'log-' + name.replace(/[^a-z0-9]/gi, '_');
     const body = document.getElementById(id);
     if (!body) continue;
+    const st = importLogPanelStatus(name, lines, running, saves);
+    const displayLines = st.cls === 'warning' ? partitionWarningsToBottom(lines) : lines;
     const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
-    body.innerHTML = lines.map(l => colorLogLine(l)).join('\n');
+    body.innerHTML = displayLines.map(l => colorLogLine(l)).join('\n');
+    const panel = document.getElementById('logpanel-' + id);
+    const statusEl = panel && panel.querySelector('.log-status');
+    if (statusEl) {
+      statusEl.textContent = st.text;
+      statusEl.className = 'log-status ' + st.cls;
+    }
     if (nearBottom) body.scrollTop = body.scrollHeight;
   }
 }

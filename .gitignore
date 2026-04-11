@@ -15,3 +15,4 @@ saves.sqlite.json
 saves.postgresql.json
 schema_snapshots/
 .cursor/
+pipeline_warnings/

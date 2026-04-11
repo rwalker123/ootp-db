@@ -30,6 +30,7 @@ from ootp_db_constants import (
     SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
     GAME_TYPE_REGULAR,
 )
+from pipeline_warnings import add_pipeline_warnings
 from shared_css import db_name_from_save, get_write_engine
 from sqlalchemy import inspect, text
 
@@ -96,49 +97,83 @@ def get_player_info(engine):
 # ---------------------------------------------------------------------------
 def get_league_batting_averages(engine, year):
     """Compute league-wide batting averages from team stats."""
-    df = pd.read_sql(f"""
-        SELECT SUM(pa) as pa, SUM(ab) as ab, SUM(h) as h, SUM(d) as d,
-               SUM(t) as t, SUM(hr) as hr, SUM(bb) as bb, SUM(k) as k,
-               SUM(hp) as hp, SUM(sf) as sf, SUM(sh) as sh, SUM(r) as r,
-               SUM(ibb) as ibb, SUM(tb) as tb
+    # COALESCE: if no rows match the WHERE clause, SUM() returns NULL for all
+    # columns, so default to 0 before downstream arithmetic and zero checks.
+    df = pd.read_sql(
+        text("""
+        SELECT COALESCE(SUM(pa), 0) AS pa, COALESCE(SUM(ab), 0) AS ab, COALESCE(SUM(h), 0) AS h,
+               COALESCE(SUM(d), 0) AS d, COALESCE(SUM(t), 0) AS t, COALESCE(SUM(hr), 0) AS hr,
+               COALESCE(SUM(bb), 0) AS bb, COALESCE(SUM(k), 0) AS k,
+               COALESCE(SUM(hp), 0) AS hp, COALESCE(SUM(sf), 0) AS sf, COALESCE(SUM(sh), 0) AS sh,
+               COALESCE(SUM(r), 0) AS r, COALESCE(SUM(ibb), 0) AS ibb, COALESCE(SUM(tb), 0) AS tb
         FROM team_batting_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_BATTING_OVERALL}
-    """, engine)
-    row = df.iloc[0]
-    s = row.h - row.d - row.t - row.hr
-    lg = dict(
-        pa=row.pa, ab=row.ab, h=row.h, hr=row.hr, bb=row.bb, k=row.k,
-        hp=row.hp, sf=row.sf, r=row.r, ibb=row.ibb,
-        obp=(row.h + row.bb + row.hp) / (row.ab + row.bb + row.hp + row.sf),
-        slg=row.tb / row.ab,
-        woba=((WOBA_BB * (row.bb - row.ibb) + WOBA_HBP * row.hp +
-               WOBA_1B * s + WOBA_2B * row.d + WOBA_3B * row.t +
-               WOBA_HR * row.hr) /
-              (row.ab + row.bb - row.ibb + row.sf + row.hp)),
-        r_per_pa=row.r / row.pa,
+        WHERE league_id = :league_id AND level_id = :level_id AND split_id = :split_id
+        """),
+        engine,
+        params=dict(
+            league_id=MLB_LEAGUE_ID,
+            level_id=MLB_LEVEL_ID,
+            split_id=SPLIT_TEAM_BATTING_OVERALL,
+        ),
     )
-    lg["avg"] = row.h / row.ab
+    row = df.iloc[0]
+    pa, ab, h, d, t, hr = map(float, (row.pa, row.ab, row.h, row.d, row.t, row.hr))
+    bb, k, hp, sf, _, r, ibb, tb = map(
+        float, (row.bb, row.k, row.hp, row.sf, row.sh, row.r, row.ibb, row.tb)
+    )
+    s = h - d - t - hr
+    obp_denom = ab + bb + hp + sf
+    obp = (h + bb + hp) / obp_denom if obp_denom > 0 else float("nan")
+    slg = tb / ab if ab > 0 else float("nan")
+    woba_denom = ab + bb - ibb + sf + hp
+    woba = (
+        (WOBA_BB * (bb - ibb) + WOBA_HBP * hp + WOBA_1B * s + WOBA_2B * d + WOBA_3B * t + WOBA_HR * hr)
+        / woba_denom
+        if woba_denom > 0
+        else float("nan")
+    )
+    r_per_pa = r / pa if pa > 0 else float("nan")
+    lg = dict(
+        pa=pa, ab=ab, h=h, hr=hr, bb=bb, k=k, hp=hp, sf=sf, r=r, ibb=ibb,
+        obp=obp, slg=slg, woba=woba, r_per_pa=r_per_pa,
+    )
+    lg["avg"] = h / ab if ab > 0 else float("nan")
     lg["ops"] = lg["obp"] + lg["slg"]
     return lg
 
 
 def get_league_pitching_averages(engine, year):
     """Compute league-wide pitching averages from team stats."""
-    df = pd.read_sql(f"""
-        SELECT SUM(ip) as ip, SUM(er) as er, SUM(k) as k, SUM(bb) as bb,
-               SUM(hp) as hp, SUM(hra) as hra, SUM(ha) as ha, SUM(bf) as bf,
-               SUM(gb) as gb, SUM(fb) as fb, SUM(ab) as ab, SUM(sf) as sf
+    df = pd.read_sql(
+        text("""
+        SELECT COALESCE(SUM(ip), 0) AS ip, COALESCE(SUM(er), 0) AS er, COALESCE(SUM(k), 0) AS k,
+               COALESCE(SUM(bb), 0) AS bb, COALESCE(SUM(hp), 0) AS hp, COALESCE(SUM(hra), 0) AS hra,
+               COALESCE(SUM(ha), 0) AS ha, COALESCE(SUM(bf), 0) AS bf,
+               COALESCE(SUM(gb), 0) AS gb, COALESCE(SUM(fb), 0) AS fb, COALESCE(SUM(ab), 0) AS ab,
+               COALESCE(SUM(sf), 0) AS sf
         FROM team_pitching_stats
-        WHERE league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} AND split_id = {SPLIT_TEAM_PITCHING_OVERALL}
-    """, engine)
+        WHERE league_id = :league_id AND level_id = :level_id AND split_id = :split_id
+        """),
+        engine,
+        params=dict(
+            league_id=MLB_LEAGUE_ID,
+            level_id=MLB_LEVEL_ID,
+            split_id=SPLIT_TEAM_PITCHING_OVERALL,
+        ),
+    )
     row = df.iloc[0]
-    lg_era = row.er * 9 / row.ip if row.ip > 0 else 4.00
-    lg_hr_per_fb = row.hra / row.fb if row.fb > 0 else 0.10
-    cfip = lg_era - ((13 * row.hra + 3 * (row.bb + row.hp) - 2 * row.k) / row.ip)
+    ip, er, k, bb, hp, hra, ha, bf, gb, fb, ab, sf = map(
+        float,
+        (row.ip, row.er, row.k, row.bb, row.hp, row.hra, row.ha, row.bf, row.gb, row.fb, row.ab, row.sf),
+    )
+    lg_era = er * 9 / ip if ip > 0 else 4.00
+    lg_hr_per_fb = hra / fb if fb > 0 else 0.10
+    cfip = (
+        lg_era - ((13 * hra + 3 * (bb + hp) - 2 * k) / ip) if ip > 0 else 4.00
+    )
     return dict(
         era=lg_era, cfip=cfip, hr_per_fb=lg_hr_per_fb,
-        ip=row.ip, k=row.k, bb=row.bb, hp=row.hp, hra=row.hra,
-        ha=row.ha, bf=row.bf, gb=row.gb, fb=row.fb, ab=row.ab, sf=row.sf,
+        ip=ip, k=k, bb=bb, hp=hp, hra=hra, ha=ha, bf=bf, gb=gb, fb=fb, ab=ab, sf=sf,
     )
 
 
@@ -280,6 +315,10 @@ def load_all_plate_appearances(engine):
 def build_ev_la_lookups(df):
     """Build EV/LA lookup tables for xBA, xSLG, and xwOBA."""
     batted = df[df["is_batted_ball"] == 1].copy()
+    if batted.empty:
+        print("  League batted-ball hit rate: n/a (no batted balls)")
+        print("  EV/LA bins: 0")
+        return {}, {}, {}
 
     def build_lookup(batted_df, value_col):
         bin_stats = batted_df.groupby(["ev_bin", "la_bin"])[value_col].agg(["count", "mean"])
@@ -302,7 +341,11 @@ def build_ev_la_lookups(df):
     xslg_lookup, _ = build_lookup(batted, "tb")
     xwoba_lookup, _ = build_lookup(batted, "woba_value")
 
-    print(f"  League batted-ball hit rate: {lg_hit_rate:.3f}")
+    lr = lg_hit_rate
+    print(
+        "  League batted-ball hit rate: "
+        + (f"{lr:.3f}" if pd.notna(lr) else "n/a")
+    )
     print(f"  EV/LA bins: {len(xba_lookup)}")
 
     return xba_lookup, xslg_lookup, xwoba_lookup
@@ -310,6 +353,9 @@ def build_ev_la_lookups(df):
 
 def compute_contact_stats(df, xba_lookup, xslg_lookup, xwoba_lookup):
     """Compute per-batter contact quality and expected stats."""
+    if df.empty:
+        return pd.DataFrame(columns=["player_id"])
+
     batted = df[df["is_batted_ball"] == 1].copy()
 
     # Apply lookups to each batted ball
@@ -397,7 +443,12 @@ def compute_contact_stats(df, xba_lookup, xslg_lookup, xwoba_lookup):
         pa_results.append(row)
     pa_df = pd.DataFrame(pa_results)
 
-    contact_df = contact_df.merge(pa_df, on="player_id", how="left")
+    if contact_df.empty and pa_df.empty:
+        return pd.DataFrame(columns=["player_id"])
+    if contact_df.empty:
+        merged = pa_df.copy()
+    else:
+        merged = contact_df.merge(pa_df, on="player_id", how="left")
 
     # Compute xwOBA: (xwOBA_batted_balls_sum + BB_woba + HBP_woba) / PA
     for suffix in ["", "_vs_lhp", "_vs_rhp"]:
@@ -405,15 +456,15 @@ def compute_contact_stats(df, xba_lookup, xslg_lookup, xwoba_lookup):
         n_bb = f"n_bb{suffix}"
         n_hbp = f"n_hbp{suffix}"
         total_pa = f"total_pa{suffix}"
-        if bb_sum in contact_df.columns and total_pa in contact_df.columns:
-            contact_df[f"xwoba{suffix}"] = (
-                (contact_df[bb_sum] +
-                 contact_df[n_bb] * WOBA_BB +
-                 contact_df[n_hbp] * WOBA_HBP) /
-                contact_df[total_pa]
+        if bb_sum in merged.columns and total_pa in merged.columns:
+            merged[f"xwoba{suffix}"] = (
+                (merged[bb_sum] +
+                 merged[n_bb] * WOBA_BB +
+                 merged[n_hbp] * WOBA_HBP) /
+                merged[total_pa]
             )
 
-    return contact_df
+    return merged
 
 
 def finalize_batter_stats(career_df, contact_df, player_info):
@@ -650,6 +701,12 @@ def archive_to_history(engine, batter_df, pitcher_df, year):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _fmt_rate3(x):
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return "n/a"
+    return f"{float(x):.3f}"
+
+
 def main():
     if len(sys.argv) != 2:
         print(f"Usage: python {sys.argv[0]} <save_name>")
@@ -659,6 +716,7 @@ def main():
     save_name = sys.argv[1]
     engine = get_write_engine(save_name)
     start = time.time()
+    analytics_warnings: list[str] = []
 
     year = get_current_year(engine)
     print(f"Current season: {year}")
@@ -669,9 +727,18 @@ def main():
     print("Computing league averages...")
     lg_bat = get_league_batting_averages(engine, year)
     lg_pitch = get_league_pitching_averages(engine, year)
-    print(f"  Batting: lgBA={lg_bat['avg']:.3f}, lgOBP={lg_bat['obp']:.3f}, "
-          f"lgSLG={lg_bat['slg']:.3f}, lgwOBA={lg_bat['woba']:.3f}")
+    print(
+        "  Batting: "
+        f"lgBA={_fmt_rate3(lg_bat['avg'])}, lgOBP={_fmt_rate3(lg_bat['obp'])}, "
+        f"lgSLG={_fmt_rate3(lg_bat['slg'])}, lgwOBA={_fmt_rate3(lg_bat['woba'])}"
+    )
     print(f"  Pitching: lgERA={lg_pitch['era']:.2f}, cFIP={lg_pitch['cfip']:.2f}")
+    if pd.isna(lg_bat.get("woba")) or (lg_bat.get("pa", 0) or 0) == 0:
+        analytics_warnings.append(
+            "League batting averages: no usable MLB current-season team totals in "
+            "team_batting_stats (often PA=0 before the first sim, or league/level keys are 0 in the export). "
+            "wRC+ / OPS+ vs league will be unreliable until totals exist."
+        )
 
     # --- Batter career stats ---
     print("Computing batter career stats...")
@@ -683,6 +750,16 @@ def main():
     ab_df = load_all_plate_appearances(engine)
     batted_count = ab_df["is_batted_ball"].sum()
     print(f"  {len(ab_df):,} plate appearances, {batted_count:,} batted balls")
+    if len(ab_df) == 0:
+        analytics_warnings.append(
+            "No plate appearances in players_at_bat_batting_stats (regular season): "
+            "contact-quality and expected-stats columns will be empty."
+        )
+    elif batted_count == 0:
+        analytics_warnings.append(
+            "No batted-ball rows with Statcast fields in the at-bat export: "
+            "barrel/hard-hit/xwOBA contact metrics will be missing."
+        )
 
     # --- Build EV/LA lookups ---
     print("Building EV/LA lookup tables...")
@@ -739,6 +816,12 @@ def main():
     print(f"  batter_advanced_stats:  {len(batter_df)} rows")
     print(f"  pitcher_advanced_stats: {len(pitcher_df)} rows")
     print(f"{'='*60}")
+
+    if analytics_warnings:
+        add_pipeline_warnings(save_name, analytics_warnings)
+        print("\n⚠ Analytics: data limitations:")
+        for msg in analytics_warnings:
+            print(f"  • {msg}")
 
     # Top hitters by wRC+
     qual_bat = batter_df[batter_df["pa"] >= 300].copy()

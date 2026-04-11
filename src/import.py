@@ -11,6 +11,13 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from ootp_db_constants import (
+    GAME_TYPE_REGULAR,
+    MLB_LEAGUE_ID,
+    MLB_LEVEL_ID,
+    SPLIT_TEAM_BATTING_OVERALL,
+)
+from pipeline_warnings import add_pipeline_warnings, reset_pipeline_warnings
 from shared_css import (
     create_postgres_server_engine,
     db_name_from_save,
@@ -395,6 +402,7 @@ def main():
 
     ootp_root = os.getenv("OOTP_CSV_PATH")  # optional, for backward compat
     csv_dir, save_name, lg_dir = resolve_save(arg, ootp_root=ootp_root)
+    reset_pipeline_warnings(save_name)
     ootp_version = detect_ootp_version(lg_dir)
 
     database_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite"
@@ -550,6 +558,58 @@ def main():
     print(f"Save '{save_name}' → database '{db_name}'")
     if ootp_version is not None:
         print(f"OOTP version (from path): {ootp_version}")
+
+    imp_warn: list[str] = []
+    try:
+        with engine.connect() as conn:
+            # Match analytics.get_league_batting_averages (MLB overall split, not minors/other splits).
+            total_pa = conn.execute(
+                text(
+                    "SELECT COALESCE(SUM(pa), 0) FROM team_batting_stats "
+                    "WHERE league_id = :league_id AND level_id = :level_id "
+                    "AND split_id = :split_id"
+                ),
+                dict(
+                    league_id=MLB_LEAGUE_ID,
+                    level_id=MLB_LEVEL_ID,
+                    split_id=SPLIT_TEAM_BATTING_OVERALL,
+                ),
+            ).scalar()
+            # Match analytics.load_all_plate_appearances (regular season only).
+            n_ab = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM players_at_bat_batting_stats ab "
+                    "JOIN games g ON g.game_id = ab.game_id "
+                    "WHERE g.game_type = :game_type"
+                ),
+                dict(game_type=GAME_TYPE_REGULAR),
+            ).scalar()
+        try:
+            total_pa = int(total_pa or 0)
+        except (TypeError, ValueError):
+            total_pa = 0
+        try:
+            n_ab = int(n_ab or 0)
+        except (TypeError, ValueError):
+            n_ab = 0
+        if total_pa == 0:
+            imp_warn.append(
+                "team_batting_stats: MLB overall split total PA is 0 — current-season MLB team batting "
+                "lines are empty until games are played and exported (expected on a brand-new sim "
+                "before Opening Day). Minors or vs-L/R split rows do not count here."
+            )
+        if n_ab == 0:
+            imp_warn.append(
+                "No regular-season plate appearances in players_at_bat_batting_stats (games.game_type): "
+                "per-at-bat Statcast-style data is empty until regular-season games appear in the export."
+            )
+    except Exception as exc:  # noqa: BLE001
+        imp_warn.append(f"Post-import data checks could not run: {exc}")
+    if imp_warn:
+        add_pipeline_warnings(save_name, imp_warn)
+        print("\n⚠ Import: data limitations:")
+        for msg in imp_warn:
+            print(f"  • {msg}")
 
 
 if __name__ == "__main__":
