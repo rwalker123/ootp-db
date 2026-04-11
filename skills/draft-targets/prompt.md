@@ -34,10 +34,39 @@ Search for prospects matching **"$ARGUMENTS"**.
 ## Prerequisites
 
 The appropriate ratings table must exist:
-- **Draft pool**: `draft_ratings` table — if missing, run `.venv/bin/python3 src/draft_ratings.py <active-save-name>`
+- **Draft pool**: `draft_ratings` / `draft_ratings_1` / `draft_ratings_2` / `draft_ratings_3` — if missing, run `.venv/bin/python3 src/draft_ratings.py <active-save-name>` (generates all four tables)
 - **IFA pool**: `ifa_ratings` table — if missing, run `.venv/bin/python3 src/ifa_ratings.py <active-save-name>`
 
-### Step 0: Pool Detection (do this first)
+### Step 0: Draft Year Detection (do this first)
+
+Determine which draft class year the query refers to. The draft_ratings tables are named
+by **offset from the current sim year** (not calendar year), so the names are stable across
+sim advances:
+
+| Table | Offset | Meaning |
+|-------|--------|---------|
+| `draft_ratings` | +0 | Current draft (upcoming) |
+| `draft_ratings_1` | +1 | Next year's draft |
+| `draft_ratings_2` | +2 | Two years out |
+| `draft_ratings_3` | +3 | Three years out |
+
+**If `$ARGUMENTS` contains a 4-digit year (e.g. "2029"):**
+1. Query the last completed season: `SELECT MAX(year) FROM team_history WHERE league_id = 203`
+2. Current draft year = last_completed_year + 1 (team_history lags by one season)
+3. Compute offset = requested_year − current_draft_year
+4. Map to table: offset 0 → `draft_ratings`, offset 1 → `draft_ratings_1`, etc.
+4. If offset < 0 or > 3, tell the user that year is not available and stop.
+
+**If `$ARGUMENTS` contains "next year" or "+1":** use `draft_ratings_1`.
+**If `$ARGUMENTS` contains "in 2 years" or "+2":** use `draft_ratings_2`.
+**If `$ARGUMENTS` contains "in 3 years" or "+3":** use `draft_ratings_3`.
+**If no year indicator:** use `draft_ratings` (current draft, default).
+
+Set `DRAFT_TABLE` to the resolved table name. Use it as the table (alias `dr`) throughout.
+
+---
+
+### Step 0b: Pool Detection
 
 Determine which prospect pool the query refers to:
 
@@ -57,7 +86,7 @@ Set `POOL = "ifa"` or `POOL = "draft"` and use the correct table/alias throughou
 
 ### Step 1: Parse Criteria
 
-#### If POOL = "draft" — filter `draft_ratings dr`:
+#### If POOL = "draft" — filter `{DRAFT_TABLE} dr`:
 
 | User says | SQL filter |
 |-----------|-----------|

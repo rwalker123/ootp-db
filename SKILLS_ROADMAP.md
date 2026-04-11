@@ -298,7 +298,7 @@ Examples:
 
 ---
 
-### [ ] 7. Rotation Analysis (`/rotation-analysis`)
+### [x] 7. Rotation Analysis (`/rotation-analysis`)
 
 Build an optimal **five-man starting rotation** (with clear **depth order** for spots 6–7+) from the pool of starters on a team. Compare the recommendation to OOTP’s own projection, surface **depth and workload risk**, and optionally evaluate a **six-man**, **short-rest**, or **partial opener** plan when the user asks. **Opener:** a reliever starts and is expected to cover **about 1–3 innings** (often only 1), followed by a **bulk** arm (typically a traditional starter) for the middle and late innings — commonly a **platoon flip** (e.g. **LHP opener** then **RHP bulk**). Real teams **rarely** use an opener every day; the skill takes **`openers=N`** so only **N** of the five rotation slots use opener+bulk — the other **5−N** slots stay **traditional starter only**.
 

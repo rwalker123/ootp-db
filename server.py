@@ -936,7 +936,7 @@ class Handler(SimpleHTTPRequestHandler):
         args = body.get("args", "").strip()
         interactive = bool(body.get("interactive", False))
         # lineup-optimizer has all-optional args; allow empty string through
-        args_optional = skill in ("lineup-optimizer",)
+        args_optional = skill in ("lineup-optimizer", "rotation-analysis")
         if not skill or (not args and not args_optional):
             self._respond(400, "Missing skill or args")
             return
@@ -1348,6 +1348,59 @@ class Handler(SimpleHTTPRequestHandler):
             )
             if path is None:
                 raise ValueError("Team not found or no batters available for lineup report")
+            return path
+
+        if skill == "rotation-analysis":
+            import re as _re
+            from rotation_analysis import generate_rotation_report
+            _ra_raw = (args or "").lower()
+            # mode: try specific modes first to avoid prefix-matching "balanced" inside "ace-first"
+            _ra_mode = next(
+                (m for m in ("ace-first", "innings", "six-man", "balanced") if m in _ra_raw),
+                "balanced",
+            )
+            # openers=N or bare "opener"
+            _ra_openers_m = _re.search(r'openers?\s*=\s*(\d)', _ra_raw)
+            _ra_openers = int(_ra_openers_m.group(1)) if _ra_openers_m else (
+                1 if _re.search(r'\bopener\b', _ra_raw) else 0
+            )
+            _ra_six_man = _ra_mode == "six-man"
+            # excluded: "without <name>"
+            _ra_excl = [
+                mg.group(1).strip()
+                for mg in _re.finditer(
+                    r'without\s+([A-Za-z][A-Za-z\s\-\']+?)(?=\s+(?:without|with\b|include|$))',
+                    args or "", _re.I,
+                )
+            ]
+            # forced: "with <name>" / "include <name>"
+            _ra_forced = [
+                mg.group(1).strip()
+                for mg in _re.finditer(
+                    r'(?:with|include)\s+([A-Za-z][A-Za-z\s\-\']+?)(?=\s+(?:without|with\b|include|$))',
+                    args or "", _re.I,
+                )
+            ]
+            # team: strip known tokens to isolate optional team name
+            _ra_stop = (
+                r'(?:balanced|ace-first|innings|six-man'
+                r'|openers?\s*=\s*\d|\bopener\b'
+                r'|without\s+[A-Za-z][A-Za-z\s\-\']+'
+                r'|(?:with|include)\s+[A-Za-z][A-Za-z\s\-\']+)'
+            )
+            _ra_team = _re.sub(_ra_stop, '', args or '', flags=_re.I).strip(" ,") or None
+            path, _ = generate_rotation_report(
+                save,
+                team_query=_ra_team,
+                mode=_ra_mode,
+                n_openers=_ra_openers,
+                six_man=_ra_six_man,
+                excluded_names=_ra_excl,
+                forced_names=_ra_forced,
+                raw_args=args or "",
+            )
+            if path is None:
+                raise ValueError("Team not found or insufficient pitcher data for rotation report")
             return path
 
         if skill == "trade-targets":
