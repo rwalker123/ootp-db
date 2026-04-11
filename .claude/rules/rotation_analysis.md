@@ -1,0 +1,1 @@
+../../src/rotation_analysis/AGENTS.md
