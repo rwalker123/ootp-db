@@ -1,0 +1,1 @@
+../../src/ratings/AGENTS.md
