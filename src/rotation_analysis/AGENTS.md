@@ -33,8 +33,8 @@ pitcher-level keys in the same data flow.
 | `_opener_pairings` | list[dict] | `{slot, bulk, opener, reason, opener_score}` |
 | `_ootp_diff` | list[dict] | `{slot, model_name, ootp_name, move_str, same}` |
 | `_ootp_projected_ids` | list[int] | player_ids from `projected_starting_pitchers` |
-| `_six_man` | bool | |
-| `_n_openers` | int | |
+| `_six_man` | bool | Whether the run is using a 6-man rotation mode |
+| `_n_openers` | int | Number of opener slots requested for the run |
 | `_all_names` | dict[int,str] | player_id → full name |
 
 ### Tables read

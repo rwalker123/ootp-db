@@ -13,7 +13,7 @@ Each skill has two parts:
   passes arguments to the prompt. When adding support for a new LLM, create a parallel
   adapter that loads the same prompt.md.
 
-All eight OOTP skills follow this architecture. Follow these rules exactly when creating or
+All OOTP skills follow this architecture. Follow these rules exactly when creating or
 modifying any skill.
 
 ### The Division of Responsibility
@@ -46,7 +46,8 @@ On `GENERATED:` — agent writes analysis into the placeholder, then opens, then
 
 ### HTML Placeholders
 
-Each report type has one placeholder the agent fills in:
+Each report type has one placeholder the agent fills in, except `/player-stats` which may
+have one or two depending on whether the report includes batting, pitching, or both:
 - `/player-stats` → `<!-- BATTING_SUMMARY -->` and/or `<!-- PITCHING_SUMMARY -->`
 - `/player-rating` → `<!-- RATING_SUMMARY -->`
 - `/free-agents` → `<!-- FA_CALLOUT_SUMMARY -->`
