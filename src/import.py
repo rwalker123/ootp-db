@@ -560,48 +560,51 @@ def main():
         print(f"OOTP version (from path): {ootp_version}")
 
     imp_warn: list[str] = []
-    with engine.connect() as conn:
-        # Match analytics.get_league_batting_averages (MLB overall split, not minors/other splits).
-        total_pa = conn.execute(
-            text(
-                "SELECT COALESCE(SUM(pa), 0) FROM team_batting_stats "
-                "WHERE league_id = :league_id AND level_id = :level_id "
-                "AND split_id = :split_id"
-            ),
-            dict(
-                league_id=MLB_LEAGUE_ID,
-                level_id=MLB_LEVEL_ID,
-                split_id=SPLIT_TEAM_BATTING_OVERALL,
-            ),
-        ).scalar()
-        # Match analytics.load_all_plate_appearances (regular season only).
-        n_ab = conn.execute(
-            text(
-                "SELECT COUNT(*) FROM players_at_bat_batting_stats ab "
-                "JOIN games g ON g.game_id = ab.game_id "
-                "WHERE g.game_type = :game_type"
-            ),
-            dict(game_type=GAME_TYPE_REGULAR),
-        ).scalar()
     try:
-        total_pa = int(total_pa or 0)
-    except (TypeError, ValueError):
-        total_pa = 0
-    try:
-        n_ab = int(n_ab or 0)
-    except (TypeError, ValueError):
-        n_ab = 0
-    if total_pa == 0:
-        imp_warn.append(
-            "team_batting_stats: MLB overall split total PA is 0 — current-season MLB team batting "
-            "lines are empty until games are played and exported (expected on a brand-new sim "
-            "before Opening Day). Minors or vs-L/R split rows do not count here."
-        )
-    if n_ab == 0:
-        imp_warn.append(
-            "No regular-season plate appearances in players_at_bat_batting_stats (games.game_type): "
-            "per-at-bat Statcast-style data is empty until regular-season games appear in the export."
-        )
+        with engine.connect() as conn:
+            # Match analytics.get_league_batting_averages (MLB overall split, not minors/other splits).
+            total_pa = conn.execute(
+                text(
+                    "SELECT COALESCE(SUM(pa), 0) FROM team_batting_stats "
+                    "WHERE league_id = :league_id AND level_id = :level_id "
+                    "AND split_id = :split_id"
+                ),
+                dict(
+                    league_id=MLB_LEAGUE_ID,
+                    level_id=MLB_LEVEL_ID,
+                    split_id=SPLIT_TEAM_BATTING_OVERALL,
+                ),
+            ).scalar()
+            # Match analytics.load_all_plate_appearances (regular season only).
+            n_ab = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM players_at_bat_batting_stats ab "
+                    "JOIN games g ON g.game_id = ab.game_id "
+                    "WHERE g.game_type = :game_type"
+                ),
+                dict(game_type=GAME_TYPE_REGULAR),
+            ).scalar()
+        try:
+            total_pa = int(total_pa or 0)
+        except (TypeError, ValueError):
+            total_pa = 0
+        try:
+            n_ab = int(n_ab or 0)
+        except (TypeError, ValueError):
+            n_ab = 0
+        if total_pa == 0:
+            imp_warn.append(
+                "team_batting_stats: MLB overall split total PA is 0 — current-season MLB team batting "
+                "lines are empty until games are played and exported (expected on a brand-new sim "
+                "before Opening Day). Minors or vs-L/R split rows do not count here."
+            )
+        if n_ab == 0:
+            imp_warn.append(
+                "No regular-season plate appearances in players_at_bat_batting_stats (games.game_type): "
+                "per-at-bat Statcast-style data is empty until regular-season games appear in the export."
+            )
+    except Exception as exc:  # noqa: BLE001
+        imp_warn.append(f"Post-import data checks could not run: {exc}")
     if imp_warn:
         add_pipeline_warnings(save_name, imp_warn)
         print("\n⚠ Import: data limitations:")
