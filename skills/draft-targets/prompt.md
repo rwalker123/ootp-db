@@ -31,6 +31,8 @@ The `<AGENT_FILLS_IN_...>` placeholders in code blocks are filled by you based o
 
 Search for prospects matching **"$ARGUMENTS"**.
 
+**If `$ARGUMENTS` is blank or empty** — treat it as "top prospects": apply no filters and ORDER BY `dr.rating_overall DESC`. Do not ask for criteria; run immediately.
+
 ## Prerequisites
 
 The appropriate ratings table must exist:
