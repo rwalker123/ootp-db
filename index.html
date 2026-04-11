@@ -232,6 +232,7 @@
         <option value="draft-targets">Draft Targets</option>
         <option value="trade-targets">Trade Targets</option>
         <option value="lineup-optimizer">Lineup Optimizer</option>
+        <option value="rotation-analysis">Rotation Analysis</option>
         <option value="adhoc">Ad-hoc Query</option>
       </select>
       <div style="display:flex;flex-direction:column;gap:6px;flex:1">
@@ -1041,6 +1042,9 @@ const GEN_SKILLS = {
   ]},
   'lineup-optimizer': { label: 'Lineup Optimizer', fields: [
     { id: 'gen-criteria', placeholder: 'All optional — e.g.: traditional vs RHP · platoon · hot-hand · primary · without Colt Keith · Torkelson starts at 1B · Montilla bench · fatigue 70 · Team Name', required: false },
+  ]},
+  'rotation-analysis': { label: 'Rotation Analysis', fields: [
+    { id: 'gen-criteria', placeholder: 'All optional — e.g.: ace-first · opener · with Jackson Jobe · without Tarik Skubal · Team Name', required: false },
   ]},
   'adhoc': { label: 'Ad-hoc Query', fields: [
     { id: 'gen-prompt', placeholder: 'Ask anything about the OOTP data…', required: true },

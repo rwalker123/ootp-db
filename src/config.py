@@ -310,3 +310,26 @@ TRADE_POSITION_ADJUSTMENTS = {
 
 # How far above the matched band ceiling the "add-on required" tier extends.
 TRADE_TIER2_OA_ABOVE = 10
+
+# ---------------------------------------------------------------------------
+# Draft prospect tool weights
+# Community-validated weights for scoring raw talent tools in draft_ratings.py.
+# ---------------------------------------------------------------------------
+
+# Batter talent weights (must sum to 1.0).
+# Gap power rates highest — extra-base ability is the hardest tool to develop.
+# Strikeout avoidance ranked above Eye/BB because Ks are a stronger ceiling signal.
+# Source: OOTP community draft guides + FanGraphs prospect weighting research.
+DRAFT_BATTER_TOOL_WEIGHTS = dict(
+    gap=0.243,
+    contact=0.228,
+    strikeouts=0.199,   # avoid Ks — higher is better
+    eye=0.176,
+    power=0.154,
+)
+
+# Pitcher talent weights — split by prospect type.
+# HS prospects: control + movement first (these develop; stuff often follows later).
+# College/advanced: stuff > movement > control (more ready to project on raw stuff).
+DRAFT_PITCHER_TOOLS_HS = dict(stuff=0.25, movement=0.38, control=0.37)
+DRAFT_PITCHER_TOOLS_COL = dict(stuff=0.38, movement=0.35, control=0.27)

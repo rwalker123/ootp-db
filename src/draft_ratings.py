@@ -17,6 +17,11 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from config import DRAFT_BATTER_TOOL_WEIGHTS, DRAFT_PITCHER_TOOLS_HS, DRAFT_PITCHER_TOOLS_COL
+from ootp_db_constants import (
+    MLB_LEAGUE_ID,
+    HSC_CURRENT_POOL, HSC_FUTURE_1, HSC_FUTURE_2, HSC_FUTURE_3,
+)
 from shared_css import db_name_from_save, get_write_engine
 from sqlalchemy import text
 
@@ -43,8 +48,18 @@ def norm(r, default=40):
     return clamp((v - 20) / 60 * 100)
 
 
-def load_prospect_data(engine):
-    """Load all draft-eligible prospects with ratings joined in."""
+def get_sim_year(engine):
+    """Return the current sim year from team history."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT MAX(year) FROM team_history WHERE league_id = :lid"),
+            dict(lid=MLB_LEAGUE_ID),
+        ).scalar()
+    return int(result) if result else None
+
+
+def load_prospect_data(engine, hsc_pool):
+    """Load draft-eligible prospects for the given hsc_pool with ratings joined in."""
     sql = """
         SELECT
             p.player_id, p.first_name, p.last_name, p.position,
@@ -78,7 +93,12 @@ def load_prospect_data(engine):
         LEFT JOIN players_fielding pf
             ON pf.player_id = p.player_id
         WHERE p.draft_eligible = 1 AND p.retired = 0
-    """
+          AND p.draft_league_id = {mlb_league_id}
+          AND p.hsc_status IN ({hsc_pool})
+    """.format(
+        mlb_league_id=MLB_LEAGUE_ID,
+        hsc_pool=", ".join(str(s) for s in hsc_pool),
+    )
     with engine.connect() as conn:
         rows = conn.execute(text(sql)).fetchall()
 
@@ -160,25 +180,25 @@ def score_defense(row, pos):
 
 
 def score_tools_batter(row):
-    cols = [
-        "batting_ratings_talent_contact",
-        "batting_ratings_talent_gap",
-        "batting_ratings_talent_power",
-        "batting_ratings_talent_eye",
-        "batting_ratings_talent_strikeouts",
-    ]
-    scores = [norm(row.get(c) or 40) for c in cols]
-    return sum(scores) / len(scores)
+    w = DRAFT_BATTER_TOOL_WEIGHTS
+    return (
+        norm(row.get("batting_ratings_talent_gap") or 40)        * w["gap"]
+        + norm(row.get("batting_ratings_talent_contact") or 40)  * w["contact"]
+        + norm(row.get("batting_ratings_talent_strikeouts") or 40) * w["strikeouts"]
+        + norm(row.get("batting_ratings_talent_eye") or 40)       * w["eye"]
+        + norm(row.get("batting_ratings_talent_power") or 40)     * w["power"]
+    )
 
 
 def score_tools_pitcher(row):
-    stuff = row.get("pitching_ratings_talent_stuff") or 40
+    stuff    = row.get("pitching_ratings_talent_stuff") or 40
     movement = row.get("pitching_ratings_talent_movement") or 40
-    control = row.get("pitching_ratings_talent_control") or 40
+    control  = row.get("pitching_ratings_talent_control") or 40
+    w = DRAFT_PITCHER_TOOLS_HS if not int(row.get("college") or 0) else DRAFT_PITCHER_TOOLS_COL
     return (
-        norm(stuff) * 0.40
-        + norm(movement) * 0.35
-        + norm(control) * 0.25
+        norm(stuff)    * w["stuff"]
+        + norm(movement) * w["movement"]
+        + norm(control)  * w["control"]
     )
 
 
@@ -317,22 +337,43 @@ def main():
     save_name = sys.argv[1]
     start = time.time()
 
-    print(f"Loading prospect data for {save_name}...")
     engine = get_write_engine(save_name)
-    df = load_prospect_data(engine)
-    print(f"  {len(df)} draft-eligible prospects loaded")
+    # team_history stores last completed season; current draft year is one ahead
+    sim_year = get_sim_year(engine)
+    current_draft_year = (sim_year + 1) if sim_year else None
 
-    batters_df = compute_batter_prospects(df)
-    pitchers_df = compute_pitcher_prospects(df)
+    # Offset 0 = current draft, 1-3 = future classes
+    pools = [
+        ("draft_ratings",   HSC_CURRENT_POOL, 0),
+        ("draft_ratings_1", HSC_FUTURE_1,     1),
+        ("draft_ratings_2", HSC_FUTURE_2,     2),
+        ("draft_ratings_3", HSC_FUTURE_3,     3),
+    ]
 
-    combined = pd.concat([batters_df, pitchers_df], ignore_index=True)
-    combined = combined.sort_values("rating_overall", ascending=False)
-    combined = combined.drop_duplicates(subset="player_id", keep="first")
+    all_counts = []
+    for table_name, hsc_pool, offset in pools:
+        cal_year = (current_draft_year + offset) if current_draft_year else "?"
+        print(f"Loading {table_name} (draft class {cal_year}, hsc_status={hsc_pool})...")
+        df = load_prospect_data(engine, hsc_pool)
+        print(f"  {len(df)} prospects loaded")
 
-    combined.to_sql("draft_ratings", engine, if_exists="replace", index=False)
+        batters_df = compute_batter_prospects(df)
+        pitchers_df = compute_pitcher_prospects(df)
+
+        combined = pd.concat([batters_df, pitchers_df], ignore_index=True)
+        combined = combined.sort_values("rating_overall", ascending=False)
+        combined = combined.drop_duplicates(subset="player_id", keep="first")
+
+        combined.to_sql(table_name, engine, if_exists="replace", index=False)
+        all_counts.append((table_name, len(combined), cal_year))
 
     elapsed = time.time() - start
-    print(f"\n✓ draft_ratings ({len(combined)} rows) written in {elapsed:.1f}s")
+    print(f"\n✓ Draft ratings written in {elapsed:.1f}s")
+    for table_name, count, cal_year in all_counts:
+        print(f"  {table_name:<18} {count:>4} rows  (draft class {cal_year})")
+
+    # Print top prospects from current draft class for quick review
+    combined = pd.read_sql("SELECT * FROM draft_ratings ORDER BY rating_overall DESC", engine)
 
     POS_MAP = {1: "P", 2: "C", 3: "1B", 4: "2B", 5: "3B", 6: "SS", 7: "LF", 8: "CF", 9: "RF"}
     BATS_MAP = {1: "R", 2: "L", 3: "S"}

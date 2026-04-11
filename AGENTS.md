@@ -33,6 +33,9 @@ PYEOF
 - **Always** use heredoc (`<< 'PYEOF'`) syntax, never `-c` with inline strings
 - **Never** use Python dicts (`{"key": val}`) or f-strings with braces in heredocs — 
   the shell flags curly braces as suspicious. Use `dict(key=val)` instead of `{"key": val}`.
+- **Never use `ILIKE` in SQL** — `ILIKE` is PostgreSQL-only and will fail on SQLite.
+  Use `LIKE` instead; SQLite's `LIKE` is already case-insensitive for ASCII characters.
+  This applies everywhere, including team name lookups in skill query modules.
 - **Never read `.env` directly** — it contains API keys. All DB config is accessed via
   `get_engine(save_name)` and `load_saves_registry()`. Never `cat .env`, never open it.
 - **`players_contract` salary columns** are named `salary0` through `salary14` (one per contract
@@ -701,6 +704,50 @@ or comparing players.**
 **Flags:** `flag_injury_risk` (bool), `flag_leader` (bool), `flag_high_ceiling` (bool)
 
 **Carried-over stats:** `wrc_plus`, `war`, `prone_overall`
+
+---
+
+## Draft Ratings Tables (`draft_ratings`, `draft_ratings_1/2/3`)
+
+Computed by `src/draft_ratings.py` — run after import. Contains one row per draft-eligible
+prospect, rated on a 0–100 composite scale. Covers all four upcoming draft classes.
+
+```bash
+.venv/bin/python3 src/draft_ratings.py <save_name>
+```
+
+### Table naming — relative offset, not calendar year
+
+Tables are named by **offset from the current sim year**, not by calendar year, so the
+names remain stable across sim advances:
+
+| Table | Offset | HSC pool constants |
+|-------|--------|-------------------|
+| `draft_ratings` | +0 (current draft) | `HSC_CURRENT_POOL` = (4, 5, 6, 9, 10) |
+| `draft_ratings_1` | +1 year out | `HSC_FUTURE_1` = (3, 8) |
+| `draft_ratings_2` | +2 years out | `HSC_FUTURE_2` = (2, 7) |
+| `draft_ratings_3` | +3 years out | `HSC_FUTURE_3` = (1,) |
+
+All four constants are defined in `src/ootp_db_constants.py`.
+
+**Mapping a calendar year to an offset:** `team_history` stores the last *completed* season,
+so the current draft year = `MAX(year) + 1`. Offset = requested_year − current_draft_year.
+Query: `SELECT MAX(year) FROM team_history WHERE league_id = 203`
+Example: MAX(year)=2025 → current draft year=2026. User asks for 2029 → offset=3 → `draft_ratings_3`.
+
+### Schema (all four tables share the same columns)
+
+**Identity:** `player_id`, `first_name`, `last_name`, `position`, `age`, `player_type`
+("batter" or "pitcher"), `bats`, `throws`, `college` (1=COL, 0=HS), `domestic`
+(1=USA, 0=international), `oa`, `pot`, `talent_value`
+
+**Composite ratings (0–100):** `rating_overall`, `rating_ceiling`, `rating_tools`,
+`rating_development`, `rating_defense`, `rating_proximity`
+
+**Flags:** `flag_elite_ceiling` (pot≥65), `flag_high_ceiling` (pot≥55),
+`flag_elite_we`, `flag_elite_iq`, `flag_demanding`, `flag_international`, `flag_hs`
+
+**Personality:** `work_ethic`, `intelligence`, `greed`
 
 ---
 

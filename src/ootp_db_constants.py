@@ -112,6 +112,19 @@ RESULT_HR = 9
 RESULT_HBP = 10
 
 # ---------------------------------------------------------------------------
+# Draft hsc_status codes
+# Players with draft_eligible=1 are grouped into draft classes by hsc_status.
+# Only draft_league_id = MLB_LEAGUE_ID players belong to the MLB draft.
+# ---------------------------------------------------------------------------
+# Current MLB draft pool (upcoming draft)
+HSC_CURRENT_POOL = (4, 5, 6, 9, 10)
+
+# Future draft classes (years ahead of current season)
+HSC_FUTURE_1 = (3, 8)   # 1 year out
+HSC_FUTURE_2 = (2, 7)   # 2 years out
+HSC_FUTURE_3 = (1,)     # 3 years out
+
+# ---------------------------------------------------------------------------
 # split_id constants
 # ---------------------------------------------------------------------------
 
