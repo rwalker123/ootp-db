@@ -936,7 +936,7 @@ class Handler(SimpleHTTPRequestHandler):
         args = body.get("args", "").strip()
         interactive = bool(body.get("interactive", False))
         # lineup-optimizer has all-optional args; allow empty string through
-        args_optional = skill in ("lineup-optimizer", "rotation-analysis")
+        args_optional = skill in ("lineup-optimizer", "rotation-analysis", "draft-targets", "free-agents", "ifa-targets")
         if not skill or (not args and not args_optional):
             self._respond(400, "Missing skill or args")
             return
