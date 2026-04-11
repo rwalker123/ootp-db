@@ -97,8 +97,8 @@ def get_player_info(engine):
 # ---------------------------------------------------------------------------
 def get_league_batting_averages(engine, year):
     """Compute league-wide batting averages from team stats."""
-    # COALESCE: if no rows match the WHERE (e.g. non-203 league_id), SQLite SUM is NULL
-    # for all columns — arithmetic would otherwise raise TypeError / divide-by-zero.
+    # COALESCE: if no rows match the WHERE clause, SUM() returns NULL for all
+    # columns, so default to 0 before downstream arithmetic and zero checks.
     df = pd.read_sql(
         text("""
         SELECT COALESCE(SUM(pa), 0) AS pa, COALESCE(SUM(ab), 0) AS ab, COALESCE(SUM(h), 0) AS h,
@@ -818,7 +818,7 @@ def main():
     print(f"{'='*60}")
 
     if analytics_warnings:
-        add_pipeline_warnings(analytics_warnings)
+        add_pipeline_warnings(save_name, analytics_warnings)
         print("\n⚠ Analytics: data limitations:")
         for msg in analytics_warnings:
             print(f"  • {msg}")
