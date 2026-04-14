@@ -3,16 +3,7 @@
 import json
 import sys
 from datetime import datetime
-from config import (
-    INJURY_DURABLE_MAX,
-    INJURY_FRAGILE_MAX,
-    INJURY_IRON_MAN_MAX,
-    INJURY_NORMAL_MAX,
-    TRAIT_AVERAGE_MAX,
-    TRAIT_BELOW_AVG_MAX,
-    TRAIT_GOOD_MAX,
-    TRAIT_POOR_MAX,
-)
+from report_formatting import injury_color, injury_label, trait_color, trait_label
 from report_write import report_filename, write_report_html
 from shared_css import get_engine, get_last_import_iso_for_save, get_report_css, get_reports_dir
 
@@ -126,62 +117,6 @@ def generate_rating_report(save_name, first_name, last_name, focus_modifiers=Non
         w = int(max(0, min(100, score)))
         cls = "bar-green" if score >= 70 else "bar-yellow" if score >= 40 else "bar-red"
         return f'<div class="bar-bg"><div class="bar-fill {cls}" style="width:{w}%"></div></div>'
-
-    def injury_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= INJURY_IRON_MAN_MAX:
-            return "Iron Man"
-        if v <= INJURY_DURABLE_MAX:
-            return "Durable"
-        if v <= INJURY_NORMAL_MAX:
-            return "Normal"
-        if v <= INJURY_FRAGILE_MAX:
-            return "Fragile"
-        return "Wrecked"
-
-    def injury_color(val):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if v <= INJURY_DURABLE_MAX:
-            return "#1a7a1a"
-        if v <= INJURY_NORMAL_MAX:
-            return "#cc7700"
-        return "#cc2222"
-
-    def trait_label(val):
-        if val is None:
-            return "Unknown"
-        v = int(val)
-        if v <= TRAIT_POOR_MAX:
-            return "Poor"
-        if v <= TRAIT_BELOW_AVG_MAX:
-            return "Below Avg"
-        if v <= TRAIT_AVERAGE_MAX:
-            return "Average"
-        if v <= TRAIT_GOOD_MAX:
-            return "Good"
-        return "Elite"
-
-    def trait_color(val, invert=False):
-        if val is None:
-            return "#888"
-        v = int(val)
-        if invert:
-            if v > TRAIT_GOOD_MAX:
-                return "#cc2222"
-            if v > TRAIT_AVERAGE_MAX:
-                return "#cc7700"
-            return "#1a7a1a"
-        if v > TRAIT_GOOD_MAX:
-            return "#1a7a1a"
-        if v > TRAIT_AVERAGE_MAX:
-            return "#4a9a2a"
-        if v > TRAIT_BELOW_AVG_MAX:
-            return "#888"
-        return "#cc7700"
 
     adj_note = ""
     if adjusted:

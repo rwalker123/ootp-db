@@ -6,12 +6,16 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import (
-    GRADE_A_PLUS, GRADE_A, GRADE_B_PLUS, GRADE_B, GRADE_C_PLUS, GRADE_C, GRADE_D,
-    INJURY_IRON_MAN_MAX, INJURY_DURABLE_MAX, INJURY_NORMAL_MAX, INJURY_FRAGILE_MAX,
-    GREED_LOW_MAX, GREED_AVERAGE_MAX, GREED_HIGH_MAX,
-)
 from ootp_db_constants import MLB_LEAGUE_ID, POS_MAP, BATS_MAP, THROWS_MAP
+from report_formatting import (
+    grade_badge,
+    greed_color,
+    greed_label,
+    injury_color,
+    injury_label,
+    letter_grade,
+    row_bg,
+)
 from report_write import write_report_html, report_filename
 from shared_css import (
     db_name_from_save,
@@ -23,98 +27,6 @@ from shared_css import (
 from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def letter_grade(score):
-    if score >= GRADE_A_PLUS:
-        return "A+"
-    if score >= GRADE_A:
-        return "A"
-    if score >= GRADE_B_PLUS:
-        return "B+"
-    if score >= GRADE_B:
-        return "B"
-    if score >= GRADE_C_PLUS:
-        return "C+"
-    if score >= GRADE_C:
-        return "C"
-    if score >= GRADE_D:
-        return "D"
-    return "F"
-
-
-def injury_label(val):
-    if val is None:
-        return "Unknown"
-    v = int(val)
-    if v <= INJURY_IRON_MAN_MAX:
-        return "Iron Man"
-    if v <= INJURY_DURABLE_MAX:
-        return "Durable"
-    if v <= INJURY_NORMAL_MAX:
-        return "Normal"
-    if v <= INJURY_FRAGILE_MAX:
-        return "Fragile"
-    return "Wrecked"
-
-
-def injury_color(val):
-    if val is None:
-        return "#888"
-    v = int(val)
-    if v <= INJURY_DURABLE_MAX:
-        return "#1a7a1a"
-    if v <= INJURY_NORMAL_MAX:
-        return "#cc7700"
-    return "#cc2222"
-
-
-def greed_label(val):
-    if val is None:
-        return "Unknown"
-    v = int(val)
-    if v < GREED_LOW_MAX:
-        return "Low"
-    if v <= GREED_AVERAGE_MAX:
-        return "Average"
-    if v <= GREED_HIGH_MAX:
-        return "High"
-    return "Demanding"
-
-
-def greed_color(val):
-    if val is None:
-        return "#888"
-    v = int(val)
-    if v < GREED_LOW_MAX:
-        return "#1a7a1a"
-    if v <= GREED_AVERAGE_MAX:
-        return "#cc7700"
-    if v <= GREED_HIGH_MAX:
-        return "#cc5500"
-    return "#cc2222"
-
-
-def grade_badge(score):
-    grade = letter_grade(score)
-    if grade in ("A+", "A"):
-        bg = "#1a7a1a"
-    elif grade in ("B+", "B"):
-        bg = "#2266cc"
-    elif grade in ("C+", "C"):
-        bg = "#cc7700"
-    else:
-        bg = "#cc2222"
-    return (f'<span style="background:{bg};color:white;border-radius:4px;'
-            f'font-weight:bold;font-size:12px;padding:2px 6px">{grade} {score:.1f}</span>')
-
-
-def row_bg(rating):
-    if rating >= 70:
-        return "#f0fff0"
-    if rating >= 50:
-        return "#fffff0"
-    return "white"
 
 
 def query_free_agents(save_name, criteria_label, where_clause, join_clause="",

@@ -1,13 +1,7 @@
 """Display and HTML formatting helpers for lineup optimizer reports."""
 
 from ootp_db_constants import BATS_MAP
-
-
-def letter_grade(score):
-    for threshold, grade in ((90, "A+"), (80, "A"), (70, "B+"), (60, "B"), (50, "C+"), (40, "C"), (30, "D")):
-        if score >= threshold:
-            return grade
-    return "F"
+from report_formatting import letter_grade
 
 
 def grade_color(score):

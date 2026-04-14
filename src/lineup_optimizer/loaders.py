@@ -7,7 +7,7 @@ from ootp_db_constants import (
     SPLIT_CAREER_FIELDING_SIM_ERA,
 )
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from .engine import compute_woba
 
@@ -216,7 +216,8 @@ def load_30day_stats(conn, player_ids):
             WHERE rn <= 30
             GROUP BY player_id
         """)).fetchall()
-    except OperationalError:
+    except (OperationalError, ProgrammingError):
+        conn.rollback()
         return {}
 
     result = {}
