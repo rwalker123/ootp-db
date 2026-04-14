@@ -1210,7 +1210,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _run_data(self, skill, args, save, kwargs_override=None):
         if skill == "player-stats":
-            from report import generate_player_report
+            from player_stats import generate_player_report
             first, *rest = args.split()
             last = " ".join(rest)
             path, _ = generate_player_report(save, first, last)

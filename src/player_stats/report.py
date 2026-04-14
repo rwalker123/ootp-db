@@ -1,23 +1,16 @@
-#!/usr/bin/env python3
 """Generate HTML player reports from OOTP database."""
 
 import json
-import re
 import sys
-import time
 from datetime import datetime
-from pathlib import Path
 
-from config import WOBA_BB, WOBA_HBP, WOBA_1B, WOBA_2B, WOBA_3B, WOBA_HR
 from ootp_db_constants import (
     MLB_LEAGUE_ID, MLB_LEVEL_ID,
     POS_MAP, BATS_MAP, THROWS_MAP,
-    SPLIT_CAREER_OVERALL, SPLIT_CAREER_VS_LHP, SPLIT_CAREER_VS_RHP,
-    SPLIT_TEAM_BATTING_OVERALL, SPLIT_TEAM_PITCHING_OVERALL,
+    SPLIT_CAREER_OVERALL,
 )
 from report_write import write_report_html, report_filename
 from shared_css import (
-    db_name_from_save,
     get_engine,
     get_last_import_iso_for_save,
     get_report_css,
@@ -25,84 +18,8 @@ from shared_css import (
 )
 from sqlalchemy import text
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def calc_rates(ab, h, d, t, hr, bb, k, hp, sf, pa, lg=None):
-    if ab == 0 or pa == 0:
-        return {}
-    singles = h - d - t - hr
-    ba = h / ab
-    obp = (h + bb + hp) / (ab + bb + hp + sf)
-    slg = (singles + 2 * d + 3 * t + 4 * hr) / ab
-    ops = obp + slg
-    iso = slg - ba
-    k_pct = k / pa * 100
-    bb_pct = bb / pa * 100
-    babip_denom = ab - k - hr + sf
-    babip = (h - hr) / babip_denom if babip_denom > 0 else 0.0
-
-    woba_num = (WOBA_BB * bb + WOBA_HBP * hp +
-                WOBA_1B * singles + WOBA_2B * d +
-                WOBA_3B * t + WOBA_HR * hr)
-    woba_den = ab + bb + hp + sf
-    woba = woba_num / woba_den if woba_den > 0 else 0.0
-
-    wrc_plus = None
-    ops_plus = None
-    if lg:
-        lg_ab, lg_h, lg_d, lg_t, lg_hr, lg_bb, lg_hp, lg_sf, lg_pa, lg_r = lg
-        lg_singles = lg_h - lg_d - lg_t - lg_hr
-        lg_obp = (lg_h + lg_bb + lg_hp) / (lg_ab + lg_bb + lg_hp + lg_sf)
-        lg_slg = (lg_singles + 2 * lg_d + 3 * lg_t + 4 * lg_hr) / lg_ab
-        lg_woba_num = (WOBA_BB * lg_bb + WOBA_HBP * lg_hp +
-                       WOBA_1B * lg_singles + WOBA_2B * lg_d +
-                       WOBA_3B * lg_t + WOBA_HR * lg_hr)
-        lg_woba = lg_woba_num / (lg_ab + lg_bb + lg_hp + lg_sf)
-        lg_rpa = lg_r / lg_pa
-        wrc_plus = ((woba - lg_woba) / 1.15 + lg_rpa) / lg_rpa * 100
-        ops_plus = 100 * (obp / lg_obp + slg / lg_slg - 1)
-
-    return dict(ba=ba, obp=obp, slg=slg, ops=ops, iso=iso, k_pct=k_pct,
-                bb_pct=bb_pct, babip=babip, woba=woba, wrc_plus=wrc_plus, ops_plus=ops_plus)
-
-
-def calc_pitching_rates(ip, ha, hra, bb, k, er, bf, hp, gb, fb, lg_pitch=None):
-    """Compute ERA, FIP, xFIP, WHIP, K%, BB%, etc. for a pitcher season."""
-    if ip == 0 or bf == 0:
-        return {}
-    era = er / ip * 9
-    whip = (bb + ha) / ip
-    k_pct = k / bf * 100
-    bb_pct = bb / bf * 100
-    k_bb_pct = k_pct - bb_pct
-    hr_9 = hra / ip * 9
-    k_9 = k / ip * 9
-    bb_9 = bb / ip * 9
-    babip_denom = bf - k - hra - bb - hp  # approximate AB - K - HR
-    babip = (ha - hra) / babip_denom if babip_denom > 0 else 0.0
-    total_balls = gb + fb
-    gb_pct = gb / total_balls * 100 if total_balls > 0 else 0.0
-
-    # FIP: (13*HR + 3*(BB+HBP) - 2*K) / IP + cFIP
-    # cFIP = lgERA - (13*lgHR + 3*(lgBB+lgHBP) - 2*lgK) / lgIP
-    fip = None
-    xfip = None
-    if lg_pitch:
-        lg_ip, lg_hra, lg_bb, lg_hp, lg_k, lg_er = lg_pitch
-        if lg_ip > 0:
-            lg_era = lg_er / lg_ip * 9
-            cfip = lg_era - (13 * lg_hra + 3 * (lg_bb + lg_hp) - 2 * lg_k) / lg_ip
-            fip = (13 * hra + 3 * (bb + hp) - 2 * k) / ip + cfip
-            # xFIP: replace HR with league-average HR/FB rate
-            lg_fb_rate = lg_hra / (lg_hra + (lg_ip * 3))  # rough approximation
-            if fb > 0:
-                expected_hr = fb * (lg_hra / (lg_ip * 3)) * 3  # rough lg HR/FB
-                xfip = (13 * expected_hr + 3 * (bb + hp) - 2 * k) / ip + cfip
-
-    return dict(era=era, whip=whip, k_pct=k_pct, bb_pct=bb_pct, k_bb_pct=k_bb_pct,
-                hr_9=hr_9, k_9=k_9, bb_9=bb_9, babip=babip, gb_pct=gb_pct,
-                fip=fip, xfip=xfip)
+from .fetch import fetch_batter_data, fetch_common_data, fetch_fielding_stats, fetch_pitcher_data
+from .rates import calc_pitching_rates, calc_rates
 
 
 def oa_pot_badges(val):
@@ -149,282 +66,6 @@ def fmt_int(val):
     if val is None:
         return "\u2014"
     return str(int(round(val)))
-
-
-def fetch_common_data(conn, player_id):
-    """Fetch player info, team, value, fielding — shared by batter and pitcher reports."""
-    data = {}
-
-    row = conn.execute(text(
-        "SELECT player_id, first_name, last_name, team_id, position, age, bats, throws "
-        "FROM players WHERE player_id = :pid"), dict(pid=player_id)).fetchone()
-    data["player"] = row
-
-    tid = row[3]
-    if tid and tid > 0:
-        data["team"] = conn.execute(text(
-            "SELECT name, nickname, abbr FROM teams WHERE team_id = :tid"),
-            dict(tid=tid)).fetchone()
-    else:
-        data["team"] = ("Free Agent", "", "FA")
-
-    data["value"] = conn.execute(text(
-        "SELECT oa, pot, oa_rating, pot_rating FROM players_value WHERE player_id = :pid"),
-        dict(pid=player_id)).fetchone()
-
-    data["fielding"] = conn.execute(text(
-        "SELECT fielding_ratings_infield_range, fielding_ratings_infield_arm, "
-        "fielding_ratings_turn_doubleplay, fielding_ratings_infield_error, "
-        "fielding_ratings_outfield_range, fielding_ratings_outfield_arm, "
-        "fielding_ratings_outfield_error, fielding_ratings_catcher_arm, "
-        "fielding_ratings_catcher_ability, fielding_ratings_catcher_framing, "
-        "fielding_rating_pos1, fielding_rating_pos2, fielding_rating_pos3, "
-        "fielding_rating_pos4, fielding_rating_pos5, fielding_rating_pos6, "
-        "fielding_rating_pos7, fielding_rating_pos8, fielding_rating_pos9, "
-        "fielding_rating_pos1_pot, fielding_rating_pos2_pot, fielding_rating_pos3_pot, "
-        "fielding_rating_pos4_pot, fielding_rating_pos5_pot, fielding_rating_pos6_pot, "
-        "fielding_rating_pos7_pot, fielding_rating_pos8_pot, fielding_rating_pos9_pot "
-        "FROM players_fielding WHERE player_id = :pid"), dict(pid=player_id)).fetchone()
-
-    # Team abbrs (for career tables)
-    rows = conn.execute(text("SELECT team_id, abbr FROM teams")).fetchall()
-    data["team_abbrs"] = dict(rows)
-
-    # League averages (batting, for wRC+/OPS+ and also for pitching cFIP)
-    lg = {}
-    rows = conn.execute(text(
-        "SELECT thbs.year, SUM(thbs.ab), SUM(thbs.h), SUM(thbs.d), SUM(thbs.t), "
-        "SUM(thbs.hr), SUM(thbs.bb), SUM(thbs.hp), SUM(thbs.sf), SUM(thbs.pa), SUM(thbs.r) "
-        "FROM team_history_batting_stats thbs "
-        f"JOIN team_history th ON th.team_id = thbs.team_id AND th.year = thbs.year AND th.league_id = {MLB_LEAGUE_ID} "
-        "GROUP BY thbs.year")).fetchall()
-    for r in rows:
-        lg[int(r[0])] = tuple(int(x) for x in r[1:])
-
-    cur = conn.execute(text(
-        "SELECT SUM(tbs.ab), SUM(tbs.h), SUM(tbs.d), SUM(tbs.t), SUM(tbs.hr), "
-        "SUM(tbs.bb), SUM(tbs.hp), SUM(tbs.sf), SUM(tbs.pa), SUM(tbs.r) "
-        "FROM team_batting_stats tbs "
-        f"JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
-        f"WHERE tbs.level_id = {MLB_LEVEL_ID} AND tbs.split_id = {SPLIT_TEAM_BATTING_OVERALL}")).fetchone()
-    if cur and cur[0]:
-        # Use current year from league_history or pitching history
-        yr_row = conn.execute(text(
-            f"SELECT MAX(year) FROM team_history WHERE league_id = {MLB_LEAGUE_ID}")).fetchone()
-        # Current season is one after the latest history year, or derive from career data
-        cur_year_candidates = []
-        if yr_row and yr_row[0]:
-            cur_year_candidates.append(int(yr_row[0]) + 1)
-        lg_cur_year = max(cur_year_candidates) if cur_year_candidates else 2028
-        lg[lg_cur_year] = tuple(int(x) for x in cur)
-
-    data["lg_avgs"] = lg
-
-    # League pitching averages for cFIP calculation
-    lg_pitch = {}
-    rows = conn.execute(text(
-        "SELECT thps.year, SUM(thps.ip), SUM(thps.hra), SUM(thps.bb), SUM(thps.hp), "
-        "SUM(thps.k), SUM(thps.er) "
-        "FROM team_history_pitching_stats thps "
-        f"JOIN team_history th ON th.team_id = thps.team_id AND th.year = thps.year AND th.league_id = {MLB_LEAGUE_ID} "
-        "GROUP BY thps.year")).fetchall()
-    for r in rows:
-        lg_pitch[int(r[0])] = tuple(float(x) for x in r[1:])
-
-    cur_p = conn.execute(text(
-        "SELECT SUM(tps.ip), SUM(tps.hra), SUM(tps.bb), SUM(tps.hp), SUM(tps.k), SUM(tps.er) "
-        "FROM team_pitching_stats tps "
-        f"JOIN team_relations tr ON tr.team_id = tps.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
-        f"WHERE tps.level_id = {MLB_LEVEL_ID} AND tps.split_id = {SPLIT_TEAM_PITCHING_OVERALL}")).fetchone()
-    if cur_p and cur_p[0]:
-        lg_pitch[lg_cur_year] = tuple(float(x) for x in cur_p)
-
-    data["lg_pitch"] = lg_pitch
-
-    return data
-
-
-def fetch_batter_data(conn, player_id, common=None):
-    """Fetch batting-specific data. If common is provided, merge into it."""
-    data = common if common else fetch_common_data(conn, player_id)
-
-    # Batting talent ratings
-    row = conn.execute(text(
-        "SELECT batting_ratings_talent_contact, batting_ratings_talent_gap, "
-        "batting_ratings_talent_power, batting_ratings_talent_eye, "
-        "batting_ratings_talent_strikeouts, batting_ratings_talent_babip, "
-        "batting_ratings_misc_bunt, batting_ratings_misc_bunt_for_hit, "
-        "running_ratings_speed, running_ratings_stealing, "
-        "running_ratings_baserunning, running_ratings_stealing_rate "
-        "FROM players_batting WHERE player_id = :pid"), dict(pid=player_id)).fetchone()
-    data["batting_ratings"] = row
-
-    # Batter advanced stats (current season)
-    row = conn.execute(text(
-        "SELECT * FROM batter_advanced_stats WHERE player_id = :pid"),
-        dict(pid=player_id)).fetchone()
-    data["advanced"] = dict(zip(row._fields, row)) if row else None
-
-    # Current (ground-truth) batting ratings from players_scouted_ratings.
-    # Only present when "Additional complete scouted ratings" is enabled in OOTP export.
-    try:
-        sr = conn.execute(text(
-            "SELECT batting_ratings_overall_contact, batting_ratings_overall_gap, "
-            "batting_ratings_overall_power, batting_ratings_overall_eye, "
-            "batting_ratings_overall_strikeouts, batting_ratings_overall_babip "
-            "FROM players_scouted_ratings "
-            "WHERE player_id = :pid AND scouting_team_id = 0"),
-            dict(pid=player_id)).fetchone()
-        data["scouted_bat"] = sr
-    except Exception:
-        data["scouted_bat"] = None
-
-    # Career batting overall
-    data["career_overall"] = conn.execute(text(
-        "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r, war, wpa "
-        "FROM players_career_batting_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Career vs LHP
-    data["career_lhp"] = conn.execute(text(
-        "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
-        "FROM players_career_batting_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Career vs RHP
-    data["career_rhp"] = conn.execute(text(
-        "SELECT year, team_id, g, pa, ab, h, d, t, hr, bb, k, rbi, sb, cs, hp, sf, sh, r "
-        "FROM players_career_batting_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Advanced stats history (graceful fallback if table doesn't exist yet)
-    try:
-        data["adv_history"] = conn.execute(text(
-            "SELECT year, team_abbr, pa, ba, obp, slg, ops, wrc_plus, woba, iso, "
-            "k_pct, bb_pct, war, avg_ev, hard_hit_pct, barrel_pct, xwoba "
-            "FROM batter_advanced_stats_history WHERE player_id = :pid AND pa >= 30 "
-            "ORDER BY year DESC"), dict(pid=player_id)).fetchall()
-    except Exception:
-        data["adv_history"] = []
-
-    return data
-
-
-def fetch_fielding_stats(conn, player_id, primary_position):
-    """Fetch fielding stats for a position player (non-pitcher).
-
-    split_id is inconsistent in this table (0 for recent seasons, 1 for older) so
-    we aggregate by year+position to avoid duplicates from team changes mid-season.
-    """
-    max_year_row = conn.execute(text(
-        "SELECT MAX(year) FROM players_career_fielding_stats "
-        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID}"
-    ), dict(pid=player_id)).fetchone()
-    max_year = int(max_year_row[0]) if max_year_row and max_year_row[0] else None
-
-    if max_year is None:
-        return dict(current=[], career=[])
-
-    current = conn.execute(text(
-        "SELECT position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
-        "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
-        "FROM players_career_fielding_stats "
-        f"WHERE player_id = :pid AND year = :yr AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
-        "GROUP BY position ORDER BY SUM(g) DESC"
-    ), dict(pid=player_id, yr=max_year)).fetchall()
-
-    # Query all positions per year; pick the one with most games played (primary_position
-    # is their *current* position, which may differ from earlier in their career).
-    career_all = conn.execute(text(
-        "SELECT year, position, SUM(g), SUM(gs), SUM(ip), SUM(tc), SUM(po), SUM(a), SUM(e), "
-        "SUM(dp), SUM(pb), SUM(sba), SUM(rto), SUM(framing), SUM(arm), SUM(zr) "
-        "FROM players_career_fielding_stats "
-        f"WHERE player_id = :pid AND level_id = {MLB_LEVEL_ID} AND league_id = {MLB_LEAGUE_ID} "
-        "GROUP BY year, position ORDER BY year, SUM(g) DESC"
-    ), dict(pid=player_id)).fetchall()
-    career = career_all
-
-    return dict(current=current, career=career)
-
-
-def fetch_pitcher_data(conn, player_id, common=None):
-    """Fetch pitching-specific data. If common is provided, merge into it."""
-    data = common if common else fetch_common_data(conn, player_id)
-
-    # Pitching talent ratings + pitch repertoire + misc
-    row = conn.execute(text(
-        "SELECT pitching_ratings_talent_stuff, pitching_ratings_talent_movement, "
-        "pitching_ratings_talent_control, pitching_ratings_talent_hra, "
-        "pitching_ratings_talent_pbabip, "
-        "pitching_ratings_misc_velocity, pitching_ratings_misc_stamina, "
-        "pitching_ratings_misc_ground_fly, pitching_ratings_misc_hold, "
-        "pitching_ratings_pitches_talent_fastball, pitching_ratings_pitches_talent_slider, "
-        "pitching_ratings_pitches_talent_curveball, pitching_ratings_pitches_talent_changeup, "
-        "pitching_ratings_pitches_talent_sinker, pitching_ratings_pitches_talent_splitter, "
-        "pitching_ratings_pitches_talent_cutter, pitching_ratings_pitches_talent_knucklecurve, "
-        "pitching_ratings_pitches_talent_screwball, pitching_ratings_pitches_talent_forkball, "
-        "pitching_ratings_pitches_talent_knuckleball "
-        "FROM players_pitching WHERE player_id = :pid"), dict(pid=player_id)).fetchone()
-    data["pitching_ratings"] = row
-
-    # Pitcher advanced stats (current season)
-    row = conn.execute(text(
-        "SELECT * FROM pitcher_advanced_stats WHERE player_id = :pid"),
-        dict(pid=player_id)).fetchone()
-    data["pitching_advanced"] = dict(zip(row._fields, row)) if row else None
-
-    # Career pitching overall
-    data["career_pitching"] = conn.execute(text(
-        "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
-        "qs, cg, sho, gb, fb, war, wpa "
-        "FROM players_career_pitching_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Career vs LHB
-    data["career_lhb"] = conn.execute(text(
-        "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
-        "qs, cg, sho, gb, fb, war, wpa "
-        "FROM players_career_pitching_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_LHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Career vs RHB
-    data["career_rhb"] = conn.execute(text(
-        "SELECT year, team_id, g, gs, w, l, s, ip, ha, hra, bb, k, er, hld, bf, hp, "
-        "qs, cg, sho, gb, fb, war, wpa "
-        "FROM players_career_pitching_stats "
-        f"WHERE player_id = :pid AND split_id = {SPLIT_CAREER_VS_RHP} AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID} "
-        "ORDER BY year"), dict(pid=player_id)).fetchall()
-
-    # Pitching advanced stats history (graceful fallback if table doesn't exist yet)
-    try:
-        data["pitch_adv_history"] = conn.execute(text(
-            "SELECT year, team_abbr, ip, era, fip, xfip, k_pct, bb_pct, k_bb_pct, "
-            "whip, hr_9, gb_pct, war, hard_hit_pct_against, barrel_pct_against, xwoba_against "
-            "FROM pitcher_advanced_stats_history WHERE player_id = :pid AND ip >= 5 "
-            "ORDER BY year DESC"), dict(pid=player_id)).fetchall()
-    except Exception:
-        data["pitch_adv_history"] = []
-
-    # Current (ground-truth) pitching ratings from players_scouted_ratings.
-    # Only present when "Additional complete scouted ratings" is enabled in OOTP export.
-    try:
-        sr_p = conn.execute(text(
-            "SELECT pitching_ratings_overall_stuff, pitching_ratings_overall_movement, "
-            "pitching_ratings_overall_control, pitching_ratings_overall_hra, "
-            "pitching_ratings_overall_pbabip "
-            "FROM players_scouted_ratings "
-            "WHERE player_id = :pid AND scouting_team_id = 0"),
-            dict(pid=player_id)).fetchone()
-        data["scouted_pit"] = sr_p
-    except Exception:
-        data["scouted_pit"] = None
-
-    return data
 
 
 def _fpct_html(tc, e):
@@ -1031,7 +672,6 @@ def generate_pitcher_section_html(data):
     return html
 
 
-
 def find_existing_report(save_name, first_name, last_name, raw_args=""):
     """Check if a fresh report already exists for this player.
 
@@ -1048,7 +688,7 @@ def find_existing_report(save_name, first_name, last_name, raw_args=""):
             return None
         player_id = row[0]
 
-    report_path = PROJECT_ROOT / "reports" / save_name / "players" / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
+    report_path = get_reports_dir(save_name, "players") / report_filename(f"player_{player_id}", dict(raw_args=raw_args.strip().lower()))
 
     if not report_path.exists():
         return None
@@ -1220,7 +860,7 @@ if (imported > generated) document.getElementById("stale-banner").style.display 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python src/report.py <save_name> <First> <Last>")
+        print("Usage: python src/player_stats/report.py <save_name> <First> <Last>")
         sys.exit(1)
     save_name = sys.argv[1]
     first = sys.argv[2]
