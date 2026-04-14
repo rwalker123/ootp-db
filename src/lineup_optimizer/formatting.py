@@ -1,7 +1,5 @@
 """Display and HTML formatting helpers for lineup optimizer reports."""
 
-import html as html_mod
-
 from ootp_db_constants import BATS_MAP
 
 

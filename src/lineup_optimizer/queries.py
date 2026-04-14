@@ -16,8 +16,6 @@ from .loaders import (
     load_position_games, load_batter_stats, load_30day_stats,
 )
 
-from ootp_db_constants import MLB_LEAGUE_ID
-
 
 def query_lineup(save_name, team_query=None, philosophy="modern",
                  opponent_hand=None, excluded_names=None,
@@ -55,18 +53,6 @@ def query_lineup(save_name, team_query=None, philosophy="modern",
         rolling_stats = load_30day_stats(conn, player_ids)
         fielding_ratings = load_fielding_ratings(conn, player_ids)
         pos_games = load_position_games(conn, player_ids)
-
-        # Full-league anchors — use MLB-wide averages, not roster averages
-        league_avg_woba = conn.execute(text(f"""
-            SELECT AVG(b.woba) FROM batter_advanced_stats b
-            JOIN players p ON p.player_id = b.player_id
-            WHERE p.league_id = {MLB_LEAGUE_ID} AND b.pa >= 100
-        """)).scalar() or 0.320
-        avg_rating_offense = conn.execute(text("""
-            SELECT AVG(pr.rating_offense) FROM player_ratings pr
-            JOIN batter_advanced_stats b ON b.player_id = pr.player_id
-            WHERE pr.player_type = 'batter' AND b.pa >= 100
-        """)).scalar() or 50.0
 
     # Enrich player dicts with stats, fielding, and temperature
     for p in batters:
