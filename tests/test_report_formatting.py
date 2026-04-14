@@ -4,9 +4,52 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+_SRC = Path(__file__).resolve().parent.parent / "src"
 
-from report_formatting import (
+
+def _load_report_formatting():
+    original = list(sys.path)
+    try:
+        p = str(_SRC)
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        from report_formatting import (
+            arb_status_label,
+            fmt_salary,
+            get_current_salary,
+            get_years_remaining,
+            grade_badge,
+            greed_color,
+            greed_label,
+            injury_color,
+            injury_label,
+            letter_grade,
+            row_bg,
+            score_color,
+            trait_color,
+            trait_label,
+        )
+        return (
+            arb_status_label,
+            fmt_salary,
+            get_current_salary,
+            get_years_remaining,
+            grade_badge,
+            greed_color,
+            greed_label,
+            injury_color,
+            injury_label,
+            letter_grade,
+            row_bg,
+            score_color,
+            trait_color,
+            trait_label,
+        )
+    finally:
+        sys.path[:] = original
+
+
+(
     arb_status_label,
     fmt_salary,
     get_current_salary,
@@ -21,7 +64,7 @@ from report_formatting import (
     score_color,
     trait_color,
     trait_label,
-)
+) = _load_report_formatting()
 
 
 class TestLetterGrade(unittest.TestCase):
