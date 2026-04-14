@@ -10,6 +10,7 @@ from shared_css import (
     load_saves_registry,
 )
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from .formatting import (
     arb_status_label,
@@ -127,25 +128,27 @@ def query_contract_extension(save_name, first_name, last_name):
     with engine.connect() as conn:
         if player_type == "pitcher":
             war_rows = conn.execute(
-                text(f"""
+                text("""
                 SELECT year, g, gs, ip, ha, bb, k, er, hra, war
                 FROM players_career_pitching_stats
-                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
-                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
+                WHERE player_id = :pid AND split_id = :split_id
+                  AND league_id = :league_id AND level_id = :level_id
                 ORDER BY year DESC LIMIT 5
                 """),
-                dict(pid=player_id),
+                dict(pid=player_id, split_id=SPLIT_CAREER_OVERALL,
+                     league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID),
             ).fetchall()
         else:
             war_rows = conn.execute(
-                text(f"""
+                text("""
                 SELECT year, g, pa, ab, h, d, t, hr, bb, k, hp, sf, war
                 FROM players_career_batting_stats
-                WHERE player_id = :pid AND split_id = {SPLIT_CAREER_OVERALL}
-                  AND league_id = {MLB_LEAGUE_ID} AND level_id = {MLB_LEVEL_ID}
+                WHERE player_id = :pid AND split_id = :split_id
+                  AND league_id = :league_id AND level_id = :level_id
                 ORDER BY year DESC LIMIT 5
                 """),
-                dict(pid=player_id),
+                dict(pid=player_id, split_id=SPLIT_CAREER_OVERALL,
+                     league_id=MLB_LEAGUE_ID, level_id=MLB_LEVEL_ID),
             ).fetchall()
 
     # ── 3. Advanced stats (contact quality) — last 3 years ──────────────
@@ -173,7 +176,7 @@ def query_contract_extension(save_name, first_name, last_name):
                     """),
                     dict(pid=player_id),
                 ).fetchall()
-        except Exception:
+        except OperationalError:
             adv_rows = []
 
     # ── 4. Market comparables ────────────────────────────────────────────

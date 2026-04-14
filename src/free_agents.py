@@ -125,6 +125,7 @@ def query_free_agents(save_name, criteria_label, where_clause, join_clause="",
     Returns a list of result dicts.
     """
     engine = get_engine(save_name)
+    where_clause = where_clause or "1=1"
 
     sql = f"""
         SELECT pr.player_id, pr.first_name, pr.last_name, pr.position,

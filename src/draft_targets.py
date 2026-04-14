@@ -102,6 +102,7 @@ def generate_draft_targets_report(save_name, criteria_label, where_clause,
     engine = get_engine(save_name)
     last_import = get_last_import_iso_for_save(save_name)
     generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    where_clause = where_clause or "1=1"
 
     sql = f"""
         SELECT dr.player_id, dr.first_name, dr.last_name, dr.position, dr.age,
