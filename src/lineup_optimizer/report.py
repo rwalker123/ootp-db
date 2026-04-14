@@ -332,7 +332,6 @@ def generate_lineup_report(save_name, team_query=None, philosophy="modern",
                        (bypasses eligibility floors).
     forced_bench:      list of player name strings — excluded from lineup regardless.
     fatigue_threshold: int 0-100 — auto-bench any player whose fatigue_points >= this.
-                       When set, also bypasses cache.
     favor_offense:     bool — reduces defense weight at premium positions (C, 2B,
                        SS, CF), overriding moderate batting advantages.
 
