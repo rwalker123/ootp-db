@@ -195,17 +195,19 @@ This reduces the risk of another “hardcoded vs config” drift like the old `r
 
 ### Phase 1 — Shared formatting (optional but high leverage)
 
-- [ ] Introduce `report_formatting.py` (or agreed name) with shared helpers + tests  
-- [ ] Migrate **one** consumer (e.g. `free_agents.py` or `trade_targets.py`) to prove the pattern  
+- [x] Introduce `report_formatting.py` with shared helpers + tests (`tests/test_report_formatting.py`, 68 tests)
+- [x] Migrate `free_agents.py` to import from `report_formatting` (removed 7 local helpers)  
 
 ### Phase 2 — Largest report modules (highest user-facing complexity)
 
 Pick order by what you touch most:
 
-- [x] `waiver_wire.py` → `waiver_wire/`  
-- [x] `lineup_optimizer.py` → `lineup_optimizer/`  
+- [x] `waiver_wire.py` → `waiver_wire/` (migrated to `report_formatting`)
+- [x] `lineup_optimizer.py` → `lineup_optimizer/` (migrated `letter_grade` to `report_formatting`)
+- [x] `contract_extension.py` → `contract_extension/` (migrated to `report_formatting`)
+- [x] `ratings/` — `ratings/report.py` migrated local `injury_*`/`trait_*` helpers to `report_formatting`
+- [x] `rotation_analysis/` — no shared helpers; `_score_color` is distinct (uses blue tier), left as-is
 - [ ] `report.py` → `player_stats/` (import path rename plan for `server.py`)  
-- [x] `contract_extension.py` → `contract_extension/`  
 
 Each step: move code with **no behavior change**, run import pipeline / server smoke path, then dedupe formatting.
 
