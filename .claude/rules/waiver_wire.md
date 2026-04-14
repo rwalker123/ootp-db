@@ -1,0 +1,1 @@
+../../src/waiver_wire/AGENTS.md

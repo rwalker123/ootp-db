@@ -1,0 +1,1 @@
+../../src/lineup_optimizer/AGENTS.md

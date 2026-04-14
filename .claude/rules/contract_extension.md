@@ -1,0 +1,1 @@
+../../src/contract_extension/AGENTS.md

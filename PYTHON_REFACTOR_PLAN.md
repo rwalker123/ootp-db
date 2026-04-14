@@ -20,8 +20,8 @@ Use **`src/ratings/`** and **AGENTS.md → Domain packages and module split (rat
 | File | Lines (approx) | Split priority | Notes |
 |------|----------------|----------------|--------|
 | `ratings/` | (done) | — | Reference implementation |
-| `lineup_optimizer.py` | ~1,509 | **High** | Large optimizer + ranking + HTML in one file |
-| `waiver_wire.py` | ~1,471 | **High** | Deep query + many `_build_*` HTML sections |
+| `lineup_optimizer/` | (done) | — | Optimizer + ranking + HTML — split to engine/loaders/queries/report |
+| `waiver_wire/` | (done) | — | Deep query + HTML — split to formatting/queries/report |
 | `report.py` | ~1,231 | **High** | Player-stats: fetch layers + large HTML generators |
 | `contract_extension.py` | ~1,059 | **High** | Very large `query_*` + many table builders + report |
 | `analytics.py` | ~768 | Medium | Cohesive ETL; split optional (batter / pitcher / history) |
@@ -202,10 +202,10 @@ This reduces the risk of another “hardcoded vs config” drift like the old `r
 
 Pick order by what you touch most:
 
-- [ ] `waiver_wire.py` → `waiver_claim/` (or `waiver_wire/`)  
-- [ ] `lineup_optimizer.py` → `lineup_optimizer/`  
+- [x] `waiver_wire.py` → `waiver_wire/`  
+- [x] `lineup_optimizer.py` → `lineup_optimizer/`  
 - [ ] `report.py` → `player_stats/` (import path rename plan for `server.py`)  
-- [ ] `contract_extension.py` → `contract_extension/`  
+- [x] `contract_extension.py` → `contract_extension/`  
 
 Each step: move code with **no behavior change**, run import pipeline / server smoke path, then dedupe formatting.
 
