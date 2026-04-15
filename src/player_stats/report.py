@@ -775,7 +775,7 @@ def generate_player_report(save_name, first_name, last_name, raw_args=""):
 
         # Fielding stats for position players (not pitchers)
         if position != 1 and has_batting:
-            data["fielding_stats"] = fetch_fielding_stats(conn, player_id, position)
+            data["fielding_stats"] = fetch_fielding_stats(conn, player_id)
 
         # Generate HTML — for position=1 players, pitching section always comes first
         if position == 1:

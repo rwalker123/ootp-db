@@ -69,8 +69,7 @@ def calc_pitching_rates(ip, ha, hra, bb, k, er, bf, hp, gb, fb, lg_pitch=None):
             lg_era = lg_er / lg_ip * 9
             cfip = lg_era - (13 * lg_hra + 3 * (lg_bb + lg_hp) - 2 * lg_k) / lg_ip
             fip = (13 * hra + 3 * (bb + hp) - 2 * k) / ip + cfip
-            # xFIP: replace HR with league-average HR/FB rate
-            lg_fb_rate = lg_hra / (lg_hra + (lg_ip * 3))  # rough approximation
+            # xFIP: replace HR with a rough league-average expected HR estimate
             if fb > 0:
                 expected_hr = fb * (lg_hra / (lg_ip * 3)) * 3  # rough lg HR/FB
                 xfip = (13 * expected_hr + 3 * (bb + hp) - 2 * k) / ip + cfip

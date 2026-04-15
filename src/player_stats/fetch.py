@@ -65,15 +65,11 @@ def fetch_common_data(conn, player_id):
         "FROM team_batting_stats tbs "
         f"JOIN team_relations tr ON tr.team_id = tbs.team_id AND tr.league_id = {MLB_LEAGUE_ID} "
         f"WHERE tbs.level_id = {MLB_LEVEL_ID} AND tbs.split_id = {SPLIT_TEAM_BATTING_OVERALL}")).fetchone()
+    yr_row = conn.execute(text(
+        f"SELECT MAX(year) FROM team_history WHERE league_id = {MLB_LEAGUE_ID}")).fetchone()
+    lg_cur_year = (int(yr_row[0]) + 1) if (yr_row and yr_row[0]) else 2028
+
     if cur and cur[0]:
-        # Use current year from league_history or pitching history
-        yr_row = conn.execute(text(
-            f"SELECT MAX(year) FROM team_history WHERE league_id = {MLB_LEAGUE_ID}")).fetchone()
-        # Current season is one after the latest history year, or derive from career data
-        cur_year_candidates = []
-        if yr_row and yr_row[0]:
-            cur_year_candidates.append(int(yr_row[0]) + 1)
-        lg_cur_year = max(cur_year_candidates) if cur_year_candidates else 2028
         lg[lg_cur_year] = tuple(int(x) for x in cur)
 
     data["lg_avgs"] = lg
@@ -171,7 +167,7 @@ def fetch_batter_data(conn, player_id, common=None):
     return data
 
 
-def fetch_fielding_stats(conn, player_id, primary_position):
+def fetch_fielding_stats(conn, player_id):
     """Fetch fielding stats for a position player (non-pitcher).
 
     split_id is inconsistent in this table (0 for recent seasons, 1 for older) so
